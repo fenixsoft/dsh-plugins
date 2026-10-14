@@ -1,0 +1,330 @@
+/**
+ * cc-import 导入对话框组件（展示层）。
+ *
+ * 职责：候选行渲染（勾选框 / 名称 / baseURL / 模型摘要 / 状态标）、勾选态
+ * 管理、批次结果反馈。数据加载（scan + settings 快照）与导入执行由 index.ts
+ * 以回调注入，本组件不触碰任何服务。
+ */
+import { useEffect, useMemo, useState } from 'react'
+import type { CSSProperties } from 'react'
+import type { Translate } from '@deepseek-ai/cordis'
+import { Button, Checkbox, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { splitModelAlias } from '../shared/mapping.js'
+import type { ScanCandidate, ScanResponse } from '../shared/mapping.js'
+import { planImports, rowState } from './importer.js'
+import type { ExistingProviders, ImportPlan } from './importer.js'
+
+/** 对话框打开时应答：候选 + 既有 providers 快照，或失败消息。 */
+export type DialogSnapshot =
+  | { readonly ok: true; readonly candidates: readonly ScanCandidate[]; readonly existing: ExistingProviders }
+  | { readonly ok: false; readonly message: string }
+
+/** 一次批次导入的结果反馈。 */
+export interface ImportOutcome {
+  readonly succeeded: number
+  readonly failures: readonly { readonly name: string; readonly reason: string }[]
+}
+
+export interface ImportDialogProps {
+  readonly t: Translate
+  readonly open: boolean
+  readonly onClose: () => void
+  /** 打开时加载候选与既有 providers（index.ts 注入）。 */
+  readonly loadSnapshot: () => Promise<DialogSnapshot>
+  /** 执行勾选集的导入（index.ts 注入；conflict 重试与单项隔离在其内部）。 */
+  readonly runImport: (plan: ImportPlan) => Promise<ImportOutcome>
+}
+
+interface RowState {
+  readonly candidate: ScanCandidate
+  readonly existed: boolean
+  readonly checked: boolean
+  readonly update: boolean
+}
+
+const rowStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '6px 4px',
+  borderBottom: '1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.25))',
+} satisfies CSSProperties
+
+const metaStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  minWidth: 0,
+  flex: 1,
+} satisfies CSSProperties
+
+const nameStyle = { fontWeight: 600, overflowWrap: 'anywhere' } satisfies CSSProperties
+
+const metaTextStyle = {
+  fontSize: 12,
+  opacity: 0.72,
+  overflowWrap: 'anywhere',
+} satisfies CSSProperties
+
+const badgeStyle = {
+  flexShrink: 0,
+  fontSize: 12,
+  borderRadius: 6,
+  padding: '2px 8px',
+  border: '1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.35))',
+  whiteSpace: 'nowrap',
+} satisfies CSSProperties
+
+const listStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  maxHeight: '46vh',
+  overflowY: 'auto',
+  margin: '8px 0',
+} satisfies CSSProperties
+
+/** 状态标文案：可导入 / 已存在（+将更新）/ 跳过-原因。 */
+function statusLabel(t: Translate, row: RowState): string {
+  if (!row.candidate.importable) {
+    return `${t('status.skipped')} · ${t(`skip.${row.candidate.skipReason ?? 'missing_model'}`)}`
+  }
+  if (row.existed) return row.update ? t('status.update') : t('status.existed')
+  return t('status.importable')
+}
+
+/** 单个候选行：跳过行无勾选框；已存在行默认不勾选、勾选即「将更新」。 */
+function CandidateRow({
+  t,
+  row,
+  onToggle,
+}: {
+  readonly t: Translate
+  readonly row: RowState
+  readonly onToggle: (name: string, checked: boolean) => void
+}) {
+  const candidate = row.candidate
+  const model = candidate.model === null ? null : splitModelAlias(candidate.model)
+  return (
+    <div style={rowStyle}>
+      {candidate.importable ? (
+        <Checkbox
+          checked={row.checked}
+          onChange={(next) => onToggle(candidate.name, next)}
+          label={candidate.name}
+          title={row.existed ? t('check.update') : undefined}
+        />
+      ) : (
+        <span style={{ width: 18, flexShrink: 0 }} aria-hidden="true" />
+      )}
+      <div style={metaStyle}>
+        <span style={nameStyle}>{candidate.name}</span>
+        <span style={metaTextStyle}>
+          {candidate.baseURL ?? '—'}
+          {model === null ? '' : ` · ${model.id}${model.contextWindow === undefined ? '' : ` · ${t('model.contextWindow')}`}`}
+        </span>
+      </div>
+      <span style={badgeStyle}>{statusLabel(t, row)}</span>
+    </div>
+  )
+}
+
+/**
+ * 导入对话框：打开时加载快照，渲染候选行与勾选态，确认后把写入计划交给
+ * runImport 执行并反馈「成功 N + 失败明细」。
+ */
+export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: ImportDialogProps) {
+  const [snapshot, setSnapshot] = useState<DialogSnapshot | null>(null)
+  const [rows, setRows] = useState<readonly RowState[]>([])
+  const [outcome, setOutcome] = useState<ImportOutcome | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [reloadToken, setReloadToken] = useState(0)
+
+  useEffect(() => {
+    if (!open) {
+      setSnapshot(null)
+      setRows([])
+      setOutcome(null)
+      setBusy(false)
+      setReloadToken(0)
+      return
+    }
+    let cancelled = false
+    setBusy(true)
+    void loadSnapshot().then((loaded) => {
+      if (cancelled) return
+      setSnapshot(loaded)
+      setOutcome(null)
+      setBusy(false)
+      if (loaded.ok) {
+        setRows(
+          loaded.candidates.map((candidate) => {
+            const state = rowState(candidate, new Set(Object.keys(loaded.existing)))
+            return { candidate, existed: state.existed, checked: state.defaultChecked, update: false }
+          }),
+        )
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open, loadSnapshot, reloadToken])
+
+  const toggle = useMemo(
+    () =>
+      (name: string, checked: boolean): void => {
+        setRows((current) =>
+          current.map((row) => {
+            if (row.candidate.name !== name) return row
+            return { ...row, checked, update: checked && row.existed }
+          }),
+        )
+      },
+    [],
+  )
+
+  const selectedNames = useMemo(
+    () => new Set(rows.filter((row) => row.checked).map((row) => row.candidate.name)),
+    [rows],
+  )
+  const updateNames = useMemo(
+    () => new Set(rows.filter((row) => row.checked && row.update).map((row) => row.candidate.name)),
+    [rows],
+  )
+  const preview = useMemo(
+    () =>
+      snapshot?.ok === true
+        ? planImports(snapshot.candidates, { names: selectedNames, updateNames }, snapshot.existing)
+        : null,
+    [snapshot, selectedNames, updateNames],
+  )
+
+  const confirm = (): void => {
+    if (preview === null || preview.planned.length === 0) return
+    setBusy(true)
+    setOutcome(null)
+    void runImport(preview)
+      .then((result) => {
+        setOutcome(result)
+        setBusy(false)
+      })
+      .catch((error: unknown) => {
+        setOutcome({
+          succeeded: 0,
+          failures: [
+            {
+              name: '*',
+              reason: error instanceof Error ? error.message : String(error),
+            },
+          ],
+        })
+        setBusy(false)
+      })
+  }
+
+  const selectable = rows.filter((row) => row.candidate.importable)
+  const errorText =
+    snapshot?.ok === false
+      ? t('scan.failed', { message: snapshot.message })
+      : snapshot?.ok === true && snapshot.candidates.length === 0
+        ? t('scan.empty')
+        : null
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={t('dialog.title')}
+      closeLabel={t('dialog.close')}
+      description={t('dialog.description')}
+    >
+      {busy && outcome === null ? <p>{t('dialog.loading')}</p> : null}
+      {errorText !== null ? <p role="alert">{errorText}</p> : null}
+      {snapshot?.ok === true && rows.length > 0 ? (
+        <div style={listStyle} role="list">
+          {rows.map((row) => (
+            <CandidateRow key={row.candidate.name} t={t} row={row} onToggle={toggle} />
+          ))}
+        </div>
+      ) : null}
+      {outcome !== null ? (
+        <div>
+          <p>{t('import.done', { count: outcome.succeeded })}</p>
+          {outcome.failures.length > 0 ? (
+            <div>
+              <p>{t('import.failures', { count: outcome.failures.length })}</p>
+              <ul>
+                {outcome.failures.map((failure) => (
+                  <li key={failure.name}>
+                    {failure.name}: {failure.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => setReloadToken((token) => token + 1)}>
+          {t('dialog.refresh')}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setRows((current) => current.map((row) => {
+              if (!row.candidate.importable || row.existed) return row
+              return { ...row, checked: true }
+            }))
+          }}
+        >
+          {t('dialog.selectAll')}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          {t('dialog.close')}
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={busy || preview === null || preview.planned.length === 0}
+          onClick={confirm}
+        >
+          {t('dialog.import', { count: preview?.planned.length ?? 0 })}
+        </Button>
+      </div>
+    </Modal>
+  )
+}
+
+/** scan 应答 → 对话框快照的适配（index.ts 的 loadSnapshot 使用）。 */
+export function snapshotFromScan(
+  scanned: ScanResponse,
+  existing: ExistingProviders,
+): DialogSnapshot {
+  if (!scanned.ok) return { ok: false, message: scanned.message }
+  return { ok: true, candidates: scanned.candidates, existing }
+}
+
+/** footer 条目组件：入口按钮 + 对话框（open 态本地持有）。 */
+export interface FooterSeats {
+  readonly t: Translate
+  readonly loadSnapshot: () => Promise<DialogSnapshot>
+  readonly runImport: (plan: ImportPlan) => Promise<ImportOutcome>
+}
+
+/** Models 页 footer 注入的条目：按钮常驻，点击打开导入对话框。 */
+export function ImportFooterEntry({ t, loadSnapshot, runImport }: FooterSeats) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        {t('action.import')}
+      </Button>
+      <ImportDialog
+        t={t}
+        open={open}
+        onClose={() => setOpen(false)}
+        loadSnapshot={loadSnapshot}
+        runImport={runImport}
+      />
+    </>
+  )
+}
