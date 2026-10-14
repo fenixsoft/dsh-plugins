@@ -1,38 +1,34 @@
 {
   "status": "success",
-  "spec": "add-dsh-dashboard-bridge",
-  "summary": "新增 fenix-dsh-dashboard-bridge 双半插件（对齐 cc-import 先例）：Host 半向 dsh-host-webserver 注册 /fenix-dashboard/ prefix 路由做同源流式反代（方法/体/头透传、逐块 pipe SSE 不缓冲、无超时、客户端断开终止上游、上游故障 502 提示页 + 错误日志、无鉴权定调落实现）；Client 半向 sidebar.panellist 注册 5 固定条目（概览/项目/设置/运维/帮助，order 10–14）与每项目动态条目（fenix-project-<name>、order 100 起名称序），main keyed 插槽同 id 挂 iframe 面板（buildPanelSrc 产出 <prefix>/?embed=1&apiBase=<prefix>#<route> 契约、顶部 clearance），60s+focus 轮询幂等 reconcile。tsdown 双入口构建产出 lib/index.js+lib/client.js，tsc --noEmit 与 vitest 36/36 全绿（透传/SSE 时间差/降级/dsh 桩/reconcile/src 契约逐字符断言）。tasks.md 17 项全部勾选；真机端到端验收清单随 docs/help 交付（前置依赖 fenixd add-dashboard-embed-mode 已在文档标注）。",
+  "spec": "verify-dsh-plugins-live",
+  "summary": "cc-import/bridge 双插件真机验收全量通过：定位并修复 cc-import client 真机激活根因（revealToken 入参需 strict codec）后，验收期再发现并修复第二处真机缺陷——远程调用统一返回 RemoteResult 信封而客户端按业务返回直用，导致导入对话框 scan 后 TypeError 崩溃；改为信封拆包（scan/revealToken 先拆 {ok,value|error} 再判业务联合）+ dsh-runtime.d.ts 类型面同步修正，42/42 测试与 typecheck 全绿。真机闭环：10+1 候选与 cc-switch 一致、全选导入 Imported 10（apiKeyEnv 引用无明文）、重复导入 Already exists/Will update 覆盖无 -2 副本、非 loopback hosts+trusted-host 路径无 memory 横幅且全程自愈清理；bridge 侧栏 5 固定+项目动态条目（与上游一致且按名排序）、5 视图 iframe 深链逐字符正确、会话条目点击回对话面板（隔离 profile 真实会话实测：概览 iframe 打开时点会话条目 iframe 移除、对话面板复原）、静态资源 sha256 与直连一致、上游停机 502 提示页且 dsh 设置不受影响、原命令恢复探活 200、SSE 自动同步（夹具项目出现 ~7s/移除消失 ~21s ≤60s）、24 轮切换连接数有界不累积，3.1-3.6 未发现 bridge 缺陷故无修复面。文档：两份安装文档按实测修正（- insert: 补丁语义、pnpm add link: 实测写法、loopback-trust 前置小节、live 刷新 pkill 自匹配警示），新增隔离 profile 从零演练方法论文档并按其在全新 profile（3445）完成从零重装走查（按钮/侧栏/对话框 10 候选一次通过）。tasks.md 17 项全部勾选；证据存 .fenix/verify-evidence/verify-dsh-plugins-live/。",
   "completed_tasks": [
     "1.1",
     "1.2",
+    "1.3",
+    "1.4",
     "2.1",
     "2.2",
     "2.3",
+    "2.4",
     "3.1",
     "3.2",
     "3.3",
+    "3.4",
+    "3.5",
+    "3.6",
     "4.1",
     "4.2",
-    "4.3",
-    "5.1",
-    "5.2",
-    "5.3",
-    "6.1",
-    "6.2",
-    "6.3"
+    "4.3"
   ],
-  "findings": [
+  "findings": [],
+  "host_changes": [
     {
-      "type": "deliverable-dispute",
-      "element": "fenix-dsh-dashboard-bridge/src/types/dsh-runtime.d.ts",
-      "current": "已随实现落盘但未入 tasks.md 交付声明段：该文件 basename 与 cc-import/src/types/dsh-runtime.d.ts 在主树唯一命中，若声明为 new 会被 lint 规则 4（疑似笔误）确定性拒绝，故按 cc-import 同名文件的既有先例（其 spec 交付声明段同样未含此文件、已随 61a5311 入库）作为未声明的构建期类型缝留存",
-      "suggestion": "按 cc-import 先例认可该文件为 dsh 运行时包（未发布到 npm）的构建期类型缝，不入交付声明段、随包源码留存"
-    },
-    {
-      "type": "deliverable-dispute",
-      "element": "fenix-dsh-dashboard-bridge/pnpm-lock.yaml",
-      "current": "tasks.md 交付声明段未列（声明段口径注释：包骨架标准文件族因 basename 与 cc-import 唯一命中被 lint 规则 4 拒绝而不入声明段，其落地由任务 1.1 把守）；任务 1.1 字面要求 pnpm install 产出 pnpm-lock.yaml，文件已生成并随提交 df09c54 入库",
-      "suggestion": "pnpm-lock.yaml 按任务 1.1 验收（已落库），声明段保持现状（无法在不触 lint 规则 4 的情况下显式声明）"
+      "object": "/etc/hosts",
+      "kind": "hosts-entry",
+      "detail": "任务 2.4 非 loopback 验收临时追加 `127.0.0.1 home.icyfenix.cn`（隔离 profile 3444 已带 --trusted-host）；验收完成后即时删除并复核（getent 解析回到真实公网地址、/etc/hosts 与备份 diff 为空）——变更已不在位，无需回滚",
+      "backup": "/root/.fenix-verify/hosts.backup.vdl",
+      "rollback": "已回滚（sed -i 删除该行）；如需复现验收见 docs/help/dsh-plugin-live-verification.md"
     }
   ]
 }
