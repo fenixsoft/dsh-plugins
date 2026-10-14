@@ -1,0 +1,12 @@
+{
+  "changes": [
+    {
+      "object": "/etc/hosts",
+      "kind": "hosts-entry",
+      "detail": "追加临时测试条目 `127.0.0.1 home.icyfenix.cn`（spec verify-dsh-plugins-live 任务 2.4 非 loopback 验收；隔离 profile 3444 已带 --trusted-host home.icyfenix.cn:3444）",
+      "backup": "/root/.fenix-verify/hosts.backup.vdl",
+      "rollback": "sed -i '\\#127.0.0.1 home.icyfenix.cn#d' /etc/hosts（或从 /root/.fenix-verify/hosts.backup.vdl 恢复）；验收后由本 run 收尾自动清理并复核"
+    }
+  ],
+  "recorded_at": "2026-10-14T16:12:00Z"
+}

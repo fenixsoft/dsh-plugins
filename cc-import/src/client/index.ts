@@ -11,44 +11,21 @@
  *   单项失败不阻断批次。
  */
 import type { Context, SettingsPathOp } from '@deepseek-ai/cordis'
+import { inject, TYPERT_REMOTE } from './contract.js'
 import { ImportFooterEntry, snapshotFromScan } from './dialog.js'
 import type { DialogSnapshot, ImportOutcome } from './dialog.js'
 import type { ExistingProviders, ImportPlan } from './importer.js'
 import { LOCALE_NS, localeBundles } from './locales.js'
-import type { ScanResponse } from '../shared/mapping.js'
+
+export { inject }
 
 /** dsh 的 pi-ai provider settings namespace（Models 页同款，先例 settings-models）。 */
 const PI_AI_NS = 'llm-pi-ai'
 
-/** cordis 服务注入：本插件消费的全部 client 服务键。 */
-export const inject = ['slots', 'locale', 'remote', 'remote.settings', 'remote.credentials']
-
-/** 本插件 Remote namespace 的 client 侧贡献描述符（src-json 编解码）。 */
-const TYPERT_REMOTE = {
-  package: 'cc-import',
-  descriptors: [
-    {
-      id: 'cc-import#ccimport/scan',
-      service: 'ccimport',
-      namespace: 'ccimport',
-      method: 'scan',
-      invocation: { kind: 'direct' },
-      parameters: [],
-      result: { mode: 'src-json' },
-    },
-    {
-      id: 'cc-import#ccimport/revealToken',
-      service: 'ccimport',
-      namespace: 'ccimport',
-      method: 'revealToken',
-      invocation: { kind: 'direct' },
-      parameters: [
-        { name: 'providerName', wire: 'providerName', source: 'json', codec: { mode: 'src-json' } },
-      ],
-      result: { mode: 'src-json' },
-    },
-  ],
-} as const
+/** cordis registry 运行时 mixin 的结构面（`ctx.plugin` 的 inject 形态；类型面未声明）。 */
+interface ContextWithInject {
+  inject(inject: string[], apply: (ctx: unknown) => void): { dispose(): void | Promise<void> }
+}
 
 /** settings 快照里的 pi-ai providers 形状（只取计划期需要的摘要字段）。 */
 function extractProviders(value: unknown): ExistingProviders {
@@ -91,7 +68,14 @@ async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutc
   const failures: { name: string; reason: string }[] = []
   let succeeded = 0
   for (const item of plan.planned) {
-    const tokenRevealed = await ctx.remote.ccimport.revealToken(item.candidate.name)
+    // 先拆 RemoteResult 信封：信封层失败=调用/传输级；业务联合的 ok=false=
+    // host 半的结构化拒绝（candidate_missing / missing_token 等）。
+    const envelope = await ctx.remote.ccimport.revealToken(item.candidate.name)
+    if (!envelope.ok) {
+      failures.push({ name: item.candidate.name, reason: envelope.error.message })
+      continue
+    }
+    const tokenRevealed = envelope.value
     if (!tokenRevealed.ok) {
       failures.push({ name: item.candidate.name, reason: tokenRevealed.message })
       continue
@@ -122,32 +106,90 @@ async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutc
  * Client 插件体：注册词典、挂载本插件 Remote 贡献、向 Models 页 footer 注入
  * 导入入口。slot 未声明（dsh 升级改名）时注入不生效，页面不崩（design.md Risks）。
  */
+/**
+ * Client 插件体：注册词典、挂载本插件 Remote 贡献、向 Models 页 footer 注入
+ * 导入入口。slot 未声明（dsh 升级改名）时注入不生效，页面不崩（design.md Risks）。
+ */
+/**
+ * 激活失败可观测（spec ADDED「激活失败可观测」）：dsh bootloader 把底层 reject
+ * 吞成 `web boot: 1 entry did not activate / cc-import: failed` 一行词，插件侧
+ * 在每个激活环节的失败路径上补一条含环节名与错误栈的 `console.warn`，使具体
+ * reject 点可从浏览器控制台定位；成功路径零 console 输出。
+ */
+function logStageFailure(stage: string, err: unknown): void {
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err)
+  console.warn(`[cc-import:apply] activation stage "${stage}" rejected: ${detail}`)
+}
+
 export async function apply(ctx: Context): Promise<() => Promise<void>> {
-  ctx.effect(() => ctx.locale.register(LOCALE_NS, localeBundles), 'cc-import: dictionaries')
-  const unmountRemote = await ctx.remote.$mount(TYPERT_REMOTE)
+  ctx.effect(() => {
+    try {
+      return ctx.locale.register(LOCALE_NS, localeBundles)
+    } catch (err) {
+      logStageFailure('locale.register', err)
+      throw err
+    }
+  }, 'cc-import: dictionaries')
 
-  const loadSnapshot = async (): Promise<DialogSnapshot> => {
-    const scanned: ScanResponse = await ctx.remote.ccimport.scan()
-    const existing = await readExistingProviders(ctx)
-    if (!existing.ok) return { ok: false, message: existing.message }
-    return snapshotFromScan(scanned, existing.existing)
+  let unmountRemote: () => void | Promise<void>
+  try {
+    unmountRemote = await ctx.remote.$mount(TYPERT_REMOTE)
+  } catch (err) {
+    logStageFailure('remote.$mount', err)
+    throw err
   }
-  const runImport = (plan: ImportPlan): Promise<ImportOutcome> => executeImport(ctx, plan)
 
-  ctx.slots.inject('settings.models.footer', () =>
-    ctx.slots.register(
-      {
-        name: 'settings.models.footer',
-        id: 'cc-import',
-        order: 10,
-        locale: LOCALE_NS,
-        inject: () => ({ loadSnapshot, runImport }),
-      },
-      ImportFooterEntry,
-    ),
+  // UI 注册走运行时 inject（先例：@deepseek-ai/dsh-experimental-client-ui-voice-input
+  // 的 mountVoiceInput）：`remote.ccimport` 命名空间服务由上一行 $mount 拉起，
+  // 此刻以运行时 inject 声明它可立即满足，且子 ctx 的 reflect fence 对其放行；
+  // slot 闭包在此后任意时机（React 渲染/事件）调用 ccimport 均安全。该键
+  // MUST NOT 进入口静态 inject——那会在 apply 之前等待自提供的服务，激活
+  // 永远 pending（真机实测死锁）。settings/credentials 一并声明，授予子 ctx
+  // 对话框读写面的 fence 访问。ctx.inject 为 registry 运行时 mixin，类型面
+  // 未声明（cordis context.ts 仅注释说明），此处按运行时形态结构化断言。
+  const ui = (ctx as unknown as ContextWithInject).inject(
+    ['remote.ccimport', 'remote.settings', 'remote.credentials'],
+    (uiCtx) => registerUi(uiCtx as Context),
   )
 
   return async () => {
+    await ui.dispose()
     await unmountRemote()
+  }
+}
+
+/**
+ * UI 注册体（运行时 inject 的 apply 回调）：构造对话框数据面闭包并注入
+ * Models 页 footer slot。闭包持有 fence 已放行的 uiCtx，后续调用不再受
+ * 渲染上下文影响。
+ */
+function registerUi(ctx: Context): void {
+  const loadSnapshot = async (): Promise<DialogSnapshot> => {
+    // 远程调用先拆 RemoteResult 信封（gateway client 面：value = 业务返回），
+    // 业务级失败（scan 自己的 ok=false）再由 snapshotFromScan 判别。
+    const envelope = await ctx.remote.ccimport.scan()
+    if (!envelope.ok) return { ok: false, message: envelope.error.message }
+    const existing = await readExistingProviders(ctx)
+    if (!existing.ok) return { ok: false, message: existing.message }
+    return snapshotFromScan(envelope.value, existing.existing)
+  }
+  const runImport = (plan: ImportPlan): Promise<ImportOutcome> => executeImport(ctx, plan)
+
+  try {
+    ctx.slots.inject('settings.models.footer', () =>
+      ctx.slots.register(
+        {
+          name: 'settings.models.footer',
+          id: 'cc-import',
+          order: 10,
+          locale: LOCALE_NS,
+          inject: () => ({ loadSnapshot, runImport }),
+        },
+        ImportFooterEntry,
+      ),
+    )
+  } catch (err) {
+    logStageFailure('slots.inject', err)
+    throw err
   }
 }

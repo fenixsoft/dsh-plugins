@@ -91,12 +91,22 @@ declare module '@deepseek-ai/cordis' {
       readonly credentials: {
         set(ref: string, value: string): Promise<RemoteResult<void>>
       }
-      /** cc-import 自己挂载的 Remote namespace（client/index.ts $mount 后可用）。 */
+      /**
+       * cc-import 自己挂载的 Remote namespace（client/index.ts $mount 后可用）。
+       * 远程调用统一返回 RemoteResult 信封（gateway client 面：ok/value/error，
+       * value = 业务返回）；业务级失败以业务联合自身的 ok=false 表达（host 半
+       * 返回业务联合而非 throw），客户端须先拆信封再判业务 ok。
+       */
       readonly ccimport: {
-        scan(): Promise<import('../shared/mapping.js').ScanResponse>
+        scan(): Promise<RemoteResult<import('../shared/mapping.js').ScanResponse>>
         revealToken(
           providerName: string,
-        ): Promise<{ readonly ok: true; readonly token: string } | { readonly ok: false; readonly code: string; readonly message: string }>
+        ): Promise<
+          RemoteResult<
+            | { readonly ok: true; readonly token: string }
+            | { readonly ok: false; readonly code: string; readonly message: string }
+          >
+        >
       }
     }
   }
