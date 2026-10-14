@@ -136,6 +136,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
   const [rows, setRows] = useState<readonly RowState[]>([])
   const [outcome, setOutcome] = useState<ImportOutcome | null>(null)
   const [busy, setBusy] = useState(false)
+  const [reloadToken, setReloadToken] = useState(0)
 
   useEffect(() => {
     if (!open) {
@@ -143,6 +144,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
       setRows([])
       setOutcome(null)
       setBusy(false)
+      setReloadToken(0)
       return
     }
     let cancelled = false
@@ -150,6 +152,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
     void loadSnapshot().then((loaded) => {
       if (cancelled) return
       setSnapshot(loaded)
+      setOutcome(null)
       setBusy(false)
       if (loaded.ok) {
         setRows(
@@ -163,7 +166,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
     return () => {
       cancelled = true
     }
-  }, [open, loadSnapshot])
+  }, [open, loadSnapshot, reloadToken])
 
   const toggle = useMemo(
     () =>
@@ -260,6 +263,9 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => setReloadToken((token) => token + 1)}>
+          {t('dialog.refresh')}
+        </Button>
         <Button
           variant="outline"
           size="sm"
