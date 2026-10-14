@@ -18,8 +18,11 @@ lib/
 .fenix/*
 .playwright-cli/
 
-# 例外：状态文件随仓库入库（todo.md 自省条目 / verify.yaml 验证契约）
+# 例外：状态文件随仓库入库（todo.md 自省条目 / verify.yaml 验证契约 /
+# verify-web-bridge.sh 验证被测实例装配脚本——verify.yaml serve 段引用，
+# 契约自包含要求其随仓库入库）
 # 项目如需版本化其它状态文件（如 .fenix/STATE.md / PROJECT_LOG.md），
 # 在此追加 `!` 规则即可。
 !.fenix/todo.md
 !.fenix/verify.yaml
+!.fenix/verify-web-bridge.sh

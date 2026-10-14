@@ -1,13 +1,25 @@
 # =============================================================================
 # .fenix/verify.yaml — 声明式验证契约
-# 起草：Administrator（spec=add-cc-import-plugin 前置预检 verify_contract_missing）
+# 起草：Administrator（spec=add-dsh-dashboard-bridge 验证环境阻塞（契约 serve
+# 缺失）：场景 kind 集含 api/cli/web，被测应用为「dsh web + 本仓库
+# fenix-dsh-dashboard-bridge 插件」实例。修正动作：补 serve/ready 段并扩
+# prepare，既有 prepare 段语义保留（cc-import 构建链）。
 #
-# 项目形态：dsh 第三方插件集仓库。交付物 cc-import 为 TypeScript 插件包
-# （tsdown 构建 + vitest 单测，纯 CLI 交付）；真实 dsh web 端到端为人工步骤
-# （docs/help/cc-import-install.md），本仓库无可服务的 HTTP 形态——
-# 纯 cli 场景集 → serve/ready 全省（不回退 commands.start，见 core/verify_contract.py）。
-# regression 段暂缺：vitest 测试体系随 cc-import/ 实现落地后再补
-# （现臆造命令必失败，会让周期回归每天 parse_error 空转，比不配更糟）。
+# 项目形态：dsh 第三方插件集仓库，交付物为插件包（cc-import、
+# fenix-dsh-dashboard-bridge；tsdown 构建 + vitest 单测）。api/web 场景的
+# 被测应用不是本仓库可独立服务的 HTTP 形态，而是「装入 dsh web 的插件」——
+# serve 段经 .fenix/verify-web-bridge.sh 在隔离 DSH_HOME（/root/.fenix-verify/
+# dsh-web-home，与生产 /root/.dsh 零交集、不用 /tmp——harness 对 /tmp 有
+# 不定期清扫）装配官方 web 模板 profile + 链接本仓库插件包 + loader insert
+# 条目，并 exec dsh web 于框架注入端口；ready 探针打 /fenix-dashboard/api/
+# projects——桥接反代的真实功能端点（上游 dashboard 默认 127.0.0.1:8787 须
+# 在场：tmux 常驻，由 Administrator dashboard 运维手册守护）。场景 origin 由
+# 验证引擎全量改写到本实例（BASE_URL 铁律），生产 dsh web（127.0.0.1:3080）
+# 不参与验证。
+#
+# regression 段：双插件包 vitest 全量回归（junit reporter 产出 XML）；
+# output 指向 bridge 套件（当前 spec 交付物），cc-import 套件先行执行、
+# 失败即 cmd 非零（两套件同为回归门）。
 # =============================================================================
 
 prepare:
@@ -18,3 +30,28 @@ prepare:
       fi
       pnpm --dir cc-import install
       pnpm --dir cc-import run build
+  - run: |
+      pnpm --dir fenix-dsh-dashboard-bridge install --frozen-lockfile --prefer-offline
+      pnpm --dir fenix-dsh-dashboard-bridge run build
+  - run: bash .fenix/verify-web-bridge.sh prepare
+
+serve:
+  kind: command
+  cmd: bash .fenix/verify-web-bridge.sh serve {port}
+
+ready:
+  url: /fenix-dashboard/api/projects
+  expect: 200
+  timeout: 120
+
+regression:
+  cmd: |
+    set -e
+    mkdir -p .fenix/regression
+    pnpm --dir cc-import install --frozen-lockfile --prefer-offline
+    pnpm --dir cc-import exec vitest run --reporter=junit --outputFile="$PWD/.fenix/regression/junit-cc-import.xml"
+    pnpm --dir fenix-dsh-dashboard-bridge install --frozen-lockfile --prefer-offline
+    pnpm --dir fenix-dsh-dashboard-bridge exec vitest run --reporter=junit --outputFile="$PWD/.fenix/regression/junit.xml"
+  output: .fenix/regression/junit.xml
+  format: junit
+  timeout_seconds: 1800
