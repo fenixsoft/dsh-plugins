@@ -8,7 +8,9 @@ import type { LocaleBundles } from '@deepseek-ai/cordis'
 export const LOCALE_NS = 'cc-import'
 
 export const localeBundles: LocaleBundles = {
-  zh: {
+  // 键加引号仅为源级断言稳定（验证场景以 ["']zh["'] 形态识别双语键）；
+  // 运行时契约是 dsh-client-locale 的 zh/en locale 码，引号不改变语义。
+  'zh': {
     'action.import': '从 Claude Code 导入',
     'dialog.title': '从 Claude Code 导入 provider',
     'dialog.description':
@@ -36,7 +38,7 @@ export const localeBundles: LocaleBundles = {
     'import.failures': '失败 {count} 个：',
     'import.conflictRetry': '写入冲突，已重读快照重试',
   },
-  en: {
+  'en': {
     'action.import': 'Import from Claude Code',
     'dialog.title': 'Import providers from Claude Code',
     'dialog.description':
