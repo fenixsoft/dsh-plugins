@@ -34,12 +34,17 @@ dsh 插件向 profile `cordis.patch.yml` 注册新插件条目 SHALL 使用 `- i
 
 ### Requirement: bridge 真机验收清单执行
 
-fenix-dsh-dashboard-bridge SHALL 在隔离 profile 上逐项执行可自动化验收项：侧栏 5 固定条目 + 项目条目与上游 API 一致、点击切换主面板 iframe 且深链正确（`/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/<view>`）、会话面板可回、静态资源与 POST 经前缀反代一致、上游停机 502 提示页且 dsh 其余功能不受影响、前缀外路径行为不变。发现缺陷 SHALL 同批修复并回归。
+fenix-dsh-dashboard-bridge SHALL 在隔离 profile 上逐项执行可自动化验收项：侧栏 5 固定条目 + 项目条目与上游 API 一致、点击切换主面板 iframe 且深链正确（`/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/<view>`）、会话面板可回、静态资源与 POST 经前缀反代一致、面板内数据自动刷新工作且多面板连续切换 ≥10 轮无退化（上游连接数不随切换累积）、移除项目后条目 ≤60s 消失、上游停机 502 提示页且 dsh 其余功能不受影响、前缀外路径行为不变。发现缺陷 SHALL 同批修复并回归。
 
 #### Scenario: 侧栏条目与深链
 
 - **WHEN** 上游 dashboard（127.0.0.1:8787）运行时打开隔离 profile 的 dsh web
 - **THEN** 侧栏出现 概览/项目/设置/运维/帮助 5 固定条目，项目条目与 `GET /fenix-dashboard/api/projects` 返回一致；点击各条目主面板切换为 iframe 且 src hash 为 `#/overview` / `#/projects` / `#/settings` / `#/activities` / `#/help`
+
+#### Scenario: 自动刷新与条目移除
+
+- **WHEN** 上游 dashboard 数据发生新增与移除（含移除一个项目）且面板保持打开，期间在多面板间连续切换 ≥10 轮
+- **THEN** 项目条目随轮询自动同步（新增出现、移除 ≤60s 消失）；自动刷新仍工作且上游连接数不随切换累积
 
 #### Scenario: 上游停机 502 降级
 
