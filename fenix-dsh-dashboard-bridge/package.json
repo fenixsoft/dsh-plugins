@@ -1,0 +1,48 @@
+{
+  "name": "fenix-dsh-dashboard-bridge",
+  "version": "0.1.0",
+  "description": "dsh web 侧栏 Fenix Dashboard 菜单集成与同源反代：Host 半把 /fenix-dashboard/ 前缀路由流式反代到本机 dashboard（SSE 不缓冲、上游故障 502），Client 半注册侧栏固定/动态条目与主面板 iframe 深链",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "NO_COLOR=1 vitest run"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "~24.0.0",
+    "@types/react": "~18.3.1",
+    "react": "^18.2.0",
+    "tsdown": "^0.23.1",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

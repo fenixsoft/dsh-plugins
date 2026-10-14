@@ -1,22 +1,38 @@
 {
- "status": "success",
- "spec": "add-cc-import-plugin",
- "summary": "验证失败（原地打回第 1 轮）复核与修复完成。复核结论：两失败场景均为场景断言缺陷、产品行为无缺陷——(1) ccimport-locales-bilingual 的 [\"']zh[\"'] 断言过度指定引号形态，产品 zh:/en: 键与 dsh-client-locale 运行时契约（FALLBACK_LOCALE=en、BUILT_IN_LOCALE_METADATA zh/en）一致；(2) ccimport-full-suite-green-no-binary-db 的 Tests\\s+N\\s+passed 断言不容忍 ANSI，场景自设 CI=1 触发 picocolors 强制着色致正则必失配（测试实为 37/37 全过 exit 0），同款缺陷潜伏于 4 个测试类场景。修复：场景文件 test_scenarios.json 断言放宽（locales 键断言兼容带/不带引号；4 个输出断言改 ANSI 容忍正则，修前已备份 test_scenarios.json.impl-round2-pre-scenario-fix.bak）；产品侧无害加固兜底（locales.ts 键加引号、test 脚本 NO_COLOR=1，使原始断言亦可命中）。重跑：run 内以与验证链同语义执行器重跑受影响 5 场景全 pass，双保险评估（原始断言对修复后现场亦命中）通过；pnpm install/build/typecheck 全过、vitest 37/37 绿。证据：.fenix/verify-evidence/add-cc-import-plugin/impl-round2-rerun-result.json。全 17 场景官方复验由验证链执行；真机端到端为 docs/help/cc-import-install.md 人工步骤。",
- "completed_tasks": [
-  "1.1",
-  "1.2",
-  "1.3",
-  "2.1",
-  "2.2",
-  "3.1",
-  "4.1",
-  "4.2",
-  "4.3",
-  "5.1",
-  "5.2",
-  "5.3",
-  "5.4",
-  "6.1",
-  "6.2"
- ]
+  "status": "success",
+  "spec": "add-dsh-dashboard-bridge",
+  "summary": "新增 fenix-dsh-dashboard-bridge 双半插件（对齐 cc-import 先例）：Host 半向 dsh-host-webserver 注册 /fenix-dashboard/ prefix 路由做同源流式反代（方法/体/头透传、逐块 pipe SSE 不缓冲、无超时、客户端断开终止上游、上游故障 502 提示页 + 错误日志、无鉴权定调落实现）；Client 半向 sidebar.panellist 注册 5 固定条目（概览/项目/设置/运维/帮助，order 10–14）与每项目动态条目（fenix-project-<name>、order 100 起名称序），main keyed 插槽同 id 挂 iframe 面板（buildPanelSrc 产出 <prefix>/?embed=1&apiBase=<prefix>#<route> 契约、顶部 clearance），60s+focus 轮询幂等 reconcile。tsdown 双入口构建产出 lib/index.js+lib/client.js，tsc --noEmit 与 vitest 36/36 全绿（透传/SSE 时间差/降级/dsh 桩/reconcile/src 契约逐字符断言）。tasks.md 17 项全部勾选；真机端到端验收清单随 docs/help 交付（前置依赖 fenixd add-dashboard-embed-mode 已在文档标注）。",
+  "completed_tasks": [
+    "1.1",
+    "1.2",
+    "2.1",
+    "2.2",
+    "2.3",
+    "3.1",
+    "3.2",
+    "3.3",
+    "4.1",
+    "4.2",
+    "4.3",
+    "5.1",
+    "5.2",
+    "5.3",
+    "6.1",
+    "6.2",
+    "6.3"
+  ],
+  "findings": [
+    {
+      "type": "deliverable-dispute",
+      "element": "fenix-dsh-dashboard-bridge/src/types/dsh-runtime.d.ts",
+      "current": "已随实现落盘但未入 tasks.md 交付声明段：该文件 basename 与 cc-import/src/types/dsh-runtime.d.ts 在主树唯一命中，若声明为 new 会被 lint 规则 4（疑似笔误）确定性拒绝，故按 cc-import 同名文件的既有先例（其 spec 交付声明段同样未含此文件、已随 61a5311 入库）作为未声明的构建期类型缝留存",
+      "suggestion": "按 cc-import 先例认可该文件为 dsh 运行时包（未发布到 npm）的构建期类型缝，不入交付声明段、随包源码留存"
+    },
+    {
+      "type": "deliverable-dispute",
+      "element": "fenix-dsh-dashboard-bridge/pnpm-lock.yaml",
+      "current": "tasks.md 交付声明段未列（声明段口径注释：包骨架标准文件族因 basename 与 cc-import 唯一命中被 lint 规则 4 拒绝而不入声明段，其落地由任务 1.1 把守）；任务 1.1 字面要求 pnpm install 产出 pnpm-lock.yaml，文件已生成并随提交 df09c54 入库",
+      "suggestion": "pnpm-lock.yaml 按任务 1.1 验收（已落库），声明段保持现状（无法在不触 lint 规则 4 的情况下显式声明）"
+    }
+  ]
 }
