@@ -43,24 +43,24 @@
 
 ## 1. 包骨架与构建链
 
-- [ ] 1.1 创建 `cc-import/package.json`：name `cc-import`、type module、devDependencies（typescript、tsdown、vitest、@types/react、react——版本对齐 dsh 0.2.0-rc.2 发行包所用基线）、`exports` 含 `.` 与 `./client`、`dsh: { client: { platform: "web", inject: [] } }` 起步骨架（`inject` 起步为空，但实现 4.x 时 MUST 回补 client 半实际消费的 client 模块——至少 slots / locale / api-remotes 所属模块，形态对齐先例 `@deepseek-ai/dsh-client-ui-settings-general` 的 `dsh.client.inject` 清单）
-- [ ] 1.2 创建 `cc-import/tsconfig.json`、`cc-import/tsdown.config.ts`（双入口 `src/host/index.ts` → `lib/index.js`、`src/client/index.ts`（`dialog.tsx` 由 entry 引入）→ `lib/client.js`）、`cc-import/vitest.config.ts`；`pnpm install` 成功（`cc-import/pnpm-lock.yaml` 落库）且 `pnpm build` 产出两个入口
-- [ ] 1.3 `.gitignore` 追加 `node_modules/`、`lib/`、`*.tsbuildinfo` 规则
+- [x] 1.1 创建 `cc-import/package.json`：name `cc-import`、type module、devDependencies（typescript、tsdown、vitest、@types/react、react——版本对齐 dsh 0.2.0-rc.2 发行包所用基线）、`exports` 含 `.` 与 `./client`、`dsh: { client: { platform: "web", inject: [] } }` 起步骨架（`inject` 起步为空，但实现 4.x 时 MUST 回补 client 半实际消费的 client 模块——至少 slots / locale / api-remotes 所属模块，形态对齐先例 `@deepseek-ai/dsh-client-ui-settings-general` 的 `dsh.client.inject` 清单）
+- [x] 1.2 创建 `cc-import/tsconfig.json`、`cc-import/tsdown.config.ts`（双入口 `src/host/index.ts` → `lib/index.js`、`src/client/index.ts`（`dialog.tsx` 由 entry 引入）→ `lib/client.js`）、`cc-import/vitest.config.ts`；`pnpm install` 成功（`cc-import/pnpm-lock.yaml` 落库）且 `pnpm build` 产出两个入口
+- [x] 1.3 `.gitignore` 追加 `node_modules/`、`lib/`、`*.tsbuildinfo` 规则
 
 ## 2. Host 半：cc-switch 扫描
 
-- [ ] 2.1 `cc-import/src/host/scan.ts`：`node:sqlite` 只读打开 `~/.cc-switch/cc-switch.db`，读 `providers` 表 `app_type='claude'` 行，解析 `settings_config` JSON env 块，产出候选 `{name, baseURL, model, hasToken, importable, skipReason?}`；db 缺失/缺表/坏 JSON 一律返回结构化错误（code + message），响应不含 token 明文
-- [ ] 2.2 `cc-import/src/host/index.ts`：cordis 插件注册 typert Remote namespace `ccimport` 暴露 `scan` 方法（对齐 `@deepseek-ai/dsh-api-settings-controller` 的 Remote 注册形态），`pnpm build` 通过
+- [x] 2.1 `cc-import/src/host/scan.ts`：`node:sqlite` 只读打开 `~/.cc-switch/cc-switch.db`，读 `providers` 表 `app_type='claude'` 行，解析 `settings_config` JSON env 块，产出候选 `{name, baseURL, model, hasToken, importable, skipReason?}`；db 缺失/缺表/坏 JSON 一律返回结构化错误（code + message），响应不含 token 明文
+- [x] 2.2 `cc-import/src/host/index.ts`：cordis 插件注册 typert Remote namespace `ccimport` 暴露 `scan` 方法（对齐 `@deepseek-ai/dsh-api-settings-controller` 的 Remote 注册形态），`pnpm build` 通过
 
 ## 3. 共享映射纯函数层
 
-- [ ] 3.1 `cc-import/src/shared/mapping.ts`：实现 `slugifyRouteId(name)`、`resolveRouteIdConflict(id, existingKeys)`（`-2`/`-3` 递增）、`splitModelAlias(model)`（`[1M]` 后缀 → `{id, contextWindow: 1000000}`，无后缀不含 contextWindow，拆分适用于任何来源键的模型值）、`resolveCandidateModel(env)`（`ANTHROPIC_MODEL` 缺失回退 `ANTHROPIC_DEFAULT_OPUS_MODEL`，均空返回 null）、`buildProviderProfile(candidate)`（`{displayName?, apiKeyEnv, api:"anthropic-messages", baseURL, models:[...]}`，`apiKeyEnv` 派生 `<ROUTE>_API_KEY`）；全部为无副作用纯函数
+- [x] 3.1 `cc-import/src/shared/mapping.ts`：实现 `slugifyRouteId(name)`、`resolveRouteIdConflict(id, existingKeys)`（`-2`/`-3` 递增）、`splitModelAlias(model)`（`[1M]` 后缀 → `{id, contextWindow: 1000000}`，无后缀不含 contextWindow，拆分适用于任何来源键的模型值）、`resolveCandidateModel(env)`（`ANTHROPIC_MODEL` 缺失回退 `ANTHROPIC_DEFAULT_OPUS_MODEL`，均空返回 null）、`buildProviderProfile(candidate)`（`{displayName?, apiKeyEnv, api:"anthropic-messages", baseURL, models:[...]}`，`apiKeyEnv` 派生 `<ROUTE>_API_KEY`）；全部为无副作用纯函数
 
 ## 4. Client 半：注入与导入
 
-- [ ] 4.1 `cc-import/src/client/importer.ts`：候选 → 写入计划构造（`writeSettings` ops `{op:"set", path:["providers",<id>], value:profile}` + `storeCredential` 调用参数），基于既有 providers 键集做冲突 id 解析与「已存在」态判定（纯函数，可单测）
-- [ ] 4.2 `cc-import/src/client/dialog.tsx`：导入对话框组件——候选行（勾选框、名称/baseURL/模型摘要、状态标：可导入/已存在/跳过-原因）、已存在行默认不勾选、跳过行无勾选框、批次结果反馈（成功 N + 失败明细）
-- [ ] 4.3 `cc-import/src/client/index.ts` + `cc-import/src/client/locales.ts`：`ctx.slots.inject("settings.models.footer", ...)` 注入「从 Claude Code 导入」按钮并挂对话框；`ctx.locale.register` 注册中英文案；导入执行走 `writeSettings(pi-ai ns, ops, expectedRevision)` + `storeCredential`，conflict 时重读快照重试一次，单项失败不阻断批次
+- [x] 4.1 `cc-import/src/client/importer.ts`：候选 → 写入计划构造（`writeSettings` ops `{op:"set", path:["providers",<id>], value:profile}` + `storeCredential` 调用参数），基于既有 providers 键集做冲突 id 解析与「已存在」态判定（纯函数，可单测）
+- [x] 4.2 `cc-import/src/client/dialog.tsx`：导入对话框组件——候选行（勾选框、名称/baseURL/模型摘要、状态标：可导入/已存在/跳过-原因）、已存在行默认不勾选、跳过行无勾选框、批次结果反馈（成功 N + 失败明细）
+- [x] 4.3 `cc-import/src/client/index.ts` + `cc-import/src/client/locales.ts`：`ctx.slots.inject("settings.models.footer", ...)` 注入「从 Claude Code 导入」按钮并挂对话框；`ctx.locale.register` 注册中英文案；导入执行走 `writeSettings(pi-ai ns, ops, expectedRevision)` + `storeCredential`，conflict 时重读快照重试一次，单项失败不阻断批次
 
 ## 5. 测试
 

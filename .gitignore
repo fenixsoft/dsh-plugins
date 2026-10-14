@@ -5,6 +5,11 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Node / 插件构建产物（cc-import 等插件包）
+node_modules/
+lib/
+*.tsbuildinfo
+
 # Worktrees (managed by fenixd)
 .claude/worktrees/
 

@@ -1,0 +1,145 @@
+/**
+ * cc-switch 候选 → dsh pi-ai provider profile 的共享映射纯函数层。
+ *
+ * Host 半（scan 的模型解析）与 Client 半（写入计划构造、profile 组装）共用；
+ * 全部函数无副作用、无 I/O，可直接单测。映射规则出处：
+ * spec/changes/add-cc-import-plugin/specs/cc-import/spec.md「映射规则」。
+ */
+
+/** cc-switch 一行 claude provider 解析出的导入候选（不含任何 token 明文）。 */
+export interface ScanCandidate {
+  /** cc-switch 里的 provider 显示名（settings_config 之外的 name 列）。 */
+  readonly name: string
+  /** ANTHROPIC_BASE_URL；缺失为 null。 */
+  readonly baseURL: string | null
+  /** 候选模型原始值（回退链解析后），缺失为 null。 */
+  readonly model: string | null
+  /** 是否配置了 ANTHROPIC_AUTH_TOKEN（只报存在性，不带值）。 */
+  readonly hasToken: boolean
+  /** 是否可导入（baseURL + token + 模型齐备）。 */
+  readonly importable: boolean
+  /** 不可导入时的机器可读原因。 */
+  readonly skipReason?: 'missing_base_url' | 'missing_token' | 'missing_model'
+}
+
+/** ccimport.scan 的结构化应答：成功给候选数组，异常给 code + message。 */
+export type ScanResponse =
+  | { readonly ok: true; readonly candidates: readonly ScanCandidate[] }
+  | { readonly ok: false; readonly code: string; readonly message: string }
+
+/** dsh pi-ai 模型行（PiAiModelProfile 的 cc-import 子集）。 */
+export interface ModelRow {
+  readonly id: string
+  readonly contextWindow?: number
+}
+
+/** dsh pi-ai provider profile（PiAiProviderProfile 的 cc-import 子集）。 */
+export interface ProviderProfile {
+  readonly displayName?: string
+  readonly apiKeyEnv: string
+  readonly api: 'anthropic-messages'
+  readonly baseURL: string
+  readonly models: readonly ModelRow[]
+}
+
+/** cc-switch env 块里承载模型候选的键，按回退顺序排列。 */
+export const MODEL_ENV_KEYS = ['ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL'] as const
+
+/**
+ * route id = name slug 化：非 `[a-z0-9-]` 字符折叠为 `-`、小写、去首尾 `-`。
+ * 折叠连续非法字符为一个 `-`（`bigmodel.cn` → `bigmodel-cn`）。全非法名折叠
+ * 为空串，由调用方按不可导入处理。
+ */
+export function slugifyRouteId(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+/**
+ * route id 与既有 providers 键冲突时追加数字后缀：`-2`、`-3`… 递增。
+ * @param id 期望的 route id。
+ * @param existingKeys 既有 providers 键集（只读；本函数不改写它）。
+ */
+export function resolveRouteIdConflict(id: string, existingKeys: ReadonlySet<string>): string {
+  if (!existingKeys.has(id)) return id
+  for (let n = 2; ; n += 1) {
+    const candidate = `${id}-${n}`
+    if (!existingKeys.has(candidate)) return candidate
+  }
+}
+
+/**
+ * 与 dsh 官方「自定义模型 API」表单同款的凭据引用派生：
+ * `<ROUTE>_API_KEY`，ROUTE 为 provider 大写、非 `[A-Z0-9]` 折叠为 `_`。
+ */
+export function deriveApiKeyEnv(routeId: string): string {
+  return `${routeId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`
+}
+
+/**
+ * `[1M]` 后缀拆分：`glm-5.3-flash[1M]` → `{ id: "glm-5.3-flash", contextWindow: 1000000 }`。
+ * 无后缀只给 id、不设 contextWindow；拆分适用于任何来源键的模型值。
+ * 空白与空 id 原样返回（由调用方按缺模型处理）。
+ */
+export function splitModelAlias(model: string): ModelRow {
+  const trimmed = model.trim()
+  const match = /^(.*\S)\s*\[1M\]$/.exec(trimmed)
+  if (match === null) return { id: trimmed }
+  return { id: (match[1] ?? '').trim(), contextWindow: 1_000_000 }
+}
+
+/** env 值判空：非字符串 / null / undefined / 纯空白都算缺失。 */
+function envValue(env: Readonly<Record<string, unknown>>, key: string): string | null {
+  const raw = env[key]
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+/**
+ * 候选模型解析链：`ANTHROPIC_MODEL` → `ANTHROPIC_DEFAULT_OPUS_MODEL` → null。
+ * 两键均缺失或为空才返回 null（调用方标 `missing_model`）。
+ */
+export function resolveCandidateModel(env: Readonly<Record<string, unknown>>): string | null {
+  for (const key of MODEL_ENV_KEYS) {
+    const value = envValue(env, key)
+    if (value !== null) return value
+  }
+  return null
+}
+
+/**
+ * 由候选构造 dsh pi-ai provider profile。
+ *
+ * - `api` 恒 `anthropic-messages`（cc-switch claude 行全部是 Anthropic 兼容端点）。
+ * - `apiKeyEnv` 由 route id 派生 `<ROUTE>_API_KEY`，patch 配置零明文。
+ * - 模型行经 `splitModelAlias` 拆分 `[1M]` 后缀。
+ * - `displayName` 携带规则：仅当 slug 与原始名不一致时携带（slug 已同名时
+ *   省略，route 键本身就是显示名）。
+ */
+export function buildProviderProfile(routeId: string, candidate: ScanCandidate): ProviderProfile {
+  if (candidate.baseURL === null) {
+    throw new TypeError(`buildProviderProfile: candidate "${candidate.name}" has no baseURL`)
+  }
+  const model = candidate.model
+  const models: ModelRow[] =
+    model === null
+      ? []
+      : [splitModelAlias(model)]
+  const profile: {
+    displayName?: string
+    apiKeyEnv: string
+    api: 'anthropic-messages'
+    baseURL: string
+    models: readonly ModelRow[]
+  } = {
+    apiKeyEnv: deriveApiKeyEnv(routeId),
+    api: 'anthropic-messages',
+    baseURL: candidate.baseURL,
+    models,
+  }
+  if (candidate.name !== routeId) profile.displayName = candidate.name
+  return profile
+}
