@@ -38,6 +38,7 @@ Host 半路由 handler：`<prefix>/X` → `upstream/X`，透传方法/查询串/
 - 不设请求超时（SSE 长连接）；上游 `error`（ECONNREFUSED 等）→ 502 提示页；
 - 请求头白名单透传（`content-type`、`accept`、`if-none-match` 等逐项拷贝；剥离 `host` 改写为上游 authority，追加 `x-forwarded-proto/path` 便于排查）；
 - 响应头原样拷贝（含 `cache-control`/`etag`/`content-type`），剥离 `content-length` 与 `transfer-encoding` 交由 node 按实际流重算，避免流式改道后长度不符。
+- 客户端断开（响应流关闭/出错）时终止上游 request——面板重挂语义反复开关 SSE，不终止则在上游侧累积泄漏连接（上游 dashboard 有常驻 SSE 连接数上限，见 fenixd `tests/test_dashboard_connection_limit.py`），退化后续自动刷新。
 
 ### D6. 项目列表同步 = 60s 轮询 + window focus
 不订阅 dashboard SSE 拿项目表（避免常驻第二长连接 + 解析负担）；60s 窗口对「侧栏多/少一个项目行」的时效足够。幂等策略：以 `name` 有序数组为指纹，指纹不变 → 零操作。

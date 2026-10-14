@@ -16,7 +16,7 @@
 - **THEN** 该请求由 dsh web 既有路由处理，与未安装本插件时行为一致
 
 ### Requirement: SSE 流式透传不缓冲
-反代 SHALL 对 `Content-Type: text/event-stream` 的上游响应逐块透传：上游每产出一个事件块，浏览器端 MUST 能在该块产出后即时读到，MUST NOT 缓冲到连接结束才发送；连接保持打开直到任一端断开。反代 MUST NOT 对 SSE 响应施加压缩或内容改写。
+反代 SHALL 对 `Content-Type: text/event-stream` 的上游响应逐块透传：上游每产出一个事件块，浏览器端 MUST 能在该块产出后即时读到，MUST NOT 缓冲到连接结束才发送；连接保持打开直到任一端断开。反代 MUST NOT 对 SSE 响应施加压缩或内容改写。浏览器端断开时（如面板切换使 iframe 卸载、页面关闭），反代 MUST 终止对应的上游请求——上游 dashboard 有常驻 SSE 连接数上限，MUST NOT 因面板反复切换在上游侧累积泄漏连接。
 
 #### Scenario: SSE 事件实时到达
 - **WHEN** 上游 `/api/stream` 在 2s 间隔下持续产出事件，浏览器经 `EventSource('/fenix-dashboard/api/stream')` 订阅
@@ -25,6 +25,10 @@
 #### Scenario: 长连接不超时
 - **WHEN** 一条 SSE 连接保持打开超过 5 分钟且持续有事件
 - **THEN** 反代不主动断开、不重置该连接
+
+#### Scenario: 客户端断开回收上游连接
+- **WHEN** 浏览器端一条 SSE 连接断开（如切走面板使 iframe 卸载）
+- **THEN** 反代终止对应的上游请求，上游侧连接数随关闭回落，不随面板切换次数累积
 
 ### Requirement: HTTP 方法与请求体透传
 反代 SHALL 透传 GET/POST/PUT/DELETE/HEAD 方法及请求体、查询串；POST 触发类端点（审查/修复/回归触发）经反代调用时 MUST 与直连上游行为一致。
@@ -85,7 +89,7 @@ Client 半 SHALL 以 60s 周期与 window focus 两个时机重拉项目列表�
 - **THEN** 不发生条目重注册（侧栏无闪烁），插槽内无重复 id
 
 ### Requirement: iframe src 契约
-所有面板的 iframe src SHALL 恒为 `<prefix>/?embed=1&apiBase=<prefix>#<hash-route>` 形态：`embed=1` 与 `apiBase=<prefix>` 两个查询参数位于 hash 之前，hash 路由段与条目深链一致。prefix 取宿主半生效的 prefix 配置。
+所有面板的 iframe src SHALL 恒为 `<prefix>/?embed=1&apiBase=<prefix>#<hash-route>` 形态：`embed=1` 与 `apiBase=<prefix>` 两个查询参数位于 hash 之前，hash 路由段与条目深链一致。prefix 取宿主半生效的 prefix 配置；其中 URL 路径前缀保留尾斜杠（`<prefix>/?...`），`apiBase` 取同一 prefix **去除尾斜杠**后的形态（默认前缀下为 `/fenix-dashboard`），使上游以 `apiBase + '/api/...'` 直拼不产生双斜杠。
 
 #### Scenario: src 形态
 - **WHEN** 用户点击「项目」条目（默认前缀下）

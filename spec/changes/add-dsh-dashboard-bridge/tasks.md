@@ -33,13 +33,13 @@
 ## 1. 包骨架与构建链
 
 - [ ] 1.1 创建 `fenix-dsh-dashboard-bridge/` 包骨架：`package.json`（name `fenix-dsh-dashboard-bridge`，`dsh.client: { platform: 'web', inject: ['@deepseek-ai/dsh-client-ui-layout', '@deepseek-ai/dsh-client-ui-sidebar'] }`，exports `.`/`./client`/`./package.json`，peerDependencies 对齐 cc-import 形态）+ `tsconfig.json` + `tsdown.config.ts`（双入口 `src/host/index.ts`→`lib/index.js`、`src/client/index.ts`→`lib/client.js`）+ `vitest.config.ts`（dsh 包以 alias 桩解耦，先例 cc-import）+ `pnpm-workspace.yaml`，`pnpm install` 产出 `pnpm-lock.yaml`
-- [ ] 1.2 建立 `src/shared/config.ts`：`upstream`（默认 `http://127.0.0.1:8787`）与 `prefix`（默认 `/fenix-dashboard/`）常量与类型、loader 行 config 覆盖入口、`buildPanelSrc(prefix, hashRoute)` 拼装函数（产出 `<prefix>/?embed=1&apiBase=<prefix>#<route>`，含前缀斜杠归一）
+- [ ] 1.2 建立 `src/shared/config.ts`：`upstream`（默认 `http://127.0.0.1:8787`）与 `prefix`（默认 `/fenix-dashboard/`）常量与类型、loader 行 config 覆盖入口、`buildPanelSrc(prefix, hashRoute)` 拼装函数（产出 `<prefix>/?embed=1&apiBase=<prefix>#<route>`；前缀斜杠归一方向钉死：URL 路径前缀保留尾斜杠、`apiBase` 取去尾斜杠形态，与 specs 契约 Scenario 示例一致，上游直拼 `apiBase + '/api/...'` 不产生双斜杠）
 
 ## 2. Host 半反代路由
 
 - [ ] 2.1 `src/host/index.ts`：默认导出 cordis 插件类（对齐 cc-import 先例），apply 时解析配置并向 WebServer 服务注册 prefix 路由（`@deepseek-ai/dsh-host-webserver` 契约），插件卸载时经 register 返回的 disposer 注销
-- [ ] 2.2 `src/host/proxy.ts`：前缀剥离转发 handler——方法/查询串/请求体透传、请求头白名单拷贝（`host` 改写为上游 authority，追加 `x-forwarded-proto/path`）、响应状态/头原样回写（剥离 `content-length`/`transfer-encoding`）、上游数据流逐块 pipe 不聚合、无请求超时
-- [ ] 2.3 上游连接失败（ECONNREFUSED/超时/DNS）返回 502 与可读 HTML 提示页（含「Fenix Dashboard 未启动」字样与启动指引），异常不外溢、不影响前缀外路由
+- [ ] 2.2 `src/host/proxy.ts`：前缀剥离转发 handler——方法/查询串/请求体透传、请求头白名单拷贝（`host` 改写为上游 authority，追加 `x-forwarded-proto/path`）、响应状态/头原样回写（剥离 `content-length`/`transfer-encoding`）、上游数据流逐块 pipe 不聚合、无请求超时；客户端断开（响应流关闭）时终止对应上游请求——面板重挂反复开关 SSE，MUST NOT 在上游侧累积泄漏连接（上游有常驻连接数上限）
+- [ ] 2.3 上游连接失败（ECONNREFUSED/超时/DNS）返回 502 与可读 HTML 提示页（含「Fenix Dashboard 未启动」字样与启动指引），异常不外溢、不影响前缀外路由，并输出含 upstream 地址与错误原因的错误日志（远程侧只见 502 页，本机日志是定位 upstream 未启动/配置错误的唯一抓手）
 
 ## 3. Host 半单测（vitest + node:http mock 上游，tests/proxy.test.ts）
 
@@ -63,4 +63,4 @@
 
 - [ ] 6.1 `pnpm build` 产出 `lib/index.js` 与 `lib/client.js`，`tsc --noEmit` 与 `vitest run` 全绿
 - [ ] 6.2 `README.zh.md`：组件说明、配置键（upstream/prefix）、iframe src 契约、dsh 版本兼容表（唯一钉 0.2.0-rc.2，升级须同步重测）
-- [ ] 6.3 `docs/help/fenix-dashboard-bridge-install.md`：人工安装步骤（workspace 注册 + loader 行示例 + `pnpm install` + 重启 dsh web）与真机验收清单——侧栏 5 固定条目可见、项目条目与 `/fenix-dashboard/api/projects` 一致、点击切换主面板且深链正确、SSE 自动刷新在面板内工作（数字滚动无需手动刷新）、上游停机 502 提示页、移除项目后条目 ≤60s 消失；标注前置依赖：fenixd 仓库 `add-dashboard-embed-mode` 已合并（embed/apiBase 两参数生效）时面板内容完整可用，未合并时面板可打开但 API 断（属预期）
+- [ ] 6.3 `docs/help/fenix-dashboard-bridge-install.md`：人工安装步骤（workspace 注册 + loader 行示例 + `pnpm install` + 重启 dsh web）与真机验收清单——侧栏 5 固定条目可见、项目条目与 `/fenix-dashboard/api/projects` 一致、点击切换主面板且深链正确、SSE 自动刷新在面板内工作（数字滚动无需手动刷新）、连续切换面板多轮后 SSE 自动刷新仍正常（上游连接无泄漏退化）、上游停机 502 提示页、移除项目后条目 ≤60s 消失；标注前置依赖：fenixd 仓库 `add-dashboard-embed-mode` 已合并（embed/apiBase 两参数生效）时面板内容完整可用，未合并时面板可打开但 API 断（属预期）
