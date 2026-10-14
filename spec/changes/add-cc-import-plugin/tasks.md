@@ -43,8 +43,8 @@
 
 ## 1. 包骨架与构建链
 
-- [ ] 1.1 创建 `cc-import/package.json`：name `cc-import`、type module、devDependencies（typescript、tsdown、vitest、@types/react、react——版本对齐 dsh 0.2.0-rc.2 发行包所用基线）、`exports` 含 `.` 与 `./client`、`dsh: { client: { platform: "web", inject: [] } }` 起步骨架
-- [ ] 1.2 创建 `cc-import/tsconfig.json`、`cc-import/tsdown.config.ts`（双入口 `src/host/index.ts` → `lib/index.js`、`src/client/index.tsx` → `lib/client.js`）、`cc-import/vitest.config.ts`；`pnpm install` 成功（`cc-import/pnpm-lock.yaml` 落库）且 `pnpm build` 产出两个入口
+- [ ] 1.1 创建 `cc-import/package.json`：name `cc-import`、type module、devDependencies（typescript、tsdown、vitest、@types/react、react——版本对齐 dsh 0.2.0-rc.2 发行包所用基线）、`exports` 含 `.` 与 `./client`、`dsh: { client: { platform: "web", inject: [] } }` 起步骨架（`inject` 起步为空，但实现 4.x 时 MUST 回补 client 半实际消费的 client 模块——至少 slots / locale / api-remotes 所属模块，形态对齐先例 `@deepseek-ai/dsh-client-ui-settings-general` 的 `dsh.client.inject` 清单）
+- [ ] 1.2 创建 `cc-import/tsconfig.json`、`cc-import/tsdown.config.ts`（双入口 `src/host/index.ts` → `lib/index.js`、`src/client/index.ts`（`dialog.tsx` 由 entry 引入）→ `lib/client.js`）、`cc-import/vitest.config.ts`；`pnpm install` 成功（`cc-import/pnpm-lock.yaml` 落库）且 `pnpm build` 产出两个入口
 - [ ] 1.3 `.gitignore` 追加 `node_modules/`、`lib/`、`*.tsbuildinfo` 规则
 
 ## 2. Host 半：cc-switch 扫描
@@ -54,7 +54,7 @@
 
 ## 3. 共享映射纯函数层
 
-- [ ] 3.1 `cc-import/src/shared/mapping.ts`：实现 `slugifyRouteId(name)`、`resolveRouteIdConflict(id, existingKeys)`（`-2`/`-3` 递增）、`splitModelAlias(model)`（`[1M]` 后缀 → `{id, contextWindow: 1000000}`，无后缀不含 contextWindow）、`buildProviderProfile(candidate)`（`{displayName?, apiKeyEnv, api:"anthropic-messages", baseURL, models:[...]}`，`apiKeyEnv` 派生 `<ROUTE>_API_KEY`）；全部为无副作用纯函数
+- [ ] 3.1 `cc-import/src/shared/mapping.ts`：实现 `slugifyRouteId(name)`、`resolveRouteIdConflict(id, existingKeys)`（`-2`/`-3` 递增）、`splitModelAlias(model)`（`[1M]` 后缀 → `{id, contextWindow: 1000000}`，无后缀不含 contextWindow，拆分适用于任何来源键的模型值）、`resolveCandidateModel(env)`（`ANTHROPIC_MODEL` 缺失回退 `ANTHROPIC_DEFAULT_OPUS_MODEL`，均空返回 null）、`buildProviderProfile(candidate)`（`{displayName?, apiKeyEnv, api:"anthropic-messages", baseURL, models:[...]}`，`apiKeyEnv` 派生 `<ROUTE>_API_KEY`）；全部为无副作用纯函数
 
 ## 4. Client 半：注入与导入
 
@@ -66,10 +66,10 @@
 
 - [ ] 5.1 `cc-import/tests/cc-switch-fixture.ts`：测试内用 `node:sqlite` 在临时路径生成含 claude/codex/gemini 混合行、缺字段行、`[1M]` 模型行的 fixture db（不提交二进制 db）
 - [ ] 5.2 `cc-import/tests/host-scan.test.ts`：覆盖 spec 四个扫描 Scenario（只返回 claude 行、字段完整且无 token 明文、跳过标注、db 异常结构化错误）
-- [ ] 5.3 `cc-import/tests/mapping.test.ts`：覆盖 `[1M]` 拆分、无后缀不设 contextWindow、id 冲突 `-2` 递增、缺失模型标 `missing_model`、profile 形态与 apiKeyEnv 派生
+- [ ] 5.3 `cc-import/tests/mapping.test.ts`：覆盖 `[1M]` 拆分、无后缀不设 contextWindow、id 冲突 `-2` 递增、模型回退链（`ANTHROPIC_MODEL` 缺失回退 `ANTHROPIC_DEFAULT_OPUS_MODEL`、均空标 `missing_model`）、profile 形态与 apiKeyEnv 派生
 - [ ] 5.4 `cc-import/tests/importer.test.ts`：覆盖写入计划构造（set-only、勾选集之外零 ops、已存在判定、displayName 携带规则）；`pnpm test` 全绿
 
 ## 6. 文档与安装交付
 
 - [ ] 6.1 `cc-import/README.zh.md`：插件用途、映射规则表、构建与测试命令
-- [ ] 6.2 `docs/help/cc-import-install.md`：人工安装步骤（源码注册进 `/root/.dsh/profiles/web/` pnpm workspace → `cordis.patch.yml` 加 loader 条目 → 重启 `dsh web`）与真机验收清单（按钮可见 → 对话框候选与 cc-switch 一致 → 导出 2 个 provider → Models 页出现新行且密钥状态点绿色 → 既有 provider 未受影响），文末「人工步骤」小节明确这些动作不由实现 Agent 执行
+- [ ] 6.2 `docs/help/cc-import-install.md`：人工安装步骤（源码注册进 `/root/.dsh/profiles/web/` pnpm workspace → `cordis.patch.yml` 加 loader 条目 → 重启 `dsh web`）与真机验收清单（按钮可见 → 对话框候选与 cc-switch 一致 → 导出全部可导入候选（评审时实测 cc-switch 数据为 10 个：含 OpenCodeGo / bytedance-volces / bigmodel.cn 等，唯一跳过为缺 AUTH_TOKEN 的 OAuth 型「Claude Official」）→ Models 页出现新行且密钥状态点绿色 → 既有 provider 未受影响），文末「人工步骤」小节明确这些动作不由实现 Agent 执行

@@ -7,7 +7,7 @@ dsh web 的 Models 设置页要求手工逐个录入 provider（Provider ID / ba
 - 新增 dsh 插件包 `cc-import`（本仓库首个插件，双半结构）：
   - Host 半：注册只读 Remote namespace `ccimport`，`scan` 方法用 `node:sqlite` 读 cc-switch.db 的 `providers` 表（`app_type='claude'`），解析 `settings_config` env 块返回候选列表；不做任何写入。
   - Client 半：经 `slots.inject("settings.models.footer", ...)` 在 Models 页注入「从 Claude Code 导入」按钮；对话框展示候选（勾选 / 已存在 / 跳过原因），确认后走官方写入路径 `writeSettings(pi-ai ns, [{op:"set", path:["providers",<id>], value:profile}], rev)` + `storeCredential(ref, key)`。
-- 映射规则：route id 由 name slug 化（冲突加 `-2` 后缀）；`ANTHROPIC_BASE_URL` → `baseURL`；`ANTHROPIC_AUTH_TOKEN` → 只写凭据 `<ROUTE>_API_KEY`（patch 配置不落明文）；`ANTHROPIC_MODEL` → `models[0]`，`[1M]` 后缀拆出 `contextWindow: 1000000` 并从 id 剥离；协议恒 `anthropic-messages`。
+- 映射规则：route id 由 name slug 化（冲突加 `-2` 后缀）；`ANTHROPIC_BASE_URL` → `baseURL`；`ANTHROPIC_AUTH_TOKEN` → 只写凭据 `<ROUTE>_API_KEY`（patch 配置不落明文）；候选模型取 `ANTHROPIC_MODEL`，缺失回退 `ANTHROPIC_DEFAULT_OPUS_MODEL`（实测 9/11 行无前者而后者在册）→ `models[0]`，`[1M]` 后缀拆出 `contextWindow: 1000000` 并从 id 剥离；协议恒 `anthropic-messages`。
 - 跳过规则：无 baseURL 或无 AUTH_TOKEN 的候选（如 OAuth 型 Claude Official）标注原因，不导入。
 - 幂等与只加不删：已存在的 route 默认不勾选并标「已存在」；导入是纯 `set` 追加，任何路径不 unset 既有 provider。
 - 安装文档：人工安装步骤（pnpm 注册进 `/root/.dsh/profiles/web/` workspace + `cordis.patch.yml` loader 条目 + 重启 `dsh web`）落 `docs/help/`；真实 dsh web 的端到端人工验收步骤同文档。

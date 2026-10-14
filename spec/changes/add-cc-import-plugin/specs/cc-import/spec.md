@@ -12,7 +12,7 @@
 #### Scenario: 候选字段完整
 
 - **WHEN** 某行 `settings_config.env` 同时含 `ANTHROPIC_BASE_URL` 与 `ANTHROPIC_AUTH_TOKEN`
-- **THEN** 该候选含 `name`、`baseURL`、`model`（`ANTHROPIC_MODEL`，可为 null）与 `hasToken: true`，且响应中 SHALL NOT 含 token 明文（只报存在性）
+- **THEN** 该候选含 `name`、`baseURL`、`model`（`ANTHROPIC_MODEL`，缺失回退 `ANTHROPIC_DEFAULT_OPUS_MODEL`，可为 null）与 `hasToken: true`，且响应中 SHALL NOT 含 token 明文（只报存在性）
 
 #### Scenario: 不完整候选标跳过
 
@@ -26,12 +26,17 @@
 
 ### Requirement: 映射规则
 
-client 由候选构造 dsh pi-ai provider profile 时 SHALL 遵循：route id = name slug 化（非 `[a-z0-9-]` 字符折叠为 `-`、小写、去首尾 `-`）；id 与既有 providers 键冲突时追加数字后缀（`-2`、`-3`…）；profile 形态 `{ displayName?, apiKeyEnv, api: "anthropic-messages", baseURL, models: [...] }`；协议恒 `anthropic-messages`。
+client 由候选构造 dsh pi-ai provider profile 时 SHALL 遵循：route id = name slug 化（非 `[a-z0-9-]` 字符折叠为 `-`、小写、去首尾 `-`）；id 与既有 providers 键冲突时追加数字后缀（`-2`、`-3`…）；profile 形态 `{ displayName?, apiKeyEnv, api: "anthropic-messages", baseURL, models: [...] }`；候选模型 SHALL 取 `env.ANTHROPIC_MODEL`，缺失时回退 `env.ANTHROPIC_DEFAULT_OPUS_MODEL`，两者均空才标 `missing_model`；`[1M]` 后缀拆分 SHALL 适用于任何来源键的模型值；协议恒 `anthropic-messages`。
 
 #### Scenario: `[1M]` 别名拆分
 
 - **WHEN** 候选 model 为 `glm-5.3-flash[1M]`
 - **THEN** 生成模型行 `{ id: "glm-5.3-flash", contextWindow: 1000000 }`，id 不含 `[1M]` 后缀
+
+#### Scenario: 模型键回退
+
+- **WHEN** 候选 `env` 无 `ANTHROPIC_MODEL` 但 `ANTHROPIC_DEFAULT_OPUS_MODEL` 为 `glm-5.3-flash[1M]`
+- **THEN** 生成模型行 `{ id: "glm-5.3-flash", contextWindow: 1000000 }`，候选不标 `missing_model`
 
 #### Scenario: 普通模型不设上下文窗
 
@@ -45,7 +50,7 @@ client 由候选构造 dsh pi-ai provider profile 时 SHALL 遵循：route id = 
 
 #### Scenario: 空模型保底
 
-- **WHEN** 候选 `ANTHROPIC_MODEL` 为 null 或空
+- **WHEN** 候选 `ANTHROPIC_MODEL` 与 `ANTHROPIC_DEFAULT_OPUS_MODEL` 均为 null 或空
 - **THEN** 生成占位模型行（id 为空串的候选行不得写入——该候选标 `importable: false`，原因 `missing_model`）
 
 ### Requirement: Models 页导入入口
