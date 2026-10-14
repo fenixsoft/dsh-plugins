@@ -136,6 +136,8 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
   const [rows, setRows] = useState<readonly RowState[]>([])
   const [outcome, setOutcome] = useState<ImportOutcome | null>(null)
   const [busy, setBusy] = useState(false)
+  /** busy 的来源：false=加载快照，true=执行导入（busy 文案随此区分）。 */
+  const [importing, setImporting] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
 
   useEffect(() => {
@@ -144,25 +146,34 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
       setRows([])
       setOutcome(null)
       setBusy(false)
+      setImporting(false)
       setReloadToken(0)
       return
     }
     let cancelled = false
     setBusy(true)
-    void loadSnapshot().then((loaded) => {
-      if (cancelled) return
-      setSnapshot(loaded)
-      setOutcome(null)
-      setBusy(false)
-      if (loaded.ok) {
-        setRows(
-          loaded.candidates.map((candidate) => {
-            const state = rowState(candidate, new Set(Object.keys(loaded.existing)))
-            return { candidate, existed: state.existed, checked: state.defaultChecked, update: false }
-          }),
-        )
-      }
-    })
+    void loadSnapshot()
+      .then((loaded) => {
+        if (cancelled) return
+        setSnapshot(loaded)
+        setOutcome(null)
+        setBusy(false)
+        if (loaded.ok) {
+          const existingNames = new Set(Object.keys(loaded.existing))
+          setRows(
+            loaded.candidates.map((candidate) => {
+              const state = rowState(candidate, existingNames)
+              return { candidate, existed: state.existed, checked: state.defaultChecked, update: false }
+            }),
+          )
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setSnapshot({ ok: false, message: error instanceof Error ? error.message : String(error) })
+        setOutcome(null)
+        setBusy(false)
+      })
     return () => {
       cancelled = true
     }
@@ -200,11 +211,13 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
   const confirm = (): void => {
     if (preview === null || preview.planned.length === 0) return
     setBusy(true)
+    setImporting(true)
     setOutcome(null)
     void runImport(preview)
       .then((result) => {
         setOutcome(result)
         setBusy(false)
+        setImporting(false)
       })
       .catch((error: unknown) => {
         setOutcome({
@@ -217,6 +230,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
           ],
         })
         setBusy(false)
+        setImporting(false)
       })
   }
 
@@ -236,7 +250,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
       closeLabel={t('dialog.close')}
       description={t('dialog.description')}
     >
-      {busy && outcome === null ? <p>{t('dialog.loading')}</p> : null}
+      {busy && outcome === null ? <p>{importing ? t('import.running') : t('dialog.loading')}</p> : null}
       {errorText !== null ? <p role="alert">{errorText}</p> : null}
       {snapshot?.ok === true && rows.length > 0 ? (
         <div style={listStyle} role="list">
@@ -269,6 +283,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
         <Button
           variant="outline"
           size="sm"
+          disabled={busy}
           onClick={() => {
             setRows((current) => current.map((row) => {
               if (!row.candidate.importable || row.existed) return row
