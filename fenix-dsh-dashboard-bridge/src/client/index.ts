@@ -59,16 +59,26 @@ export interface ClientPluginOptions extends BridgeConfigInput {
   readonly timer?: SyncTimer
 }
 
-/** 默认项目列表拉取：GET `<prefix>api/projects` → parseProjectNames。 */
+/** 默认项目列表拉取超时（毫秒）：悬挂请求超时后 abort，不让同步循环永久停摆。 */
+const FETCH_PROJECTS_TIMEOUT_MS = 10_000
+
+/** 默认项目列表拉取：GET `<prefix>api/projects` → parseProjectNames（10s 超时）。 */
 export function defaultFetchProjects(prefix: string): ProjectListFetcher {
   return async () => {
-    const response = await fetch(`${prefix}api/projects`, {
-      headers: { accept: 'application/json' },
-    })
-    if (!response.ok) {
-      throw new Error(`fenix-dsh-dashboard-bridge: 拉取项目列表失败 HTTP ${response.status}`)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), FETCH_PROJECTS_TIMEOUT_MS)
+    try {
+      const response = await fetch(`${prefix}api/projects`, {
+        headers: { accept: 'application/json' },
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        throw new Error(`fenix-dsh-dashboard-bridge: 拉取项目列表失败 HTTP ${response.status}`)
+      }
+      return parseProjectNames(await response.json())
+    } finally {
+      clearTimeout(timeout)
     }
-    return parseProjectNames(await response.json())
   }
 }
 
@@ -77,6 +87,8 @@ export function projectEntrySink(ctx: Context, prefix: string): ProjectEntrySink
   const disposers = new Map<string, () => void>()
   return {
     addProject({ name, order }) {
+      // 防御自守：重名重复 add 先注销旧注册，避免旧 disposer 被覆盖后无法注销（泄漏）。
+      disposers.get(name)?.()
       const id = projectIdFor(name)
       const src = buildPanelSrc(prefix, projectRouteFor(name))
       const disposeEntry = ctx.slots.register(

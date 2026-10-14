@@ -16,7 +16,7 @@ export const localeBundles: LocaleBundles = {
     'dialog.description':
       '候选来自 cc-switch（~/.cc-switch/cc-switch.db）的 claude 形态 provider；导入经 dsh 官方写入路径，只加不删，密钥只进凭据库。',
     'dialog.refresh': '重新扫描',
-    'dialog.selectAll': '全选可导入',
+    'dialog.selectAll': '全选新增',
     'dialog.import': '导入所选（{count}）',
     'dialog.close': '关闭',
     'dialog.loading': '正在扫描 cc-switch…',
@@ -32,11 +32,9 @@ export const localeBundles: LocaleBundles = {
     'model.contextWindow': '1M 上下文',
     'scan.empty': 'cc-switch 没有可导入的 claude provider',
     'scan.failed': '扫描失败：{message}',
-    'load.failed': '读取 dsh providers 失败：{message}',
     'import.running': '正在导入…',
     'import.done': '成功导入 {count} 个',
     'import.failures': '失败 {count} 个：',
-    'import.conflictRetry': '写入冲突，已重读快照重试',
   },
   'en': {
     'action.import': 'Import from Claude Code',
@@ -44,7 +42,7 @@ export const localeBundles: LocaleBundles = {
     'dialog.description':
       'Candidates come from the claude-shaped providers managed by cc-switch (~/.cc-switch/cc-switch.db). Imports go through the official dsh write path, append-only; keys live only in the credential store.',
     'dialog.refresh': 'Rescan',
-    'dialog.selectAll': 'Select importable',
+    'dialog.selectAll': 'Select new',
     'dialog.import': 'Import selected ({count})',
     'dialog.close': 'Close',
     'dialog.loading': 'Scanning cc-switch…',
@@ -60,10 +58,8 @@ export const localeBundles: LocaleBundles = {
     'model.contextWindow': '1M context',
     'scan.empty': 'No importable claude provider in cc-switch',
     'scan.failed': 'Scan failed: {message}',
-    'load.failed': 'Failed to read dsh providers: {message}',
     'import.running': 'Importing…',
     'import.done': 'Imported {count}',
     'import.failures': '{count} failed:',
-    'import.conflictRetry': 'Write conflict; snapshot re-read and retried',
   },
 }

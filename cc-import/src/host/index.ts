@@ -14,7 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { RemoteMethodDecoratorContext } from '@deepseek-ai/dsh-typert-protocol'
 import type { ScanResponse } from '../shared/mapping.js'
-import { defaultDbPath, lookupCcSwitchToken, scanCcSwitch } from './scan.js'
+import { defaultDbPath, readCcSwitchToken, scanCcSwitch } from './scan.js'
 
 /** revealToken 的结构化应答。 */
 export type TokenResponse =
@@ -50,24 +50,13 @@ export class CcimportController extends TypertRemoteService {
 
   /**
    * 按候选名读取 AUTH_TOKEN 明文；仅导入确认后由 client 调用。
-   * scan 已确认 `hasToken` 的候选若在此刻读取失败（db 被并发修改），按结构化
-   * 错误返回，client 将其计入该候选的失败明细，不阻断批次。
+   * 单次开库按 name 定点查行并就地完成 hasToken 语义校验，不依赖 scanCcSwitch
+   * 的整体成败（无关候选的坏行不再连带挡住本候选）；行缺失 / token 未配置 /
+   * 行配置在导入时被并发修改，都按结构化错误返回，client 将其计入该候选的
+   * 失败明细，不阻断批次。
    */
   async revealToken(providerName: string): Promise<TokenResponse> {
-    const scanned = scanCcSwitch(defaultDbPath())
-    if (!scanned.ok) return scanned
-    const candidate = scanned.candidates.find((entry) => entry.name === providerName)
-    if (candidate === undefined) {
-      return { ok: false, code: 'candidate_missing', message: `cc-switch 中不存在名为 "${providerName}" 的 claude 候选` }
-    }
-    if (!candidate.hasToken) {
-      return { ok: false, code: 'missing_token', message: `候选 "${providerName}" 未配置 ANTHROPIC_AUTH_TOKEN，无法导入` }
-    }
-    const token = lookupCcSwitchToken(defaultDbPath(), providerName)
-    if (token === null) {
-      return { ok: false, code: 'token_unreadable', message: `候选 "${providerName}" 的 AUTH_TOKEN 在导入时已不可读` }
-    }
-    return { ok: true, token }
+    return readCcSwitchToken(defaultDbPath(), providerName)
   }
 }
 

@@ -11,7 +11,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { resolveCandidateModel } from '../shared/mapping.js'
-import type { ScanCandidate, ScanResponse } from '../shared/mapping.js'
+import type { ScanCandidate, ScanResponse, ScanSkippedRow } from '../shared/mapping.js'
 
 /** 默认 cc-switch 数据库路径（可被 CC_IMPORT_CC_SWITCH_DB 覆盖，测试注入用）。 */
 export function defaultDbPath(): string {
@@ -40,8 +40,9 @@ interface ProviderRow {
  * 扫描 cc-switch.db 的 claude 形态 provider。
  * @param dbPath 数据库路径；缺省 `~/.cc-switch/cc-switch.db`。
  * @returns 成功给候选数组；db 缺失（`db_missing`）、无法打开（`db_unreadable`）、
- * 缺表/缺列（`db_schema`）、行内 `settings_config` 坏 JSON（`bad_settings_config`）
- * 一律给结构化错误。
+ * 缺表/缺列（`db_schema`）一律给结构化错误。单行损坏不整体失败：缺 name 的行
+ * 以 `bad_provider_row`、行内 `settings_config` 坏 JSON/非对象/缺 env 块以
+ * `bad_settings_config` 逐行记入 `skippedRows` 并跳过，其余候选照常产出。
  */
 export function scanCcSwitch(dbPath: string = defaultDbPath()): ScanResponse {
   if (!existsSync(dbPath)) {
@@ -76,12 +77,24 @@ export function scanCcSwitch(dbPath: string = defaultDbPath()): ScanResponse {
       return { ok: false, code: 'db_schema', message: `cc-switch providers 表不可读：${messageOf(error)}` }
     }
     const candidates: ScanCandidate[] = []
+    const skippedRows: ScanSkippedRow[] = []
     for (const row of rows) {
       if (typeof row.name !== 'string' || row.name.length === 0) {
-        return { ok: false, code: 'bad_settings_config', message: 'providers 表存在缺少 name 的 claude 行' }
+        // 缺 name 的行走独立错误码 bad_provider_row（与 bad_settings_config 的
+        // 「settings_config 坏 JSON」语义区分），单行降级为跳过。
+        skippedRows.push({
+          name: null,
+          code: 'bad_provider_row',
+          message: 'providers 表存在缺少 name 的 claude 行，已跳过（请在 cc-switch 中修复该行）',
+        })
+        continue
       }
       const parsed = parseEnvBlock(row.name, row.settings_config)
-      if (!parsed.ok) return parsed
+      if (!parsed.ok) {
+        // 单行 settings_config 损坏只跳过该行并记明细，不阻塞其他候选的导入。
+        skippedRows.push({ name: row.name, code: parsed.code, message: parsed.message })
+        continue
+      }
       const env = parsed.env
       const baseURL = envValue(env, 'ANTHROPIC_BASE_URL')
       const hasToken = envValue(env, 'ANTHROPIC_AUTH_TOKEN') !== null
@@ -97,44 +110,64 @@ export function scanCcSwitch(dbPath: string = defaultDbPath()): ScanResponse {
         ...(skipReason === undefined ? {} : { skipReason }),
       })
     }
-    return { ok: true, candidates }
+    return skippedRows.length > 0 ? { ok: true, candidates, skippedRows } : { ok: true, candidates }
   } finally {
     db.close()
   }
 }
 
+/** `readCcSwitchToken` 的结构化结果（code 面对齐 revealToken 的结构化错误）。 */
+export type TokenLookup =
+  | { readonly ok: true; readonly token: string }
+  | {
+      readonly ok: false
+      readonly code: 'db_missing' | 'db_unreadable' | 'candidate_missing' | 'missing_token' | 'token_unreadable'
+      readonly message: string
+    }
+
 /**
- * 定点读取某一 claude 行的 `ANTHROPIC_AUTH_TOKEN` 明文。
- * 仅供 `revealToken` 在 scan 确认 `hasToken` 后调用；行缺失或 token 缺失返回
- * null（并发修改窗口由调用侧按单项失败处理）。
+ * 单次开库、按 name 定点读取某一 claude 行的 `ANTHROPIC_AUTH_TOKEN` 明文，
+ * 并就地完成 hasToken 语义校验（`revealToken` 因此不依赖 `scanCcSwitch` 的
+ * 整体成败，一次开库完成校验与读取）。
+ * 行缺失（`candidate_missing`）、token 未配置（`missing_token`）、行配置损坏
+ * 或并发修改（`token_unreadable`）、整库不可读（`db_missing` / `db_unreadable`）
+ * 都结构化返回，不抛未捕获异常。
  */
-export function lookupCcSwitchToken(dbPath: string, providerName: string): string | null {
-  if (!existsSync(dbPath)) return null
+export function readCcSwitchToken(dbPath: string, providerName: string): TokenLookup {
+  if (!existsSync(dbPath)) {
+    return { ok: false, code: 'db_missing', message: `cc-switch 数据库不存在：${dbPath}` }
+  }
   let db: DatabaseSync
   try {
     db = new DatabaseSync(dbPath, { readOnly: true })
-  } catch {
-    return null
+  } catch (error) {
+    return { ok: false, code: 'db_unreadable', message: `cc-switch 数据库无法打开：${messageOf(error)}` }
   }
   try {
     const row = db
       .prepare("SELECT settings_config FROM providers WHERE app_type = 'claude' AND name = ?")
       .get(providerName) as { readonly settings_config?: unknown } | undefined
-    if (row === undefined || typeof row.settings_config !== 'string') return null
-    const parsed: unknown = JSON.parse(row.settings_config)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    const env = (parsed as { readonly env?: unknown }).env
-    if (env === null || typeof env !== 'object' || Array.isArray(env)) return null
-    const token = (env as Readonly<Record<string, unknown>>)['ANTHROPIC_AUTH_TOKEN']
-    return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
+    if (row === undefined) {
+      return { ok: false, code: 'candidate_missing', message: `cc-switch 中不存在名为 "${providerName}" 的 claude 候选` }
+    }
+    const parsed = parseEnvBlock(providerName, row.settings_config)
+    if (!parsed.ok) {
+      return { ok: false, code: 'token_unreadable', message: `候选 "${providerName}" 的 AUTH_TOKEN 在导入时已不可读` }
+    }
+    const token = envValue(parsed.env, 'ANTHROPIC_AUTH_TOKEN')
+    if (token === null) {
+      return { ok: false, code: 'missing_token', message: `候选 "${providerName}" 未配置 ANTHROPIC_AUTH_TOKEN，无法导入` }
+    }
+    return { ok: true, token }
   } catch {
-    return null
+    return { ok: false, code: 'token_unreadable', message: `候选 "${providerName}" 的 AUTH_TOKEN 在导入时已不可读` }
   } finally {
     db.close()
   }
 }
 
-/** `settings_config` JSON → env 记录；坏 JSON / 非对象 / env 块缺失都走结构化错误。 */
+/** `settings_config` JSON → env 记录；坏 JSON / 非对象 / env 块缺失都以
+ * `bad_settings_config` 结构化返回，由调用方按单行跳过记入 skippedRows。 */
 function parseEnvBlock(
   providerName: string,
   settingsConfig: unknown,

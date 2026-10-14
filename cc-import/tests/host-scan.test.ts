@@ -110,6 +110,43 @@ describe('Scenario: 不完整候选标跳过', () => {
   })
 })
 
+describe('Scenario: 单行损坏降级为 skippedRows', () => {
+  it('settings_config 坏 JSON 行跳过并记 bad_settings_config，其余候选照常产出（不抛未捕获异常）', () => {
+    const dbPath = createFixtureDb([
+      { appType: 'claude', name: 'broken', settingsConfig: '{not json' },
+      { appType: 'claude', name: 'healthy', settingsConfig: claudeEnv() },
+    ])
+    try {
+      const result = scanCcSwitch(dbPath)
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.candidates.map((candidate) => candidate.name)).toEqual(['healthy'])
+      expect(result.skippedRows).toEqual([
+        { name: 'broken', code: 'bad_settings_config', message: expect.stringContaining('broken') },
+      ])
+    } finally {
+      removeFixtureDb(dbPath)
+    }
+  })
+
+  it('缺 name 行跳过并记独立错误码 bad_provider_row，不再复用 bad_settings_config', () => {
+    const dbPath = createFixtureDb([
+      { appType: 'claude', name: '', settingsConfig: claudeEnv() },
+    ])
+    try {
+      const result = scanCcSwitch(dbPath)
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.candidates).toEqual([])
+      expect(result.skippedRows).toEqual([
+        { name: null, code: 'bad_provider_row', message: expect.any(String) },
+      ])
+    } finally {
+      removeFixtureDb(dbPath)
+    }
+  })
+})
+
 describe('Scenario: db 异常结构化报错', () => {
   it('db 不存在 → db_missing', () => {
     const result = scanCcSwitch(tempPath('absent.db'))
@@ -131,18 +168,5 @@ describe('Scenario: db 异常结构化报错', () => {
     db.close()
     const result = scanCcSwitch(path)
     expect(result).toMatchObject({ ok: false, code: 'db_schema' })
-  })
-
-  it('settings_config 坏 JSON → bad_settings_config（不抛未捕获异常）', () => {
-    const dbPath = createFixtureDb([
-      { appType: 'claude', name: 'broken', settingsConfig: '{not json' },
-    ])
-    try {
-      const result = scanCcSwitch(dbPath)
-      expect(result).toMatchObject({ ok: false, code: 'bad_settings_config' })
-      expect((result as { message?: string }).message).toContain('broken')
-    } finally {
-      removeFixtureDb(dbPath)
-    }
   })
 })

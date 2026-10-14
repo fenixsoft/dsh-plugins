@@ -22,9 +22,23 @@ export interface ScanCandidate {
   readonly skipReason?: 'missing_base_url' | 'missing_token' | 'missing_model'
 }
 
-/** ccimport.scan 的结构化应答：成功给候选数组，异常给 code + message。 */
+/** 扫描时因单行数据损坏被跳过的 cc-switch 行明细（不阻塞其他候选）。 */
+export interface ScanSkippedRow {
+  /** 行名；name 列缺失或非字符串时为 null。 */
+  readonly name: string | null
+  /** 机器可读跳过原因：缺 name 走 `bad_provider_row`，settings_config 坏 JSON 走 `bad_settings_config`。 */
+  readonly code: 'bad_provider_row' | 'bad_settings_config'
+  /** 人类可读明细。 */
+  readonly message: string
+}
+
+/** ccimport.scan 的结构化应答：成功给候选数组（单行损坏降级为 skippedRows 明细），异常给 code + message。 */
 export type ScanResponse =
-  | { readonly ok: true; readonly candidates: readonly ScanCandidate[] }
+  | {
+      readonly ok: true
+      readonly candidates: readonly ScanCandidate[]
+      readonly skippedRows?: readonly ScanSkippedRow[]
+    }
   | { readonly ok: false; readonly code: string; readonly message: string }
 
 /** dsh pi-ai 模型行（PiAiModelProfile 的 cc-import 子集）。 */
@@ -73,9 +87,28 @@ export function resolveRouteIdConflict(id: string, existingKeys: ReadonlySet<str
 /**
  * 与 dsh 官方「自定义模型 API」表单同款的凭据引用派生：
  * `<ROUTE>_API_KEY`，ROUTE 为 provider 大写、非 `[A-Z0-9]` 折叠为 `_`。
+ * 折叠不单射（`-` 折叠成 `_`，如 `a-b` 与 `a--b` 同得 `A_B_API_KEY`）：不同
+ * route id 派生同一引用会互相覆盖 token，批次内碰撞由 `resolveApiKeyEnvConflict`
+ * 加后缀消解。
  */
 export function deriveApiKeyEnv(routeId: string): string {
   return `${routeId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`
+}
+
+/**
+ * keyRef 与已占用凭据引用冲突时在 `_API_KEY` 前插入递增后缀：`A_B_API_KEY` →
+ * `A_B_2_API_KEY`、`A_B_3_API_KEY`…（与 `resolveRouteIdConflict` 的 `-2` 后缀
+ * 策略同风格）。
+ * @param keyRef 期望的凭据引用。
+ * @param usedRefs 已占用的凭据引用集（只读；本函数不改写它）。
+ */
+export function resolveApiKeyEnvConflict(keyRef: string, usedRefs: ReadonlySet<string>): string {
+  if (!usedRefs.has(keyRef)) return keyRef
+  const prefix = keyRef.slice(0, -'_API_KEY'.length)
+  for (let n = 2; ; n += 1) {
+    const candidate = `${prefix}_${n}_API_KEY`
+    if (!usedRefs.has(candidate)) return candidate
+  }
 }
 
 /**

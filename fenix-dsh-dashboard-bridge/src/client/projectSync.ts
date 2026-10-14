@@ -131,9 +131,14 @@ export function startProjectSync(options: ProjectSyncOptions): () => void {
     try {
       const names = await options.fetchProjects()
       if (!stopped) current = reconcileProjects(current, names, options.sink)
-    } catch {
+    } catch (error) {
       // 拉取失败：仅保留固定条目（既有项目条目原样保留），无未处理异常，
-      // 等下一轮/聚焦重试。
+      // 等下一轮/聚焦重试。失败要吞但不能不可见：warn 出状态/错误消息便于排障。
+      console.warn(
+        `[fenix-dsh-dashboard-bridge] 拉取项目列表失败（保留既有条目，等下一轮/聚焦重试）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
     } finally {
       inFlight = false
     }

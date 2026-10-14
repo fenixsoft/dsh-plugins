@@ -7,10 +7,13 @@
  *   即刻 end），不在内存聚合；
  * - 请求头白名单拷贝：仅逐项拷贝内容协商 / 条件请求 / range / content 类头；
  *   `host` 剥离并改写为上游 authority，追加 `x-forwarded-proto/path` 便于排查；
- * - 响应状态 / 头原样回写：仅剥离 `content-length` 与 `transfer-encoding`
- *   交由 node 按实际流重算（流式改道后长度不符），其余原样拷贝；
+ * - 响应状态 / 头原样回写：剥离 `content-length`（交由 node 按实际流重算，
+ *   流式改道后长度不符）与 hop-by-hop 头（含 `connection` 列出的逐个头名，
+ *   RFC 7230 §6.1/6.7），其余原样拷贝；
  * - 响应体逐块 pipe 不聚合：node pipe 自带背压，SSE 天然透传；
- * - 不设任何请求超时（SSE 长连接）；
+ * - 「发出请求 → 收到响应头」阶段设 30s 超时（上游 accept 后僵死不回响应头
+ *   时降级 502，不让浏览器无限 pending）；已开始的响应流（SSE 长连接）不设
+ *   任何超时；
  * - 客户端断开（响应流关闭）时终止对应上游请求——面板重挂反复开关 SSE，
  *   不终止则在上游侧累积泄漏连接（上游 dashboard 有常驻连接数上限）；
  * - 上游连接失败（ECONNREFUSED / 超时 / DNS）→ 502 + 可读 HTML 提示页，
@@ -35,6 +38,13 @@ export const REQUEST_HEADER_ALLOWLIST = [
   'if-unmodified-since',
   'range',
 ] as const
+
+/**
+ * 「发出请求 → 收到响应头」阶段超时：上游 TCP 已 accept 但不返回响应头
+ * （进程僵死 / 连接池耗尽）时降级 502，而非让浏览器无限 pending。取值远大于
+ * dashboard 正常首字节时间；已开始的响应流（SSE）不适用任何超时。
+ */
+const RESPONSE_HEADER_TIMEOUT_MS = 30_000
 
 export interface DashboardProxyOptions {
   /** 上游 dashboard 地址（无尾斜杠，如 `http://127.0.0.1:8787`）。 */
@@ -128,11 +138,29 @@ export function createDashboardProxy(options: DashboardProxyOptions): DashboardP
       target,
       { method: req.method, headers: buildForwardHeaders(req, target) },
       (upstreamRes) => {
+        // 已收到响应头：清除该阶段超时，此后响应流（含 SSE 长连接）不再有超时。
+        clearTimeout(responseHeaderTimer)
         forwardUpstreamResponse(upstreamRes, res)
       },
     )
-    // SSE 长连接：显式不设任何请求超时。
+    // 「发出请求 → 收到响应头」阶段独立超时：上游 accept 后僵死 / 连接池耗尽
+    // 不回响应头时降级 502，而非让浏览器无限 pending。收到响应头或上游连接
+    // 收口即清除；已开始的响应流（SSE 长连接）不设任何超时。
+    let responseHeaderTimedOut = false
+    const responseHeaderTimer = setTimeout(() => {
+      responseHeaderTimedOut = true
+      const reason = `上游 ${RESPONSE_HEADER_TIMEOUT_MS}ms 内未返回响应头`
+      logError(
+        `fenix-dashboard-bridge: 上游响应头超时 upstream=${upstream} path=${req.url ?? '/'} reason=${reason}`,
+      )
+      // 掐掉僵死的上游连接后走既有 502 路径；destroy 随后引发的滞后 'error'
+      // （socket hang up）经 responseHeaderTimedOut 短路，不再动已发出的响应。
+      upstreamReq.destroy()
+      sendBadGateway(res, upstream, reason)
+    }, RESPONSE_HEADER_TIMEOUT_MS)
     upstreamReq.on('error', (error) => {
+      // 响应头超时已降级 502：此处的 error 只是 destroy 的滞后回声，跳过。
+      if (responseHeaderTimedOut) return
       const reason =
         error instanceof Error
           ? `${('code' in error && typeof error.code === 'string' ? error.code : error.name)}: ${error.message}`
@@ -151,6 +179,9 @@ export function createDashboardProxy(options: DashboardProxyOptions): DashboardP
     let upstreamSettled = false
     upstreamReq.on('close', () => {
       upstreamSettled = true
+      // 上游连接收口（完成 / 出错 / 被销毁）后，响应头超时不再有意义，
+      // 避免残留定时器事后去动一个已收口的响应。
+      clearTimeout(responseHeaderTimer)
     })
     res.on('close', () => {
       if (!upstreamSettled) upstreamReq.destroy()
@@ -163,14 +194,35 @@ export function createDashboardProxy(options: DashboardProxyOptions): DashboardP
   }
 }
 
-/** 上游响应回写：状态/头原样（剥 content-length/transfer-encoding），体逐块 pipe。 */
+/** RFC 7230 §6.1 hop-by-hop 头：代理不得向下游透传（`connection` 列出的头名另剥）。 */
+const HOP_BY_HOP_HEADERS = [
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+] as const
+
+/** 上游响应回写：状态/头原样（剥 content-length 与 hop-by-hop 头），体逐块 pipe。 */
 function forwardUpstreamResponse(
   upstreamRes: IncomingMessage,
   res: ServerResponse,
 ): void {
   const headers: Record<string, string | string[] | undefined> = { ...upstreamRes.headers }
+  // content-length 交由 node 按实际流重算（流式改道后长度不符）；hop-by-hop
+  // 头（含 `connection` 列出的逐个头名，RFC 7230 §6.1/6.7）剥除——上游连接
+  // 语义（connection: close / keep-alive 参数）不得污染客户端与 dsh web 的
+  // 连接复用，也不与 node 自行管理的连接语义冲突。
   delete headers['content-length']
-  delete headers['transfer-encoding']
+  const connection = headers['connection']
+  const listed = (Array.isArray(connection) ? connection.join(',') : connection ?? '')
+    .split(',')
+    .map((name) => name.trim().toLowerCase())
+    .filter((name) => name.length > 0)
+  for (const name of [...HOP_BY_HOP_HEADERS, ...listed]) delete headers[name]
   res.writeHead(upstreamRes.statusCode ?? 502, headers)
   upstreamRes.on('error', () => {
     res.destroy()
