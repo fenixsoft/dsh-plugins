@@ -53,3 +53,13 @@
 - [x] 4.1 修正 `docs/help/cc-import-install.md` 与 `docs/help/fenix-dashboard-bridge-install.md`：workspace 注册改为实测的 `pnpm add link:` 写法、loader 条目改为 `- insert:` 形式（注明裸 id 形式会被静默跳过的原因）、新增 `dsh-plugin-loopback-trust` 前置小节（安装命令、engines 匹配、明文 HTTP 安全注记）、live 实例刷新人工步骤（完整重启命令 + token 从启动日志获取 + pkill 自匹配陷阱警示）
 - [x] 4.2 新增 `docs/help/dsh-plugin-live-verification.md`：隔离 profile 验证方法论（临时 `DSH_HOME`、独立端口、`pnpm add link:`、insert 注册、playwright-cli 断言口径、临时状态清理清单），内容与任务 1.1/2.x/3.x 实测过程一致
 - [x] 4.3 按修正后文档在全新临时 profile 从零重装走查一遍（「按文档从零重装可复现」），不一致处回改文档后重验
+
+## 验证修复（原地打回第 1 轮）
+
+### 上轮实现结论（自动携带，来自上一轮 implementer 收工结论）
+
+{'total': 30, 'passed': 18, 'warnings': 11, 'failed': 1, 'errors': 0}
+
+- [ ] 先复核失败有效性：逐条核对 `spec/changes/verify-dsh-plugins-live/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码
+- [ ] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码
+- [ ] 修复后重跑验证确认通过
