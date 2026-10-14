@@ -71,5 +71,5 @@
 
 ## 6. 文档与安装交付
 
-- [ ] 6.1 `cc-import/README.zh.md`：插件用途、映射规则表、构建与测试命令
-- [ ] 6.2 `docs/help/cc-import-install.md`：人工安装步骤（源码注册进 `/root/.dsh/profiles/web/` pnpm workspace → `cordis.patch.yml` 加 loader 条目 → 重启 `dsh web`）与真机验收清单（按钮可见 → 对话框候选与 cc-switch 一致 → 导出全部可导入候选（评审时实测 cc-switch 数据为 10 个：含 OpenCodeGo / bytedance-volces / bigmodel.cn 等，唯一跳过为缺 AUTH_TOKEN 的 OAuth 型「Claude Official」）→ Models 页出现新行且密钥状态点绿色 → 既有 provider 未受影响），文末「人工步骤」小节明确这些动作不由实现 Agent 执行
+- [x] 6.1 `cc-import/README.zh.md`：插件用途、映射规则表、构建与测试命令
+- [x] 6.2 `docs/help/cc-import-install.md`：人工安装步骤（源码注册进 `/root/.dsh/profiles/web/` pnpm workspace → `cordis.patch.yml` 加 loader 条目 → 重启 `dsh web`）与真机验收清单（按钮可见 → 对话框候选与 cc-switch 一致 → 导出全部可导入候选（评审时实测 cc-switch 数据为 10 个：含 OpenCodeGo / bytedance-volces / bigmodel.cn 等，唯一跳过为缺 AUTH_TOKEN 的 OAuth 型「Claude Official」）→ Models 页出现新行且密钥状态点绿色 → 既有 provider 未受影响），文末「人工步骤」小节明确这些动作不由实现 Agent 执行
