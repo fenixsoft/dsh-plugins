@@ -64,10 +64,10 @@
 
 ## 5. 测试
 
-- [ ] 5.1 `cc-import/tests/cc-switch-fixture.ts`：测试内用 `node:sqlite` 在临时路径生成含 claude/codex/gemini 混合行、缺字段行、`[1M]` 模型行的 fixture db（不提交二进制 db）
-- [ ] 5.2 `cc-import/tests/host-scan.test.ts`：覆盖 spec 四个扫描 Scenario（只返回 claude 行、字段完整且无 token 明文、跳过标注、db 异常结构化错误）
-- [ ] 5.3 `cc-import/tests/mapping.test.ts`：覆盖 `[1M]` 拆分、无后缀不设 contextWindow、id 冲突 `-2` 递增、模型回退链（`ANTHROPIC_MODEL` 缺失回退 `ANTHROPIC_DEFAULT_OPUS_MODEL`、均空标 `missing_model`）、profile 形态与 apiKeyEnv 派生
-- [ ] 5.4 `cc-import/tests/importer.test.ts`：覆盖写入计划构造（set-only、勾选集之外零 ops、已存在判定、displayName 携带规则）；`pnpm test` 全绿
+- [x] 5.1 `cc-import/tests/cc-switch-fixture.ts`：测试内用 `node:sqlite` 在临时路径生成含 claude/codex/gemini 混合行、缺字段行、`[1M]` 模型行的 fixture db（不提交二进制 db）
+- [x] 5.2 `cc-import/tests/host-scan.test.ts`：覆盖 spec 四个扫描 Scenario（只返回 claude 行、字段完整且无 token 明文、跳过标注、db 异常结构化错误）
+- [x] 5.3 `cc-import/tests/mapping.test.ts`：覆盖 `[1M]` 拆分、无后缀不设 contextWindow、id 冲突 `-2` 递增、模型回退链（`ANTHROPIC_MODEL` 缺失回退 `ANTHROPIC_DEFAULT_OPUS_MODEL`、均空标 `missing_model`）、profile 形态与 apiKeyEnv 派生
+- [x] 5.4 `cc-import/tests/importer.test.ts`：覆盖写入计划构造（set-only、勾选集之外零 ops、已存在判定、displayName 携带规则）；`pnpm test` 全绿
 
 ## 6. 文档与安装交付
 

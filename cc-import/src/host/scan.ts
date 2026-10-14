@@ -47,10 +47,14 @@ export function scanCcSwitch(dbPath: string = defaultDbPath()): ScanResponse {
   if (!existsSync(dbPath)) {
     return { ok: false, code: 'db_missing', message: `cc-switch 数据库不存在：${dbPath}` }
   }
-  let db: DatabaseSync
+  let db: DatabaseSync | undefined
   try {
     db = new DatabaseSync(dbPath, { readOnly: true })
+    // SQLite 延迟到首条语句才读文件头：非 SQLite 文件在这里以
+    // 「file is not a database」暴露，归为 db_unreadable 而非 db_schema。
+    db.prepare('PRAGMA schema_version').get()
   } catch (error) {
+    db?.close()
     return { ok: false, code: 'db_unreadable', message: `cc-switch 数据库无法打开：${messageOf(error)}` }
   }
   try {
