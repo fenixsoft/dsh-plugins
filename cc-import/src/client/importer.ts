@@ -8,6 +8,7 @@
  */
 import {
   buildProviderProfile,
+  resolveApiKeyEnvConflict,
   resolveRouteIdConflict,
   slugifyRouteId,
 } from '../shared/mapping.js'
@@ -37,7 +38,7 @@ export interface PlannedImport {
   /** 实际写入的 route id（冲突已解析）。 */
   readonly routeId: string
   readonly profile: ProviderProfile
-  /** storeCredential 的凭据引用（`<ROUTE>_API_KEY`）。 */
+  /** storeCredential 的凭据引用（`<ROUTE>_API_KEY`；批次内派生冲突时带 `_2` 递增后缀）。 */
   readonly keyRef: string
   /** slug 命中既有 providers（对话框标「已存在」）。 */
   readonly existed: boolean
@@ -48,12 +49,15 @@ export interface PlannedImport {
 /** 计划中被跳过的勾选项（含机器可读原因）。 */
 export interface SkippedImport {
   readonly name: string
-  readonly reason: 'unnameable' | 'not_importable'
+  readonly reason: 'unnameable' | 'not_importable' | 'duplicate'
 }
 
 /** 一次导入的完整写入计划。 */
 export interface ImportPlan {
-  /** 按候选顺序排列的 set op（每项一条；set-only）。 */
+  /**
+   * 按候选顺序与 planned 锁步对齐的 set op（每项一条；set-only）。写入路径
+   * （executeImport）按序直接消费本数组，不二次构造同一 op。
+   */
   readonly ops: readonly SettingsPathOp[]
   readonly planned: readonly PlannedImport[]
   readonly skipped: readonly SkippedImport[]
@@ -80,6 +84,11 @@ export function rowState(
  * - 默认对 slug 与既有 providers（或同批已规划 id）冲突的候选加 `-2`/`-3` 后缀；
    已存在行被显式勾选「将更新」时同键覆盖（spec「重复导入为覆盖更新」）。
  * - slug 为空的候选跳过（`unnameable`）。
+ * - 同名候选只保留首个、后续同名跳过（`duplicate`）：勾选集/行 key/revealToken
+ *   全程以 name 寻址，而 cc-switch 的 providers.name 未见唯一约束，重名行会让
+ *   勾选与计划互相串扰。
+ * - keyRef 派生把 `-` 折叠成 `_`，不同 route id 可派生同一凭据引用：批次内
+ *   冲突时对后到者加 `_2`/`_3` 递增后缀（`resolveApiKeyEnvConflict`）。
  */
 export function planImports(
   candidates: readonly ScanCandidate[],
@@ -87,11 +96,18 @@ export function planImports(
   existing: ExistingProviders,
 ): ImportPlan {
   const existingKeys = new Set(Object.keys(existing))
+  const usedKeyRefs = new Set<string>()
+  const seenNames = new Set<string>()
   const ops: SettingsPathOp[] = []
   const planned: PlannedImport[] = []
   const skipped: SkippedImport[] = []
   for (const candidate of candidates) {
     if (!selection.names.has(candidate.name)) continue
+    if (seenNames.has(candidate.name)) {
+      skipped.push({ name: candidate.name, reason: 'duplicate' })
+      continue
+    }
+    seenNames.add(candidate.name)
     if (!candidate.importable) {
       skipped.push({ name: candidate.name, reason: 'not_importable' })
       continue
@@ -104,14 +120,20 @@ export function planImports(
     const existed = existingKeys.has(slug)
     const update = existed && selection.updateNames.has(candidate.name)
     const routeId = update ? slug : resolveRouteIdConflict(slug, existingKeys)
-    const profile = buildProviderProfile(routeId, candidate)
+    const built = buildProviderProfile(routeId, candidate)
+    // routeId 在批次内已唯一，但 keyRef 派生不单射（`a-b` 与 `a--b` 同得
+    // A_B_API_KEY），后到者若不消解会覆盖先到者的 token：按 routeId 同风格
+    // 的递增后缀策略给后到者派生独立 keyRef。
+    const keyRef = resolveApiKeyEnvConflict(built.apiKeyEnv, usedKeyRefs)
+    const profile = keyRef === built.apiKeyEnv ? built : { ...built, apiKeyEnv: keyRef }
+    usedKeyRefs.add(keyRef)
     existingKeys.add(routeId)
     ops.push({ op: 'set', path: ['providers', routeId], value: profile })
     planned.push({
       candidate,
       routeId,
       profile,
-      keyRef: profile.apiKeyEnv,
+      keyRef,
       existed,
       update,
     })

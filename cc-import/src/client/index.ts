@@ -60,14 +60,30 @@ async function readExistingProviders(
 
 /**
  * 执行一个写入计划：逐候选 reveal → writeSettings（conflict 重读重试一次）→
- * storeCredential。任何一步失败记入失败明细并继续其余候选；set-only，任何
- * 路径不 unset、不整体替换 providers。
+ * storeCredential。任何一步失败记入失败明细并继续其余候选；对既有 providers
+ * set-only（不整体替换、不删既有条目），唯一例外是凭据落库失败时回滚本轮
+ * 自建的 provider 条目，避免留下无凭据的半配置。初始快照读取失败则整批中止，
+ * 绝不在无 expectedRevision 约束下盲写。
  */
 async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutcome> {
   let snapshot: ExistingRead | { ok: false; message: string } = await readExistingProviders(ctx)
   const failures: { name: string; reason: string }[] = []
   let succeeded = 0
-  for (const item of plan.planned) {
+  if (!snapshot.ok) {
+    // 无快照即无 expectedRevision：继续写会以 last-write-wins 静默覆盖其他端
+    // 的并发改动。失败降级偏保守——整批中止，逐候选记入失败明细。
+    const reason = `settings 快照读取失败，已中止导入：${snapshot.message}`
+    return {
+      succeeded: 0,
+      failures: plan.planned.map((item) => ({ name: item.candidate.name, reason })),
+    }
+  }
+  // ops 与 planned 由 planImports 锁步构造（单一构造源），此处按序配对消费。
+  for (let index = 0; index < plan.planned.length; index += 1) {
+    const item = plan.planned[index]
+    const op = plan.ops[index]
+    // 错位只可能是计划结构被破坏：终止批次而不是写向未知路径。
+    if (item === undefined || op === undefined) break
     // 先拆 RemoteResult 信封：信封层失败=调用/传输级；业务联合的 ok=false=
     // host 半的结构化拒绝（candidate_missing / missing_token 等）。
     const envelope = await ctx.remote.ccimport.revealToken(item.candidate.name)
@@ -80,21 +96,40 @@ async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutc
       failures.push({ name: item.candidate.name, reason: tokenRevealed.message })
       continue
     }
-    const op: SettingsPathOp = { op: 'set', path: ['providers', item.routeId], value: item.profile }
-    let written = await ctx.remote.settings.mutate(PI_AI_NS, [op], snapshot.ok ? snapshot.revision : undefined)
+    let written = await ctx.remote.settings.mutate(PI_AI_NS, [op], snapshot.revision)
     if (!written.ok && written.error.code === 'settings/conflict') {
-      // 重读快照并重试一次；再冲突按该候选失败处理，不中断批次。
-      snapshot = await readExistingProviders(ctx)
-      written = await ctx.remote.settings.mutate(PI_AI_NS, [op], snapshot.ok ? snapshot.revision : undefined)
+      // 重读快照并重试一次；重读失败与再冲突同样按该候选失败处理（不在无
+      // 版本约束下盲写），不中断批次。
+      const reread = await readExistingProviders(ctx)
+      if (!reread.ok) {
+        failures.push({ name: item.candidate.name, reason: reread.message })
+        continue
+      }
+      snapshot = reread
+      written = await ctx.remote.settings.mutate(PI_AI_NS, [op], snapshot.revision)
     }
     if (!written.ok) {
       failures.push({ name: item.candidate.name, reason: written.error.message })
       continue
     }
-    if (snapshot.ok) snapshot = { ...snapshot, revision: written.value.revision }
+    snapshot = { ...snapshot, revision: written.value.revision }
     const stored = await ctx.remote.credentials.set(item.keyRef, tokenRevealed.token)
     if (!stored.ok) {
-      failures.push({ name: item.candidate.name, reason: stored.error.message })
+      // 凭据落库失败：本轮刚写入的 provider 条目成了指向空凭据的半配置。
+      // 对「本轮自建」的条目（非既有条目的覆盖更新）补一次 unset 回滚，回滚
+      // 成败一并并入失败明细，提示用户可重试导入。
+      let reason = stored.error.message
+      if (!(item.existed && item.update)) {
+        const rollback: SettingsPathOp = { op: 'unset', path: ['providers', item.routeId] }
+        const reverted = await ctx.remote.settings.mutate(PI_AI_NS, [rollback], snapshot.revision)
+        if (reverted.ok) {
+          snapshot = { ...snapshot, revision: reverted.value.revision }
+          reason = `${reason}（已回滚本轮写入的 provider 条目）`
+        } else {
+          reason = `${reason}（provider 条目回滚失败，Models 页可能留下无凭据条目，请重试导入：${reverted.error.message}）`
+        }
+      }
+      failures.push({ name: item.candidate.name, reason })
       continue
     }
     succeeded += 1
@@ -102,10 +137,6 @@ async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutc
   return { succeeded, failures }
 }
 
-/**
- * Client 插件体：注册词典、挂载本插件 Remote 贡献、向 Models 页 footer 注入
- * 导入入口。slot 未声明（dsh 升级改名）时注入不生效，页面不崩（design.md Risks）。
- */
 /**
  * Client 插件体：注册词典、挂载本插件 Remote 贡献、向 Models 页 footer 注入
  * 导入入口。slot 未声明（dsh 升级改名）时注入不生效，页面不崩（design.md Risks）。

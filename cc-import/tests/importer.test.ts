@@ -1,6 +1,7 @@
 /**
  * importer 测试：写入计划构造——set-only、勾选集之外零 ops、已存在判定、
- * 显式「将更新」同键覆盖、批次内 id 冲突 -2 递增、displayName 携带规则。
+ * 显式「将更新」同键覆盖、批次内 id 冲突 -2 递增、重名候选去重（duplicate）、
+ * keyRef 派生冲突加后缀、displayName 携带规则。
  */
 import { describe, expect, it } from 'vitest'
 import { planImports, rowState } from '../src/client/importer.js'
@@ -89,14 +90,15 @@ describe('已存在判定与冲突解析', () => {
     expect(plan.ops[0]?.path).toEqual(['providers', 'bigmodel-cn-2'])
   })
 
-  it('仍冲突继续 -3；同批两个同名候选依次加后缀', () => {
+  it('仍冲突继续 -3；同批重名候选只保留首个，后续同名标 duplicate 跳过', () => {
     const existing: ExistingProviders = { 'x': {}, 'x-2': {} }
     const plan = planImports(
       [candidate('x'), candidate('x')],
       { names: new Set(['x']), updateNames: new Set() },
       existing,
     )
-    expect(plan.ops.map((op) => op.path)).toEqual([['providers', 'x-3'], ['providers', 'x-4']])
+    expect(plan.ops.map((op) => op.path)).toEqual([['providers', 'x-3']])
+    expect(plan.skipped).toEqual([{ name: 'x', reason: 'duplicate' }])
   })
 })
 
@@ -112,6 +114,17 @@ describe('计划项的 profile 与凭据引用', () => {
     expect(item?.profile.apiKeyEnv).toBe('BYTEDANCE_VOLCES_API_KEY')
     expect(item?.profile.models).toEqual([{ id: 'deepseek-v4.1-flash', contextWindow: 1_000_000 }])
     expect(item?.profile.api).toBe('anthropic-messages')
+  })
+
+  it('不同 route id 派生同一 keyRef 时后到者加后缀，且 profile.apiKeyEnv 与 keyRef 保持一致', () => {
+    const plan = planImports(
+      [candidate('a-b'), candidate('a--b')],
+      { names: new Set(['a-b', 'a--b']), updateNames: new Set() },
+      {},
+    )
+    expect(plan.ops.map((op) => op.path)).toEqual([['providers', 'a-b'], ['providers', 'a--b']])
+    expect(plan.planned.map((item) => item.keyRef)).toEqual(['A_B_API_KEY', 'A_B_2_API_KEY'])
+    expect(plan.planned[1]?.profile.apiKeyEnv).toBe('A_B_2_API_KEY')
   })
 
   it('displayName 携带规则：slug 与名字一致时省略，否则携带原名', () => {

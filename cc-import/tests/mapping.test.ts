@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildProviderProfile,
   deriveApiKeyEnv,
+  resolveApiKeyEnvConflict,
   resolveCandidateModel,
   resolveRouteIdConflict,
   slugifyRouteId,
@@ -72,6 +73,25 @@ describe('resolveRouteIdConflict（冲突加 -2/-3 递增后缀）', () => {
     const existing = new Set(['a'])
     resolveRouteIdConflict('a', existing)
     expect(existing.has('a-2')).toBe(false)
+  })
+})
+
+describe('resolveApiKeyEnvConflict（keyRef 冲突在 _API_KEY 前插递增后缀）', () => {
+  it('无冲突原样返回', () => {
+    expect(resolveApiKeyEnvConflict('A_B_API_KEY', new Set(['OTHER_API_KEY']))).toBe('A_B_API_KEY')
+  })
+
+  it('冲突加 _2；仍冲突继续 _3（派生折叠不单射：a-b 与 a--b 同得 A_B_API_KEY）', () => {
+    expect(deriveApiKeyEnv('a-b')).toBe('A_B_API_KEY')
+    expect(deriveApiKeyEnv('a--b')).toBe('A_B_API_KEY')
+    expect(resolveApiKeyEnvConflict('A_B_API_KEY', new Set(['A_B_API_KEY']))).toBe('A_B_2_API_KEY')
+    expect(resolveApiKeyEnvConflict('A_B_API_KEY', new Set(['A_B_API_KEY', 'A_B_2_API_KEY']))).toBe('A_B_3_API_KEY')
+  })
+
+  it('不改写传入的已用引用集（纯函数）', () => {
+    const used = new Set(['A_API_KEY'])
+    resolveApiKeyEnvConflict('A_API_KEY', used)
+    expect(used.has('A_2_API_KEY')).toBe(false)
   })
 })
 
