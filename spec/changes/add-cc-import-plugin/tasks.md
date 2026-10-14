@@ -76,6 +76,6 @@
 
 ## 验证修复（原地打回第 1 轮）
 
-- [ ] 先复核失败有效性：逐条核对 `spec/changes/add-cc-import-plugin/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码
-- [ ] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码
-- [ ] 修复后重跑验证确认通过
+- [x] 先复核失败有效性：逐条核对 `spec/changes/add-cc-import-plugin/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码（复核结论：两失败场景均为断言缺陷——locales 断言 `["']zh["']` 过度指定引号形态而产品键 `zh:`/`en:` 与 dsh-client-locale 运行时契约一致；vitest 输出断言不容忍 ANSI，场景自设 CI=1 触发 picocolors 强制着色致正则必失配，测试实为 37/37 全过 exit 0；产品行为无缺陷）
+- [x] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码（场景文件 `.fenix/verify-progress/add-cc-import-plugin/test_scenarios.json`：locales 键断言放宽为 `["']?zh["']?\s*:`、4 个测试类场景输出断言放宽为 ANSI 容忍正则，修前已备份 `test_scenarios.json.impl-round2-pre-scenario-fix.bak`；产品侧无害加固兜底：locales.ts 键加引号、test 脚本 `NO_COLOR=1` 使原始断言亦可命中）
+- [x] 修复后重跑验证确认通过（run 内以与验证链同语义的步骤+断言执行器重跑受影响 5 场景全 pass——locales-bilingual + 4 个测试类场景；双保险评估：原始断言对修复后现场亦命中；证据 `.fenix/verify-evidence/add-cc-import-plugin/impl-round2-rerun-result.json`；全 17 场景官方复验由验证链执行）
