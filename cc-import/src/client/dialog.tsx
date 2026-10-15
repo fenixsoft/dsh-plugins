@@ -1,9 +1,9 @@
 /**
  * cc-import 导入对话框组件（展示层）。
  *
- * 职责：候选行渲染（勾选框 / 名称 / baseURL / 模型摘要 / 状态标）、勾选态
- * 管理、批次结果反馈。数据加载（scan + settings 快照）与导入执行由 index.ts
- * 以回调注入，本组件不触碰任何服务。
+ * 职责：候选行渲染（勾选框 / 名称 / baseURL / 模型摘要 / 状态标列布局）、
+ * 勾选态管理（全选新增 / 取消全部选择）、批次结果反馈。数据加载（scan +
+ * settings 快照）与导入执行由 index.ts 以回调注入，本组件不触碰任何服务。
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
@@ -14,7 +14,7 @@ import type { ScanCandidate, ScanResponse } from '../shared/mapping.js'
 import { planImports, rowState } from './importer.js'
 import type { ExistingProviders, ImportPlan } from './importer.js'
 
-/** 对话框打开时应答：候选 + 既有 providers 快照，或失败消息。 */
+/** 对话框应答：候选 + 既有 providers 快照，或失败消息。 */
 export type DialogSnapshot =
   | { readonly ok: true; readonly candidates: readonly ScanCandidate[]; readonly existing: ExistingProviders }
   | { readonly ok: false; readonly message: string }
@@ -42,28 +42,35 @@ interface RowState {
   readonly update: boolean
 }
 
-const rowStyle = {
+/** 对话框 80% 视口宽样式类（样式经 ensureDialogStyle 注入，见文件尾）。 */
+export const DIALOG_WIDE_CLASS = 'fenix-ccimport-dialog-wide'
+
+const rowStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
+  gap: 12,
   padding: '6px 4px',
   borderBottom: '1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.25))',
-} satisfies CSSProperties
+}
 
-const metaStyle = {
-  display: 'flex',
-  flexDirection: 'column',
+/** 候选行列宽：名称 / baseURL / 模型摘要三列弹性间隔，状态标固定收缩。 */
+const colNameStyle: CSSProperties = { flex: '1.1 1 0', minWidth: 0, fontWeight: 600, overflowWrap: 'anywhere' }
+
+const colBaseURLStyle: CSSProperties = {
+  flex: '1.6 1 0',
   minWidth: 0,
-  flex: 1,
-} satisfies CSSProperties
-
-const nameStyle = { fontWeight: 600, overflowWrap: 'anywhere' } satisfies CSSProperties
-
-const metaTextStyle = {
   fontSize: 12,
   opacity: 0.72,
   overflowWrap: 'anywhere',
-} satisfies CSSProperties
+}
+
+const colModelStyle: CSSProperties = {
+  flex: '1 1 0',
+  minWidth: 0,
+  fontSize: 12,
+  opacity: 0.72,
+  overflowWrap: 'anywhere',
+}
 
 const badgeStyle = {
   flexShrink: 0,
@@ -91,7 +98,8 @@ function statusLabel(t: Translate, row: RowState): string {
   return t('status.importable')
 }
 
-/** 单个候选行：跳过行无勾选框；已存在行默认不勾选、勾选即「将更新」。 */
+/** 单个候选行：跳过行无勾选框；已存在行默认不勾选、勾选即「将更新」。
+ *  列布局（80vw 对话框下）：勾选框 / 名称 / baseURL / 模型摘要 / 状态标。 */
 function CandidateRow({
   t,
   row,
@@ -104,7 +112,7 @@ function CandidateRow({
   const candidate = row.candidate
   const model = candidate.model === null ? null : splitModelAlias(candidate.model)
   return (
-    <div style={rowStyle}>
+    <div style={rowStyle} data-testid={`ccimport-row-${candidate.name}`}>
       {candidate.importable ? (
         <Checkbox
           checked={row.checked}
@@ -115,13 +123,13 @@ function CandidateRow({
       ) : (
         <span style={{ width: 18, flexShrink: 0 }} aria-hidden="true" />
       )}
-      <div style={metaStyle}>
-        <span style={nameStyle}>{candidate.name}</span>
-        <span style={metaTextStyle}>
-          {candidate.baseURL ?? '—'}
-          {model === null ? '' : ` · ${model.id}${model.contextWindow === undefined ? '' : ` · ${t('model.contextWindow')}`}`}
-        </span>
-      </div>
+      <span style={colNameStyle}>{candidate.name}</span>
+      <span style={colBaseURLStyle}>{candidate.baseURL ?? '—'}</span>
+      <span style={colModelStyle}>
+        {model === null
+          ? '—'
+          : `${model.id}${model.contextWindow === undefined ? '' : ` · ${t('model.contextWindow')}`}`}
+      </span>
       <span style={badgeStyle}>{statusLabel(t, row)}</span>
     </div>
   )
@@ -249,6 +257,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
       title={t('dialog.title')}
       closeLabel={t('dialog.close')}
       description={t('dialog.description')}
+      className={DIALOG_WIDE_CLASS}
     >
       {busy && outcome === null ? <p>{importing ? t('import.running') : t('dialog.loading')}</p> : null}
       {errorText !== null ? <p role="alert">{errorText}</p> : null}
@@ -293,6 +302,17 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
         >
           {t('dialog.selectAll')}
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="ccimport-deselect-all"
+          disabled={busy || selectedNames.size === 0}
+          onClick={() => {
+            setRows((current) => current.map((row) => (row.checked ? { ...row, checked: false, update: false } : row)))
+          }}
+        >
+          {t('dialog.deselectAll')}
+        </Button>
         <Button variant="ghost" size="sm" onClick={onClose}>
           {t('dialog.close')}
         </Button>
@@ -317,6 +337,28 @@ export function snapshotFromScan(
   if (!scanned.ok) return { ok: false, message: scanned.message }
   return { ok: true, candidates: scanned.candidates, existing }
 }
+
+/**
+ * 注入对话框 80% 视口宽样式（幂等；形态对齐 dsh 插件包的
+ * `style[data-plugin-css]` 注入先例）。Modal 卡片缺省 `width: min(380px, 100%)`，
+ * 双写类名提升优先级压过原规则；node/SSR 环境跳过。
+ */
+interface StyleHost {
+  head: { appendChild(node: unknown): unknown }
+  querySelector(selector: string): unknown
+  createElement(tag: string): { dataset: Record<string, string>; textContent?: string }
+}
+
+export function ensureDialogStyle(doc: StyleHost | undefined): void {
+  if (doc === undefined) return
+  const tagId = 'cc-import/dialog-width'
+  if (doc.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return
+  const tag = doc.createElement('style')
+  tag.dataset = { plugin: 'cc-import', pluginCss: tagId }
+  tag.textContent = `.${DIALOG_WIDE_CLASS}.${DIALOG_WIDE_CLASS}{width:80vw;max-width:none}`
+  doc.head.appendChild(tag)
+}
+ensureDialogStyle(typeof document === 'undefined' ? undefined : (document as unknown as StyleHost))
 
 /** footer 条目组件：入口按钮 + 对话框（open 态本地持有）。 */
 export interface FooterSeats {

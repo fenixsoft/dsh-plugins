@@ -165,6 +165,8 @@ declare module '@deepseek-ai/dsh-client-ui-primitives' {
     readonly disabled?: boolean
     readonly onClick?: () => void
     readonly children?: ReactNode
+    /** 透传到 DOM button（Button 实现展开 rest props），供真机 DOM 断言定位。 */
+    readonly 'data-testid'?: string
   }
   export interface ModalProps {
     readonly open: boolean
@@ -175,6 +177,8 @@ declare module '@deepseek-ai/dsh-client-ui-primitives' {
     readonly children?: ReactNode
     readonly footer?: ReactNode
     readonly contentClassName?: string
+    /** 附加到对话框卡片（.dialog）的类名——本插件注入 80vw 宽度样式。 */
+    readonly className?: string
   }
   export interface CheckboxProps {
     readonly checked: boolean
