@@ -24,10 +24,10 @@
 
 ## Decisions
 
-1. **分组承载 = 单个 `sidebar.panellist` 条目「项目」+ 自定义分组组件**。`sidebar.panellist` 条目组件本就是插件自给组件（现即徽标/图标组件），把「项目」条目的组件替换为分组块（头部行 + 限高滚动列表）：不与官方 Workspaces 争槽，不动 single 槽。条目 `label` 仍为「项目」，order 维持 11。
+1. **分组承载 = 单个 `sidebar.panellist` 条目「项目」+ 自定义分组组件**。`sidebar.panellist` 条目组件本就是插件自给组件（现即徽标/图标组件），把「项目」条目的组件替换为分组块（头部行 + 限高滚动列表）：不与官方 Workspaces 争槽，不动 single 槽。条目 `label` 仍为「项目」，order 维持 11。头部行点击 SHALL 仅切换展开/折叠态，不再触发 `#/projects` 概览面板切换（`fenix-projects` keyed 面板注册契约保留，仅经深链可达）。
 2. **主面板切换机制 = 复用条目选中路径**：panellist 条目的 active/点击选中由 sidebar/layout 内部状态驱动；实现期 MUST 读 `dsh-client-ui-layout` / `dsh-client-ui-sidebar` 发行包源码确认「以既有 id 激活 main keyed 面板」的程序化入口（候选：layout 服务 API、选中 store、或以 hash 路由为事实源），并把结论固化进 `src/types/dsh-runtime.d.ts` 类型缝。若确认无程序化入口（不可行），**降级方案**：项目恢复逐条 panellist 注册但 order 紧随「项目」（11.01 起名称序）解决「排在帮助后」，分组/限高以条目组件内滚动近似，取舍记入收工结果并更新文档——用户诉求的完整形态优先级高于降级形态。
 3. **项目行数据流不变**：`projectSync` 的拉取/轮询/幂等差异同步保留，同步目标从「slot 注册/注销」改为「分组组件数据源」（React 状态或轻量 store），60s + focus 时机、幂等语义、移除项目清理全部沿用；`projectSync.test.ts` 契约测试同步改写。
-4. **对话框宽度与反选 = 纯展示层改动**：宽度优先用 Modal 既有 props（`contentClassName` 或等价物）注入 `width: 80vw`，Modal 不支持时以包裹层样式实现；「取消全部选择」置灰逻辑 = 无勾选项时 disabled，点击清 `names` 与 `updateNames` 两个集合；新文案键 `dialog.deselectAll`（zh：取消全部选择 / en：Deselect all）。
+4. **对话框宽度与反选 = 纯展示层改动**：宽度优先用 Modal 既有 props（`contentClassName` 或等价物）注入 `width: 80vw`，Modal 不支持时以包裹层样式实现；「取消全部选择」置灰逻辑 = 无勾选项时 disabled，点击清 `selectedNames` 与 `updateNames` 两个集合；新文案键 `dialog.deselectAll`（zh：取消全部选择 / en：Deselect all）。
 
 ## Risks / Trade-offs
 
