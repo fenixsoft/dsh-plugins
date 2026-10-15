@@ -1,0 +1,36 @@
+{
+  "name": "fenix-skill-provider",
+  "version": "0.1.0",
+  "description": "把外部 Claude 风格 skill 目录（默认 ~/.claude/skills 下 fenix-*）动态注册进 dsh web 原生 skill 体系：Host 半经 ctx.skills.registerProvider 注册 skill provider，动态扫描 + fs.watch 去抖失效，\"/\" 菜单即见即点",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "NO_COLOR=1 vitest run"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-skill": "0.2.0-rc.2",
+    "@types/node": "~24.0.0",
+    "tsdown": "^0.23.1",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
