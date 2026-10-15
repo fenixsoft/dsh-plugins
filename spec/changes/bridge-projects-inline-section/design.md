@@ -23,8 +23,8 @@
 
 ## Decisions
 
-1. **挂载机制 = React Portal + 语义锚点兄弟位**：从「项目」条目组件（已确认运行于侧栏树内）`ref.closest('nav')` 取条目列表元素，`insertAdjacentElement('afterend', hostDiv)` 创建宿主，`createPortal(<ProjectSection/>, hostDiv)` 渲染分区（位于条目列表与工作区之间；备选位置 regionArea 之后，实现期按视觉效果二选一，默认前者）。宿主由插件创建/清理，分区状态存既有 `projectGroupStore`（跨 portal 存活）。
-2. **锚点自愈 = 失败重试 + 周期巡检**：挂载失败（锚点未找到/宿主被移除）时按退避重试（如 MutationObserver 监听侧栏根 + 轮询兜底）；连续不可达即停用 Portal 并置 `degraded` 标志——浮层分组路径自动接管（现实现保留为组件，不删）。dsh 升级导致语义结构变化时表现为「分区消失、浮层回归」，响亮且可用。
+1. **挂载机制 = React Portal + 语义锚点兄弟位**：从「项目」条目组件（已确认运行于侧栏树内）`ref.closest('nav')` 取条目列表元素，`insertAdjacentElement('afterend', hostDiv)` 创建宿主，`createPortal(<ProjectSection/>, hostDiv)` 渲染分区（固定位于条目列表与工作区之间，不采用 regionArea 之后的备选位——与 spec Scenario「项目分区常驻内嵌」及任务 2.1 验收口径一致）。宿主由插件创建/清理，分区状态存既有 `projectGroupStore`（跨 portal 存活）。
+2. **锚点自愈 = 失败重试 + 周期巡检**：挂载失败（锚点未找到/宿主被移除）时按退避重试（如 MutationObserver 监听侧栏根 + 轮询兜底）；连续不可达即置 `degraded` 暂停 Portal 渲染——浮层分组路径自动接管（现实现保留为组件，不删）。`degraded` 为可恢复状态而非永久停用：MutationObserver/轮询兜底持续运行，锚点或宿主恢复可达即自动重挂分区并清除 `degraded`（对齐 spec Scenario「恢复锚点后分区重新出现」）。dsh 升级导致语义结构变化时表现为「分区消失、浮层回归」，响亮且可用。
 3. **宽窄态信号**：Portal 分区无法从 renderSlot 拿 `{wide}`，改从宿主宿侧栏容器实际宽度推断（`ResizeObserver` 观测宿主或根容器，阈值对齐现有 `wide` 判定）；窄态渲染徽标栈/计数紧凑形态。
 4. **分区视觉对齐官方工作区**：标题行（项目 + 计数）、行 = 圆形首字母徽标 + 名称 + hover 态、`max-height: min(7行, 46vh)` + 内部滚动；样式变量沿用 `--dsw-*` alias（与上轮浮层一致），不引新依赖。
 5. **降级双路径同仓**：浮层分组组件保留并共享 `projectGroupStore` 与 `layout.selectPanel` 回调；Portal 优先、浮层兜底，二者互斥渲染（Portal 生效时「项目」条目退化为图标直选「项目」主面板）。
@@ -42,4 +42,4 @@
 
 ## Open Questions
 
-- 分区插入位置默认取「条目列表之后、工作区之前」，实现期在隔离 profile 里与「工作区之后」二选一（视觉评审口径：与「工作区」同级的第二分区）。
+- 分区插入位置已钉死为「条目列表之后、工作区之前」（与 spec Scenario「项目分区常驻内嵌」及任务 2.1 验收口径一致）；隔离 profile 真机验收仅核对该位置的视觉效果（与「工作区」同级的第二分区），不再二选一。

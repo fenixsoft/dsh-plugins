@@ -11,6 +11,8 @@
   kind: modify
 - path: fenix-dsh-dashboard-bridge/tests/projectSync.test.ts
   kind: modify
+- path: fenix-dsh-dashboard-bridge/tests/srcContract.test.ts
+  kind: modify
 - path: fenix-dsh-dashboard-bridge/lib/client.js
   kind: reference
 ```
@@ -19,7 +21,7 @@
 
 - [ ] 1.1 实现语义锚点探测与宿主管理：从「项目」条目组件 `closest('nav')` 取条目列表元素，`insertAdjacentElement('afterend')` 创建宿主 div，React Portal 渲染分区；锚点不可达/宿主被移除时按 MutationObserver + 轮询兜底重试，连续不可达置 `degraded` 回落浮层分组（现实现保留为降级路径）；禁止依赖 CSS module 哈希类名
 - [ ] 1.2 分区组件：标题行（项目 + 计数，点击仅折叠/展开）+ 首字母徽标项目行（点击经 `layout.selectPanel` 切主面板、行高亮）+ `max-height: min(7 行, 46vh)` 内部滚动 + `ResizeObserver` 宽窄态适配（窄态徽标栈/计数）；样式沿用 `--dsw-*` alias；数据源复用 `projectGroupStore`（轮询同步/幂等/移除清理语义不变）
-- [ ] 1.3 `tests/projectSync.test.ts` 与新增纯渲染/锚点判定单测随改写，`pnpm test` / `pnpm typecheck` 全绿
+- [ ] 1.3 `tests/projectSync.test.ts`、`tests/srcContract.test.ts`（分组块纯渲染/交互与「项目」条目退化断言随 Portal 化改写）及新增纯渲染/锚点判定单测随实现更新，`pnpm test` / `pnpm typecheck` 全绿
 
 ## 2. 隔离 profile 真机验收
 
