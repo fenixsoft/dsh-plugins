@@ -718,13 +718,12 @@ const sectionRailListStyle: CSSProperties = {
   padding: '2px 0',
 }
 
-/** 窄态单枚徽标行样式（徽标栈行：居中、钉死高度、可高亮）。 */
+/** 窄态单枚徽标行样式（徽标栈行：居中、随容器收缩、可高亮、无横向溢出）。 */
 const sectionRailRowStyle = (active: boolean): CSSProperties => ({
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 30,
-  height: 30,
+  padding: 2,
   flexShrink: 0,
   borderRadius: 'var(--dsw-radius-sm, 6px)',
   cursor: 'pointer',
@@ -818,7 +817,11 @@ export function renderProjectSection(view: ProjectSectionView, handlers: Project
   )
   if (!view.wide) {
     return (
-      <section data-testid="fenix-projects-section" aria-label="项目" style={sectionStyle}>
+      <section
+        data-testid="fenix-projects-section"
+        aria-label="项目"
+        style={{ ...sectionStyle, margin: '2px 2px 8px', padding: 4, alignItems: 'center' }}
+      >
         <span
           role="button"
           tabIndex={-1}
@@ -927,10 +930,19 @@ function ProjectSectionEntry({
       }
       const current = hostRef.current
       if (current !== null && current.isConnected && current.previousElementSibling === nav) {
+        // 健康幂等：状态不变时不触发重渲染。
         setMountState((state) => nextPortalMountState(state, true))
         return
       }
-      // （重）挂载：清理陈旧宿主 → nav 紧后兄弟位插入新宿主。
+      // 宿主曾挂载但被移除/漂移：本轮先脱挂（Portal 暂停渲染 → 浮层分组自动
+      // 接管，降级可观察），下一轮巡检（观察器去抖/轮询）再重挂——不与删除
+      // 同拍重挂，保证「降级 → 恢复」的时序响亮且可验证。
+      if (current !== null) {
+        detach()
+        setMountState((state) => nextPortalMountState(state, false))
+        return
+      }
+      // 从未挂载（首挂或降级后重挂）：nav 可达即插宿主。
       detach()
       const navElement = nav as HTMLElement
       const mounted = mountSectionHost(navElement, {
@@ -985,7 +997,8 @@ function ProjectSectionEntry({
   const handlers = projectGroupHandlers(projectGroupStore, deps)
   return (
     <>
-      {/* 条目锚点：常驻于侧栏树内（portalActive 时呈图标直选「项目」主面板形态）。 */}
+      {/* 条目锚点：常驻于侧栏树内（portalActive 时呈图标直选「项目」主面板形态；
+          降级窗口零尺寸让位给浮层分组，保留树内位置供重挂探测）。 */}
       <span
         ref={anchorRef}
         data-testid="fenix-projects-anchor"
@@ -994,8 +1007,9 @@ function ProjectSectionEntry({
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: WIDE_ICON_SIZE,
-          height: WIDE_ICON_SIZE,
+          width: portalActive ? WIDE_ICON_SIZE : 0,
+          height: portalActive ? WIDE_ICON_SIZE : 0,
+          overflow: 'hidden',
         }}
       >
         {portalActive ? fixedIconComponent('fenix-projects')({ size: WIDE_ICON_SIZE }) : null}
