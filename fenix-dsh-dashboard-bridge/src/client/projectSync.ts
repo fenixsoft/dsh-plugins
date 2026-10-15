@@ -1,29 +1,32 @@
 /**
- * Client 半项目列表同步（spec「每项目动态条目」/「项目列表轮询同步」）：
- * 启动拉取 `<prefix>/api/projects` 生成每项目动态条目；60s 周期 + window focus
- * 重拉；以 name 有序集合为指纹做幂等 reconcile——新增注册、消失 dispose、
- * 无变化零操作；拉取失败/空列表仅保留固定条目且无未处理异常。
+ * Client 半项目列表同步（spec「每项目动态条目」2026-10 分组化改版）：
+ * 启动拉取 `<prefix>/api/projects` 驱动「项目」分组数据源与每项目 main keyed
+ * 面板注册；60s 周期 + window focus 重拉；以名称集合为指纹做幂等 reconcile——
+ * 新增注册面板、消失注销面板、无变化零操作；拉取失败仅保留既有状态且无未
+ * 处理异常。
+ *
+ * 项目不再逐个注册顶层侧栏条目（spec 变更：平铺条目改为「项目」分组，见
+ * panels.tsx 分组组件）；同步目标 = main keyed 面板（契约不变）+ 分组组件
+ * 数据源（setProjects 整体替换，store 内去重排序、无变化零通知）。
  *
  * 不订阅 dashboard SSE 拿项目表（design D6：避免常驻第二长连接 + 解析负担），
  * 60s 窗口对「侧栏多/少一个项目行」的时效足够。
  */
 
-/** 项目条目 order 基准（固定 5 项取 10–14，项目条目全部位于其后）。 */
-export const PROJECT_ORDER_BASE = 100
-
 /** 项目列表轮询周期。 */
 export const DEFAULT_POLL_INTERVAL_MS = 60_000
 
-/** 一条待注册的项目条目（order = 100 起按名称排序）。 */
-export interface ProjectRegistration {
-  readonly name: string
-  readonly order: number
-}
-
-/** 项目条目汇：把 reconcile 的差异落到 slots（ctx.slots.register/disposer）。 */
+/**
+ * 项目条目汇：reconcile 差异（main keyed 面板注册/注销）与分组数据源
+ * （setProjects 整体替换）的落点。
+ */
 export interface ProjectEntrySink {
-  addProject(project: ProjectRegistration): void
+  /** 项目新增（或消失后重现）：注册该项目 main keyed 面板。 */
+  addProject(name: string): void
+  /** 项目消失：注销该项目 main keyed 面板并清理分组残留态。 */
   removeProject(name: string): void
+  /** 分组数据源整体替换（实现应去重排序、无变化零通知）。 */
+  setProjects(names: readonly string[]): void
 }
 
 export type ProjectListFetcher = () => Promise<readonly string[]>
@@ -54,24 +57,23 @@ export function parseProjectNames(payload: unknown): string[] {
 }
 
 /**
- * 幂等 reconcile：期望映射 = 去重排序后的 `{ name → 100 + 有序位次 }`。
- * - 消失（或期望 order 变化，如中间插入使位次后移）→ removeProject；
- * - 新增（或 order 变化的既有项重注册）→ addProject；
- * - 指纹（name 有序集合）不变 → 期望映射逐项相等 → 零操作。
- * 返回新的已注册映射（name → order），作为下一轮 reconcile 的 current。
+ * 幂等 reconcile（main keyed 面板差异）：期望集 = 去重后的名称集合。
+ * - 消失 → removeProject；
+ * - 新增 → addProject；
+ * - 指纹（名称集合）不变 → 零操作。
+ * 返回新的已注册集合，作为下一轮 reconcile 的 current。
  */
 export function reconcileProjects(
-  current: ReadonlyMap<string, number>,
+  current: ReadonlySet<string>,
   next: readonly string[],
-  sink: ProjectEntrySink,
-): ReadonlyMap<string, number> {
-  const names = [...new Set(next)].sort(compareNames)
-  const desired = new Map<string, number>(names.map((name, index) => [name, PROJECT_ORDER_BASE + index]))
-  for (const [name, order] of current) {
-    if (desired.get(name) !== order) sink.removeProject(name)
+  sink: Pick<ProjectEntrySink, 'addProject' | 'removeProject'>,
+): ReadonlySet<string> {
+  const desired = new Set([...new Set(next)])
+  for (const name of current) {
+    if (!desired.has(name)) sink.removeProject(name)
   }
-  for (const [name, order] of desired) {
-    if (current.get(name) !== order) sink.addProject({ name, order })
+  for (const name of desired) {
+    if (!current.has(name)) sink.addProject(name)
   }
   return desired
 }
@@ -106,7 +108,7 @@ function defaultTimer(): SyncTimer {
 export interface ProjectSyncOptions {
   /** 拉取项目名列表（默认实现 fetch `<prefix>/api/projects` 并解析）。 */
   readonly fetchProjects: ProjectListFetcher
-  /** 差异落点（ctx.slots 注册/注销）。 */
+  /** 差异落点（main keyed 面板注册/注销 + 分组数据源）。 */
   readonly sink: ProjectEntrySink
   /** 轮询周期；缺省 60s。 */
   readonly intervalMs?: number
@@ -121,7 +123,7 @@ export interface ProjectSyncOptions {
 export function startProjectSync(options: ProjectSyncOptions): () => void {
   const intervalMs = options.intervalMs ?? DEFAULT_POLL_INTERVAL_MS
   const timer = options.timer ?? defaultTimer()
-  let current: ReadonlyMap<string, number> = new Map()
+  let current: ReadonlySet<string> = new Set()
   let stopped = false
   let inFlight = false
 
@@ -130,12 +132,15 @@ export function startProjectSync(options: ProjectSyncOptions): () => void {
     inFlight = true
     try {
       const names = await options.fetchProjects()
-      if (!stopped) current = reconcileProjects(current, names, options.sink)
+      if (!stopped) {
+        current = reconcileProjects(current, names, options.sink)
+        options.sink.setProjects(names)
+      }
     } catch (error) {
-      // 拉取失败：仅保留固定条目（既有项目条目原样保留），无未处理异常，
-      // 等下一轮/聚焦重试。失败要吞但不能不可见：warn 出状态/错误消息便于排障。
+      // 拉取失败：仅保留既有状态（面板与分组数据源原样），无未处理异常，
+      // 等下一轮/聚焦重试。失败要吞但不能不可见：warn 出状态便于排障。
       console.warn(
-        `[fenix-dsh-dashboard-bridge] 拉取项目列表失败（保留既有条目，等下一轮/聚焦重试）：${
+        `[fenix-dsh-dashboard-bridge] 拉取项目列表失败（保留既有状态，等下一轮/聚焦重试）：${
           error instanceof Error ? error.message : String(error)
         }`,
       )

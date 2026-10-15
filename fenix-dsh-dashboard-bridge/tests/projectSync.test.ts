@@ -1,37 +1,43 @@
 /**
- * Client 半单测：reconcile 三态与幂等、失败兜底、同步循环（假定时器/焦点桩）、
- * 项目列表解析。
+ * Client 半单测（2026-10 分组化数据流）：reconcile 三态与幂等、失败兜底、
+ * 同步循环（假定时器/焦点桩）、项目列表解析、分组数据源（store）契约。
  */
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_POLL_INTERVAL_MS,
-  PROJECT_ORDER_BASE,
   compareNames,
   parseProjectNames,
   reconcileProjects,
   startProjectSync,
 } from '../src/client/projectSync.js'
 import type { ProjectEntrySink, SyncTimer } from '../src/client/projectSync.js'
+import { projectGroupStore } from '../src/client/panels.js'
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 interface RecordingSink extends ProjectEntrySink {
-  readonly added: { name: string; order: number }[]
+  readonly added: string[]
   readonly removed: string[]
+  readonly projectSets: readonly (readonly string[])[]
   calls(): number
 }
 
 function recordingSink(): RecordingSink {
-  const added: { name: string; order: number }[] = []
+  const added: string[] = []
   const removed: string[] = []
+  const projectSets: (readonly string[])[] = []
   return {
     added,
     removed,
-    addProject(project) {
-      added.push({ name: project.name, order: project.order })
+    projectSets,
+    addProject(name) {
+      added.push(name)
     },
     removeProject(name) {
       removed.push(name)
+    },
+    setProjects(names) {
+      projectSets.push([...names])
     },
     calls: () => added.length + removed.length,
   }
@@ -86,42 +92,26 @@ function fakeTimer(): SyncTimer & {
   }
 }
 
-describe('reconcileProjects（指纹幂等）', () => {
-  it('新增：空 → [b,a] 按名称序注册，order 从 100 起', () => {
+describe('reconcileProjects（main 面板差异，指纹幂等）', () => {
+  it('新增：空 → {a,b} 全部注册（名称序无关差异数）', () => {
     const sink = recordingSink()
-    const next = reconcileProjects(new Map(), ['b', 'a'], sink)
-    expect(sink.added).toEqual([
-      { name: 'a', order: PROJECT_ORDER_BASE },
-      { name: 'b', order: PROJECT_ORDER_BASE + 1 },
-    ])
+    const next = reconcileProjects(new Set(), ['b', 'a'], sink)
+    expect(sink.added.sort()).toEqual(['a', 'b'])
     expect(sink.removed).toEqual([])
-    expect([...next.entries()]).toEqual([
-      ['a', 100],
-      ['b', 101],
-    ])
+    expect([...next].sort()).toEqual(['a', 'b'])
   })
 
   it('移除：消失项目 dispose，保留项零操作', () => {
     const sink = recordingSink()
-    const next = reconcileProjects(
-      new Map([
-        ['a', 100],
-        ['b', 101],
-      ]),
-      ['a'],
-      sink,
-    )
+    const next = reconcileProjects(new Set(['a', 'b']), ['a'], sink)
     expect(sink.removed).toEqual(['b'])
     expect(sink.added).toEqual([])
-    expect([...next.entries()]).toEqual([['a', 100]])
+    expect([...next]).toEqual(['a'])
   })
 
   it('无变化：指纹一致零操作（连续同列表零重注册）', () => {
     const sink = recordingSink()
-    const current = new Map([
-      ['a', 100],
-      ['b', 101],
-    ])
+    const current = new Set(['a', 'b'])
     const once = reconcileProjects(current, ['a', 'b'], sink)
     expect(sink.calls()).toBe(0)
     const twice = reconcileProjects(once, ['b', 'a'], sink)
@@ -129,36 +119,10 @@ describe('reconcileProjects（指纹幂等）', () => {
     expect(twice).toEqual(once)
   })
 
-  it('中间插入：新项按名称序入位，位次后移的既有项重注册，其余不动', () => {
+  it('重复名去重后视为单项目', () => {
     const sink = recordingSink()
-    const next = reconcileProjects(
-      new Map([
-        ['a', 100],
-        ['c', 101],
-      ]),
-      ['a', 'b', 'c'],
-      sink,
-    )
-    // c 从 order 101 移到 102 → 先注销再重注册；a 保持 100 不动。
-    expect(sink.removed).toEqual(['c'])
-    expect(sink.added).toEqual([
-      { name: 'b', order: 101 },
-      { name: 'c', order: 102 },
-    ])
-    expect([...next.entries()]).toEqual([
-      ['a', 100],
-      ['b', 101],
-      ['c', 102],
-    ])
-  })
-
-  it('重复名去重后按名称序编 order', () => {
-    const sink = recordingSink()
-    const next = reconcileProjects(new Map(), ['x', 'x', 'a'], sink)
-    expect(sink.added).toEqual([
-      { name: 'a', order: 100 },
-      { name: 'x', order: 101 },
-    ])
+    const next = reconcileProjects(new Set(), ['x', 'x', 'a'], sink)
+    expect(sink.added.sort()).toEqual(['a', 'x'])
     expect(next.size).toBe(2)
   })
 
@@ -210,22 +174,22 @@ describe('startProjectSync 同步循环', () => {
     })
     await tick()
     expect(fetchCalls).toBe(1)
-    expect(sink.added).toEqual([{ name: 'a', order: 100 }])
+    expect(sink.added).toEqual(['a'])
+    expect(sink.projectSets).toEqual([['a']])
     expect(timer.intervalMs).toBe(1234)
 
-    // 周期触发：列表变化 → 差异注册。
+    // 周期触发：列表变化 → 差异注册 + 数据源整体替换。
     list = ['a', 'b']
     timer.triggerInterval()
     await tick()
-    expect(sink.added).toEqual([
-      { name: 'a', order: 100 },
-      { name: 'b', order: 101 },
-    ])
+    expect(sink.added).toEqual(['a', 'b'])
+    expect(sink.projectSets).toEqual([['a'], ['a', 'b']])
 
-    // 焦点触发：列表无变化 → 零操作。
+    // 焦点触发：列表无变化 → 面板零操作，数据源仍整体替换（store 内幂等）。
     timer.triggerFocus()
     await tick()
     expect(sink.calls()).toBe(2)
+    expect(sink.projectSets).toHaveLength(3)
 
     // stop：清定时器 + 退订焦点 + 停止拉取。
     stop()
@@ -268,15 +232,17 @@ describe('startProjectSync 同步循环', () => {
     await tick()
     await tick()
     expect(sink.calls()).toBe(0)
+    expect(sink.projectSets).toHaveLength(0)
 
     shouldFail = false
     timer.triggerInterval()
     await tick()
-    expect(sink.added).toEqual([{ name: 'a', order: 100 }])
+    expect(sink.added).toEqual(['a'])
+    expect(sink.projectSets).toEqual([['a']])
     stop()
   })
 
-  it('空列表：全部项目条目 dispose（仅固定条目保留），不抛异常', async () => {
+  it('空列表：全部项目 main 面板 dispose（固定条目不受影响），数据源清空', async () => {
     const timer = fakeTimer()
     const sink = recordingSink()
     let list: string[] = ['a', 'b']
@@ -294,6 +260,38 @@ describe('startProjectSync 同步循环', () => {
     await tick()
     expect(sink.removed.sort()).toEqual(['a', 'b'])
     expect(sink.added).toHaveLength(2)
+    expect(sink.projectSets.at(-1)).toEqual([])
     stop()
+  })
+})
+
+describe('projectGroupStore（分组数据源契约）', () => {
+  beforeEach(() => {
+    projectGroupStore.reset()
+  })
+
+  it('setProjects 去重 + 码点序排序；无变化零通知', () => {
+    const seen: string[][] = []
+    const unsubscribe = projectGroupStore.subscribe(() => {
+      seen.push([...projectGroupStore.getSnapshot().projects])
+    })
+    projectGroupStore.setProjects(['dsh-plugins', 'fenixd', 'fenixd'])
+    expect(projectGroupStore.getSnapshot().projects).toEqual(['dsh-plugins', 'fenixd'])
+    projectGroupStore.setProjects(['fenixd', 'dsh-plugins'])
+    expect(seen).toHaveLength(1)
+    unsubscribe()
+  })
+
+  it('展开/折叠与高亮切换；高亮项目从列表消失时归空', () => {
+    projectGroupStore.setProjects(['a', 'b'])
+    projectGroupStore.setActiveProject('a')
+    expect(projectGroupStore.getSnapshot().activeProject).toBe('a')
+    projectGroupStore.toggleExpanded()
+    expect(projectGroupStore.getSnapshot().expanded).toBe(false)
+    projectGroupStore.setProjects(['b'])
+    expect(projectGroupStore.getSnapshot().activeProject).toBeNull()
+    expect(projectGroupStore.getSnapshot().expanded).toBe(false)
+    projectGroupStore.toggleExpanded()
+    expect(projectGroupStore.getSnapshot().expanded).toBe(true)
   })
 })

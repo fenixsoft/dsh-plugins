@@ -44,6 +44,21 @@ declare module '@deepseek-ai/cordis' {
       /** 注册命名路由；同 (kind, path) 重复注册会抛错。返回注销 disposer。 */
       register(route: WebRoute): () => void
     }
+    /**
+     * client 布局服务（@deepseek-ai/dsh-client-ui-layout 提供）。
+     *
+     * 程序化面板切换入口（2026-10 实现期读 0.2.0-rc.2 发行包源码钉死）：
+     * ui-sidebar 的 panellist 行按钮 onClick → 注入回调 selectPanel(id) →
+     * `ctx.layout.selectPanel(id)`；layout 侧校验 hasMainPanel(panelId)（未注册
+     * 抛 `layout.selectPanel: main panel "<id>" is not registered`）后写
+     * panelInfo.activePanelId 驱动 main keyed 面板与行高亮。面板选中无 hash
+     * 路由事实源（layout client 无 hashchange/location.hash），深链仅存在于
+     * 本插件 iframe src 内部。
+     */
+    readonly layout: {
+      /** 激活 main keyed 面板（panelId=null 回到会话视图）；未注册的 id 会抛错。 */
+      selectPanel(panelId: string | null): void
+    }
   }
 
   /** slots.register 的注册选项（SlotRegistrationOptions / KindOptions 子集）。 */

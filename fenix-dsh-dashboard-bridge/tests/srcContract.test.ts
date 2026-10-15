@@ -1,12 +1,21 @@
 /**
  * Client 半单测：iframe src 契约逐字符断言（默认/非默认前缀两组）+ 条目注册
- * 断言（桩 slots 上 5 固定条目 id/label/order、项目条目名称序、main keyed
- * 注册 id 一一对应、面板组件渲染出的 iframe 属性）。
+ * 断言（桩 slots 上 5 固定条目 id/label/order、项目不再平铺注册、main keyed
+ * 注册一一对应、面板组件渲染出的 iframe 属性）+ 分组块纯渲染/交互契约
+ * （点击项目行 → layout.selectPanel + 高亮；头部行仅折叠切换）。
  */
-import { describe, expect, it } from 'vitest'
-import { FIXED_ENTRIES, apply, projectIdFor, projectRouteFor } from '../src/client/index.js'
+import { beforeEach, describe, expect, it } from 'vitest'
+import {
+  FIXED_ENTRIES,
+  apply,
+  projectIdFor,
+  projectPanelSelector,
+  projectRouteFor,
+} from '../src/client/index.js'
 import type { ClientPluginOptions } from '../src/client/index.js'
 import { buildPanelSrc, resolveBridgeConfig } from '../src/shared/config.js'
+import { projectGroupStore, projectGroupHandlers, renderProjectGroup } from '../src/client/panels.js'
+import type { ProjectGroupHandlers } from '../src/client/panels.js'
 import type { SyncTimer } from '../src/client/projectSync.js'
 
 const flush = async (): Promise<void> => {
@@ -35,17 +44,34 @@ function collectByType(node: unknown, type: string, acc: ElementLike[] = []): El
   return acc
 }
 
+/** 按 data-testid 收集元素树命中的 React 元素。 */
+function collectByTestId(node: unknown, testId: string, acc: ElementLike[] = []): ElementLike[] {
+  if (node === null || node === undefined) return acc
+  if (typeof node === 'string' || typeof node === 'number' || typeof node === 'boolean') return acc
+  if (Array.isArray(node)) {
+    for (const child of node) collectByTestId(child, testId, acc)
+    return acc
+  }
+  if (typeof node === 'object' && 'type' in node && 'props' in node) {
+    const element = node as ElementLike
+    if (element.props?.['data-testid'] === testId) acc.push(element)
+    collectByTestId(element.props?.children, testId, acc)
+  }
+  return acc
+}
+
 interface Registration {
   readonly slotName: string
   readonly options: Record<string, unknown>
   readonly component: unknown
 }
 
-/** 最小 slots 桩：记录注册、维护 live 表、注销登记。 */
+/** 最小 slots/layout 桩：记录注册、维护 live 表、注销登记、selectPanel 调用迹。 */
 function stubSlotsCtx() {
   const registrations: Registration[] = []
   const removed: string[] = []
   const injectCalls: string[] = []
+  const selectedPanels: (string | null)[] = []
   const live = new Map<string, Registration>()
   const ctx = {
     slots: {
@@ -63,8 +89,13 @@ function stubSlotsCtx() {
         }
       },
     },
+    layout: {
+      selectPanel(panelId: string | null) {
+        selectedPanels.push(panelId)
+      },
+    },
   }
-  return { ctx, registrations, removed, injectCalls, live }
+  return { ctx, registrations, removed, injectCalls, live, selectedPanels }
 }
 
 function fakeTimer(): SyncTimer {
@@ -208,10 +239,16 @@ describe('条目注册（桩 slots）', () => {
     // main keyed 注册 id 与侧栏条目一一对应。
     expect(panels.map((entry) => entry.options.key)).toEqual(fixed.map((entry) => entry.options.id))
 
-    // 固定条目组件是线性 svg 图标组件。
+    // 固定条目组件：线性 svg 图标组件 ×4 + 「项目」分组块组件（hook 组件，
+    // 订阅分组 store；渲染树断言在「项目」分组块 describe 内经纯渲染面覆盖）。
     for (const entry of fixed) {
-      const rendered = (entry.component as (props: Record<string, unknown>) => unknown)({ size: 16 })
-      expect(collectByType(rendered, 'svg')).toHaveLength(1)
+      const rendered = (entry.component as (props: Record<string, unknown>) => unknown)({ size: 16 }) as ElementLike
+      if (entry.options.id === 'fenix-projects') {
+        expect(typeof rendered.type, '「项目」条目为分组块组件（函数组件）').toBe('function')
+        expect(collectByType(rendered, 'svg')).toHaveLength(0)
+      } else {
+        expect(collectByType(rendered, 'svg'), `${String(entry.options.id)} 应为线性图标组件`).toHaveLength(1)
+      }
     }
     stub.stop()
   })
@@ -226,51 +263,198 @@ describe('条目注册（桩 slots）', () => {
     ])
   })
 
-  it('项目动态条目：名称序 order 100 起、label=项目名、main 面板深链直达', async () => {
-    // 故意乱序输入，验证注册按名称序。
+  it('项目分组化：不平铺顶层条目；main 面板深链直达；数据源驱动分组', async () => {
+    // 故意乱序输入，验证数据源按名称序。
     const stub = await applied({ fetchProjects: () => Promise.resolve(['fenixd', 'dsh-plugins', 'cc-import']) })
 
-    const projects = sidebarEntries(stub, (options) => String(options.id).startsWith('fenix-project-'))
-    expect(projects.map((entry) => entry.options.id)).toEqual([
-      'fenix-project-cc-import',
-      'fenix-project-dsh-plugins',
-      'fenix-project-fenixd',
-    ])
-    expect(projects.map((entry) => entry.options.order)).toEqual([100, 101, 102])
-    expect(projects.map((entry) => entry.options.label)).toEqual(['cc-import', 'dsh-plugins', 'fenixd'])
-
-    const projectPanel = mainEntries(stub).find((entry) => entry.options.key === 'fenix-project-fenixd')
-    const iframe = iframeOf(projectPanel?.component)
-    expect(iframe.props?.src).toBe('/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/projects/fenixd')
-
-    // 项目条目图标是首字母圆形徽标（span 内联样式）。
-    const badge = (projects[0]?.component as (props: Record<string, unknown>) => unknown)({ size: 18 })
-    const spans = collectByType(badge, 'span')
-    expect(spans).toHaveLength(1)
-    expect((spans[0]?.props?.style as Record<string, unknown>)?.['borderRadius']).toBe('50%')
-
-    // stop：项目条目全部 dispose，固定条目不在 stop 范围（由 inject disposer 注销）。
-    const projectCount = projects.length + mainEntries(stub).filter((entry) => String(entry.options.key).startsWith('fenix-project-')).length
-    stub.stop()
-    expect(stub.removed).toHaveLength(projectCount)
-    for (const id of ['fenix-overview', 'fenix-projects', 'fenix-settings', 'fenix-activities', 'fenix-help']) {
-      expect(stub.removed).not.toContain(`list:${id}`)
-    }
-  })
-
-  it('拉取失败：仅固定条目存在，无未处理异常', async () => {
-    const stub = await applied({ fetchProjects: () => Promise.reject(new Error('upstream down')) })
-    await flush()
+    // spec「项目收纳进分组」：侧栏不出现平铺的项目顶层条目。
     const projects = sidebarEntries(stub, (options) => String(options.id).startsWith('fenix-project-'))
     expect(projects).toHaveLength(0)
     expect(sidebarEntries(stub)).toHaveLength(5)
+
+    // main keyed 注册契约不变：每项目 iframe 深链直达。
+    const projectPanel = mainEntries(stub).find((entry) => entry.options.key === 'fenix-project-fenixd')
+    const iframe = iframeOf(projectPanel?.component)
+    expect(iframe.props?.src).toBe('/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/projects/fenixd')
+    expect(projectGroupStore.getSnapshot().projects).toEqual(['cc-import', 'dsh-plugins', 'fenixd'])
+
+    // stop：项目 main 面板全部 dispose，固定条目不在 stop 范围（由 inject disposer 注销）。
+    const projectPanelCount = mainEntries(stub).filter((entry) =>
+      String(entry.options.key).startsWith('fenix-project-'),
+    ).length
     stub.stop()
+    expect(stub.removed).toHaveLength(projectPanelCount)
+    for (const id of ['fenix-overview', 'fenix-projects', 'fenix-settings', 'fenix-activities', 'fenix-help']) {
+      expect(stub.removed).not.toContain(`list:${id}`)
+      expect(stub.removed).not.toContain(`main:${id}`)
+    }
   })
 
-  it('空列表：不注册任何项目条目，固定条目照常', async () => {
-    const stub = await applied({ fetchProjects: () => Promise.resolve([]) })
-    expect(sidebarEntries(stub, (options) => String(options.id).startsWith('fenix-project-'))).toHaveLength(0)
-    expect(sidebarEntries(stub)).toHaveLength(5)
-    stub.stop()
+  it('空列表/上游停机：不注册项目 main 面板、分组数据源清空，无未处理异常', async () => {
+    projectGroupStore.setActiveProject('stale')
+    const empty = await applied({ fetchProjects: () => Promise.resolve([]) })
+    expect(mainEntries(empty).filter((entry) => String(entry.options.key).startsWith('fenix-project-'))).toHaveLength(0)
+    expect(projectGroupStore.getSnapshot().projects).toEqual([])
+    empty.stop()
+
+    const failed = await applied({ fetchProjects: () => Promise.reject(new Error('upstream down')) })
+    await flush()
+    expect(mainEntries(failed).filter((entry) => String(entry.options.key).startsWith('fenix-project-'))).toHaveLength(0)
+    failed.stop()
+  })
+})
+
+describe('「项目」分组块（纯渲染 + 交互契约）', () => {
+  const noopRef = { current: null }
+
+  /** 构造仅带 stopPropagation 的伪事件（handlers 契约面只消费它）。 */
+  const fakeEvent = (): Parameters<ProjectGroupHandlers['toggleHeader']>[0] => ({ stopPropagation() {} }) as never
+
+  function groupView(overrides: Partial<Parameters<typeof renderProjectGroup>[0]> = {}) {
+    return {
+      projects: ['fenixd', 'dsh-plugins'],
+      expanded: true,
+      activeProject: null,
+      wide: true,
+      rowWidth: 260,
+      glyphRef: noopRef,
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    projectGroupStore.reset()
+  })
+
+  it('宽态展开：项目行 = 首字母徽标 + 项目名；行可点且带 data-testid', () => {
+    const tree = renderProjectGroup(groupView(), {
+      toggleHeader: () => {},
+      selectProject: () => {},
+    })
+    const list = collectByTestId(tree, 'fenix-projects-list')
+    expect(list).toHaveLength(1)
+    for (const name of ['fenixd', 'dsh-plugins']) {
+      const row = collectByTestId(tree, `fenix-project-row-${name}`)
+      expect(row, `项目行 ${name}`).toHaveLength(1)
+      // 行内含首字母圆形徽标（span borderRadius 50%）与项目名文本。
+      const style = row[0] && (collectByType(row[0], 'span').map((span) => span.props?.['style']) as (Record<string, unknown> | undefined)[])
+      expect(style?.some((item) => item?.['borderRadius'] === '50%')).toBe(true)
+    }
+  })
+
+  it('宽态折叠：列表不渲染；窄态（收起轨）仅徽标计数', () => {
+    const collapsed = renderProjectGroup(groupView({ expanded: false }), { toggleHeader: () => {}, selectProject: () => {} })
+    expect(collectByTestId(collapsed, 'fenix-projects-list')).toHaveLength(0)
+    expect(collectByTestId(collapsed, 'fenix-projects-header')).toHaveLength(1)
+
+    const rail = renderProjectGroup(groupView({ wide: false }), { toggleHeader: () => {}, selectProject: () => {} })
+    const count = collectByTestId(rail, 'fenix-projects-rail-count')
+    expect(count).toHaveLength(1)
+    expect(collectByTestId(rail, 'fenix-projects-list')).toHaveLength(0)
+  })
+
+  it('空列表：分组呈现空态提示，不渲染项目行', () => {
+    const tree = renderProjectGroup(groupView({ projects: [] }), { toggleHeader: () => {}, selectProject: () => {} })
+    expect(collectByTestId(tree, 'fenix-projects-empty')).toHaveLength(1)
+    expect(collectByTestId(tree, 'fenix-projects-list')).toHaveLength(1)
+  })
+
+  it('限高滚动：列表容器 maxHeight 有上限且 overflowY auto', () => {
+    const tree = renderProjectGroup(groupView(), { toggleHeader: () => {}, selectProject: () => {} })
+    const list = collectByTestId(tree, 'fenix-projects-list')[0]
+    const style = list?.props?.['style'] as Record<string, unknown>
+    expect(String(style?.['maxHeight'])).toMatch(/min\(\d+px/)
+    expect(style?.['overflowY']).toBe('auto')
+  })
+
+  it('点击项目行：stopPropagation + selectProject(name)，当前行高亮', () => {
+    const selected: string[] = []
+    let propagationStopped = false
+    const tree = renderProjectGroup(
+      groupView({ activeProject: 'fenixd' }),
+      projectGroupHandlers(projectGroupStore, {
+        selectProject: (name) => {
+          selected.push(name)
+        },
+      }),
+    )
+    const row = collectByTestId(tree, 'fenix-project-row-dsh-plugins')[0]
+    const onClick = row?.props?.['onClick'] as (event: { stopPropagation(): void }) => void
+    onClick({
+      stopPropagation: () => {
+        propagationStopped = true
+      },
+    })
+    expect(selected).toEqual(['dsh-plugins'])
+    expect(propagationStopped).toBe(true)
+    // 当前高亮项目行 data-active 标记。
+    const activeRow = collectByTestId(tree, 'fenix-project-row-fenixd')[0]
+    expect(activeRow?.props?.['data-active']).toBe(true)
+    const style = activeRow?.props?.['style'] as Record<string, unknown>
+    expect(String(style?.['background'])).toContain('var(')
+  })
+
+  it('点击头部行：stopPropagation + 仅切换展开/折叠（不触发 selectProject）', () => {
+    let selected = 0
+    const tree = renderProjectGroup(
+      groupView(),
+      projectGroupHandlers(projectGroupStore, {
+        selectProject: () => {
+          selected += 1
+        },
+      }),
+    )
+    const header = collectByTestId(tree, 'fenix-projects-header')[0]
+    const onClick = header?.props?.['onClick'] as (event: { stopPropagation(): void }) => void
+    onClick({ stopPropagation: () => {} })
+    expect(projectGroupStore.getSnapshot().expanded).toBe(false)
+    expect(selected).toBe(0)
+  })
+
+  it('projectGroupHandlers：stopPropagation 后分别落 store 切换与 deps.selectProject', () => {
+    const selected: string[] = []
+    const handlers = projectGroupHandlers(projectGroupStore, { selectProject: (name) => selected.push(name) })
+    handlers.toggleHeader(fakeEvent())
+    expect(projectGroupStore.getSnapshot().expanded).toBe(false)
+    handlers.selectProject('fenixd', fakeEvent())
+    expect(selected).toEqual(['fenixd'])
+    // store 高亮由 index.ts 的 selector 落（此处只验证 handler 不越权改高亮）。
+    expect(projectGroupStore.getSnapshot().activeProject).toBeNull()
+  })
+})
+
+describe('projectPanelSelector（点击 → layout.selectPanel 契约）', () => {
+  beforeEach(() => {
+    projectGroupStore.reset()
+  })
+
+  it('调用 layout.selectPanel(projectId) 并更新分组高亮', () => {
+    const selectedPanels: (string | null)[] = []
+    const ctx = {
+      layout: {
+        selectPanel(panelId: string | null) {
+          selectedPanels.push(panelId)
+        },
+      },
+    }
+    projectPanelSelector(ctx as never)('fenixd')
+    expect(selectedPanels).toEqual([projectIdFor('fenixd')])
+    expect(projectGroupStore.getSnapshot().activeProject).toBe('fenixd')
+  })
+
+  it('layout.selectPanel 抛错（面板未注册）：吞掉 warn，不抛未处理异常', () => {
+    const ctx = {
+      layout: {
+        selectPanel() {
+          throw new Error('layout.selectPanel: main panel "fenix-project-x" is not registered')
+        },
+      },
+    }
+    expect(() => projectPanelSelector(ctx as never)('x')).not.toThrow()
+    expect(projectGroupStore.getSnapshot().activeProject).toBeNull()
+  })
+
+  it('layout 服务缺失（异常环境）：静默降级，仅 warn 不抛', () => {
+    expect(() => projectPanelSelector({} as never)('fenixd')).not.toThrow()
   })
 })
