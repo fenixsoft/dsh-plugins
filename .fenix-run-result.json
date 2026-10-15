@@ -1,244 +1,388 @@
 {
   "status": "success",
-  "spec": "polish-dsh-plugins-ui",
+  "spec": "bridge-projects-inline-section",
   "mode": "fast-track",
-  "summary": "bridge 项目条目从平铺顶层条目改为「项目」分组（工作区样式）：panellist 行内分组块（可折叠头部拦截层 + 首字母徽标+项目名行 + 限高内部滚动 + 窄态计数徽标 + 当前行高亮），点击项目行经 ctx.layout.selectPanel 切主面板 iframe（深链 #/projects/<name> 不变），projectSync 改为分组数据源差异同步；cc-import 导入对话框提升为视口 80% 宽（Modal className + data-plugin-css 标记样式注入）并新增「取消全部选择」（清勾选与将更新、无勾选禁用、计数归零禁用，zh/en 文案）。真机验证 9 场景全过（隔离 profile 3941/3942 双实例 + playwright DOM 断言），过程中发现并修复两个首轮缺陷：dataset 整体赋值在真机不落 data-plugin-css（幂等守卫失效，7b48944）、分组行 flex-shrink 默认压缩致限高滚动条永不出现（2566360），修复后复测通过，无遗留缺陷。",
+  "summary": "「项目」侧栏分组由条目内下拉浮层升级为 Portal 常驻内嵌分区：从「项目」条目组件 closest('nav') 取条目列表语义锚点（禁 CSS module 哈希），nav 紧后兄弟位插宿主 div 并 createPortal 渲染官方工作区同款分区（标题行+计数、首字母徽标项目行、min(222px,46vh) 限高内部滚动、宿主宽度推断宽窄态、窄态徽标栈）；MutationObserver 去抖 + 1s 轮询兜底巡检自愈，宿主被移除先降级浮层分组（可观察窗口）下轮重挂，连续 3 次不可达置 degraded，恢复即自动清除；「项目」条目 Portal 生效时退化为图标直选主面板，浮层分组保留为降级路径，数据源共用 projectGroupStore（轮询/幂等/清理语义不变），深链 #/projects/<name> 契约不变。单测 60/60 全绿、typecheck 通过、构建产物 lib/client.js 正常；隔离 profile 三实例真机验收（真实上游 6 项目 / 10 项目 mock 上游 / 上游停机）7 场景全部通过：内嵌位置与 DOM 结构、标题行仅折叠、行点击深链切换+高亮、限高滚动不撑破侧栏、窄态无溢出、锚点漂移降级-恢复演练（807ms 恢复、宿主唯一、控制台零异常、reload 无残留）、空态无未处理异常。验证中发现并修复 2 处轻微缺陷（窄态 3px 横向溢出；宿主删除与重挂同拍导致降级窗口不可观察），均已复验。证据落主树 .fenix/verify-evidence/bridge-projects-inline-section/。",
   "completed_tasks": [
     "1.1",
     "1.2",
     "1.3",
-    "1.4",
     "2.1",
     "2.2",
     "2.3"
   ],
   "implementation": {
     "deliverables": [
-      "fenix-dsh-dashboard-bridge/src/types/dsh-runtime.d.ts",
-      "fenix-dsh-dashboard-bridge/src/client/index.ts",
       "fenix-dsh-dashboard-bridge/src/client/panels.tsx",
+      "fenix-dsh-dashboard-bridge/src/client/index.ts",
       "fenix-dsh-dashboard-bridge/src/client/projectSync.ts",
+      "fenix-dsh-dashboard-bridge/src/types/dsh-runtime.d.ts",
       "fenix-dsh-dashboard-bridge/tests/projectSync.test.ts",
       "fenix-dsh-dashboard-bridge/tests/srcContract.test.ts",
-      "fenix-dsh-dashboard-bridge/lib/client.js",
-      "cc-import/src/client/dialog.tsx",
-      "cc-import/src/client/locales.ts",
-      "cc-import/src/types/dsh-runtime.d.ts",
-      "cc-import/tests/locales.test.ts",
-      "cc-import/lib/client.js"
-    ],
-    "commits": [
-      "b7441b8 1.1 selectPanel 类型接缝",
-      "bfa1771 1.2 分组重构",
-      "4ffcfde 1.3 契约测试改写",
-      "589d013 2.1 80vw+列布局",
-      "7b48944 2.1fix 样式标记 setAttribute",
-      "fa594d2 2.2 取消全部选择",
-      "2566360 1.2fix flex-shrink 行高",
-      "4577ad8 tasks.md 勾选"
+      "fenix-dsh-dashboard-bridge/package.json",
+      "fenix-dsh-dashboard-bridge/pnpm-lock.yaml",
+      "fenix-dsh-dashboard-bridge/lib/client.js"
     ]
   },
   "verification": {
     "scenarios": [
       {
-        "scenario_id": "bridge-group-not-flat",
+        "scenario_id": "portal-section-between-nav-and-workspace",
         "kind": "web",
-        "description": "项目收纳进「项目」分组：侧栏不出现平铺的项目顶层条目（帮助之后无新增），分组内为首字母徽标+项目名行（真机 6 项目），列表浮层 absolute 定位于行下沿",
+        "description": "项目分区常驻内嵌于条目列表 nav 与工作区之间（Portal 宿主 nav 紧后兄弟位），6 项目行（首字母徽标+项目名），项目行不入条目区",
         "status": "pass",
         "assertion_results": [
           {
-            "type": "step",
+            "type": "assertion",
             "pass": true,
-            "message": "nav 顺序 [插件,概览,项目,设置,运维,帮助]；分组 6 行；list x=12 w=256 z=30 maxHeight=min(222px,46vh) overflowY=auto；console 0 错误"
-          }
-        ],
-        "screenshots": [
-          ".fenix/verify-evidence/polish-dsh-plugins-ui/bridge-group-not-flat.png"
-        ],
-        "evidence": {
-          "failed_assertions": [],
-          "output": ".fenix/verify-evidence/polish-dsh-plugins-ui/snap-bridge-group-not-flat.yml",
-          "kind_note": "playwright DOM 断言 + 截图 .fenix/verify-evidence/polish-dsh-plugins-ui/bridge-group-not-flat.png"
-        }
-      },
-      {
-        "scenario_id": "bridge-group-expand-rows",
-        "kind": "web",
-        "description": "点击分组头部行仅切换折叠/展开（拦截层阻断行按钮 selectPanel）：折叠后列表与行消失、chevron 复位、主面板不变；再点展开恢复",
-        "status": "pass",
-        "assertion_results": [
-          {
-            "type": "step",
-            "pass": true,
-            "message": "collapsed: list=false rows=0 chevron=matrix(1,0,0,1) iframes=[]；expanded: list=true rows=6 iframes=[]（面板未切换）"
-          }
-        ],
-        "screenshots": [
-          ".fenix/verify-evidence/polish-dsh-plugins-ui/bridge-group-expand-rows.png"
-        ],
-        "evidence": {
-          "failed_assertions": [],
-          "output": ".fenix/verify-evidence/polish-dsh-plugins-ui/bridge-group-expand-collapsed.eval.json + bridge-group-expand-expanded.eval.json",
-          "kind_note": "playwright DOM 断言 + 截图 .fenix/verify-evidence/polish-dsh-plugins-ui/bridge-group-expand-rows.png"
-        }
-      },
-      {
-        "scenario_id": "bridge-row-click-switch-panel",
-        "kind": "web",
-        "description": "点击分组内项目行「fenixd」：主面板 iframe 切换为深链 #/projects/fenixd，行 data-active=true 且高亮",
-        "status": "pass",
-        "assertion_results": [
-          {
-            "type": "step",
-            "pass": true,
-            "message": "iframe src=http://127.0.0.1:3941/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/projects/fenixd；data-active=true；rowBg=rgba(38,49,72,0.06)"
-          }
-        ],
-        "screenshots": [
-          ".fenix/verify-evidence/polish-dsh-plugins-ui/bridge-row-click-switch-panel.png"
-        ],
-        "evidence": {
-          "failed_assertions": [],
-          "output": ".fenix/verify-evidence/polish-dsh-plugins-ui/snap-bridge-row-click.yml",
-          "kind_note": "playwright DOM 断言 + 截图 .fenix/verify-evidence/polish-dsh-plugins-ui/bridge-row-click-switch-panel.png"
-        }
-      },
-      {
-        "scenario_id": "bridge-group-maxheight-scroll",
-        "kind": "web",
-        "description": "分组限高内部滚动：stub 上游注入 12 项目，列表 clientHeight<scrollHeight，scrollTop 可滚动，侧栏列高度不被撑破",
-        "status": "pass",
-        "assertion_results": [
-          {
-            "type": "step",
-            "pass": true,
-            "message": "12 行均 30px；clientH=220 scrollH=390 scrollable=true；scrollTop=500→170（钳到最大）；navH=236 docScrollH=900=vh"
-          }
-        ],
-        "screenshots": [
-          ".fenix/verify-evidence/polish-dsh-plugins-ui/bridge-group-maxheight-scroll.png"
-        ],
-        "evidence": {
-          "failed_assertions": [],
-          "output": ".fenix/verify-evidence/polish-dsh-plugins-ui/bridge-group-maxheight-scroll.eval.json",
-          "kind_note": "playwright DOM 断言 + 截图 .fenix/verify-evidence/polish-dsh-plugins-ui/bridge-group-maxheight-scroll.png"
-        }
-      },
-      {
-        "scenario_id": "bridge-upstream-error-empty",
-        "kind": "web",
-        "description": "空列表与上游停机两态：空列表呈现「暂无项目」空态且分组不崩；上游 502 停机保留既有状态并 warn，无未处理异常",
-        "status": "pass",
-        "assertion_results": [
-          {
-            "type": "step",
-            "pass": true,
-            "message": "空态：emptyText=暂无项目 visible rows=0 console 0 错误；停机：rows=2 保留、bridge warn 一条、group 完好"
-          }
-        ],
-        "screenshots": [
-          ".fenix/verify-evidence/polish-dsh-plugins-ui/bridge-upstream-error-empty.png"
-        ],
-        "evidence": {
-          "failed_assertions": [],
-          "output": ".fenix/verify-evidence/polish-dsh-plugins-ui/bridge-upstream-error-empty.eval.json",
-          "kind_note": "playwright DOM 断言 + 截图 .fenix/verify-evidence/polish-dsh-plugins-ui/bridge-upstream-error-empty.png"
-        }
-      },
-      {
-        "scenario_id": "ccimport-dialog-width-80",
-        "kind": "web",
-        "description": "导入对话框宽度恰为视口 80%（1440→1152px），注入样式携带 data-plugin-css 标记，候选行五列布局无换行挤压",
-        "status": "pass",
-        "assertion_results": [
-          {
-            "type": "step",
-            "pass": true,
-            "message": "ratio=0.800；styleRule=.fenix-ccimport-dialog-wide.fenix-ccimport-dialog-wide{width:80vw;max-width:none}；11 行均高 36px"
-          }
-        ],
-        "screenshots": [
-          ".fenix/verify-evidence/polish-dsh-plugins-ui/ccimport-dialog-width-80.png"
-        ],
-        "evidence": {
-          "failed_assertions": [],
-          "output": ".fenix/verify-evidence/polish-dsh-plugins-ui/ccimport-dialog-width-80.eval.json",
-          "kind_note": "playwright DOM 断言 + 截图 .fenix/verify-evidence/polish-dsh-plugins-ui/ccimport-dialog-width-80.png"
-        }
-      },
-      {
-        "scenario_id": "ccimport-deselect-all",
-        "kind": "web",
-        "description": "全选(含已存在行→将更新)→点击「取消全部选择」：全部回未勾选、将更新标清除、导入按钮计数归零禁用、按钮自身无勾选时禁用",
-        "status": "pass",
-        "assertion_results": [
-          {
-            "type": "step",
-            "pass": true,
-            "message": "afterDeselect: checked=0 updateBadges=0 import=导入所选（0）importDisabled=true deselDisabled=true；console 0 错误"
-          }
-        ],
-        "screenshots": [
-          ".fenix/verify-evidence/polish-dsh-plugins-ui/ccimport-deselect-all.png"
-        ],
-        "evidence": {
-          "failed_assertions": [],
-          "output": ".fenix/verify-evidence/polish-dsh-plugins-ui/ccimport-deselect-all.eval.json",
-          "kind_note": "playwright DOM 断言 + 截图 .fenix/verify-evidence/polish-dsh-plugins-ui/ccimport-deselect-all.png"
-        }
-      },
-      {
-        "scenario_id": "ccimport-locale-en-zh",
-        "kind": "web",
-        "description": "对话框操作区文案随界面语言切换：zh「取消全部选择/全选新增」，切 en 后「Deselect all/Select new」",
-        "status": "pass",
-        "assertion_results": [
-          {
-            "type": "step",
-            "pass": true,
-            "message": "zh: 取消全部选择 / 全选新增 / 导入所选（9）；en(document.lang=en): Deselect all / Select new / Import selected (9)"
-          }
-        ],
-        "screenshots": [
-          ".fenix/verify-evidence/polish-dsh-plugins-ui/ccimport-locale-en.png"
-        ],
-        "evidence": {
-          "failed_assertions": [],
-          "output": ".fenix/verify-evidence/polish-dsh-plugins-ui/ccimport-locale-en.eval.json",
-          "kind_note": "playwright DOM 断言 + 截图 .fenix/verify-evidence/polish-dsh-plugins-ui/ccimport-locale-en.png"
-        }
-      },
-      {
-        "scenario_id": "unit-contracts-green",
-        "kind": "cli",
-        "description": "两插件单测全绿：bridge 46 例、cc-import 49 例（vitest，node 环境纯渲染函数契约）",
-        "status": "pass",
-        "assertion_results": [
-          {
-            "type": "step",
-            "pass": true,
-            "message": "bridge: Tests 46 passed (46), exit=0"
+            "message": "step: 打开隔离 profile dsh web（实例 A，真实上游 8787，6 项目）"
           },
           {
-            "type": "step",
+            "type": "assertion",
             "pass": true,
-            "message": "cc-import: Tests 49 passed (49), exit=0"
+            "message": "element_visible: [data-testid='fenix-projects-section'] 常驻分区可见（snapshot: region '项目'）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_visible: 分区标题行可见（button '项目 6'）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_visible: Portal 宿主存在且唯一（hostCount=1）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "dom_structure: 分区渲染在宿主内（sectionInHost=true，direct-child）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_not_exist: 分区不在 nav 内（sectionInNav=false——非条目内下拉浮层）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_not_exist: 条目列表 nav 内项目行数=0（rowsInNav=0，不出现在「帮助」之后条目区）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_count: 分区内项目行=6，与上游 /api/projects 一致"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "text_contains: 分区含项目名行（dsh-plugins/fenix-desktop/fenix-server/fenixd/harness-brand-showcase/potplayer-base，码点序）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "no_console_error: 控制台 0 错误 0 警告"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "结构取证: hostIsNavNextSibling=true（宿主=nav 紧后兄弟位）、hostParentSameAsNav=true（位于条目列表与工作区 regionArea 之间）"
           }
         ],
-        "screenshots": [],
+        "screenshots": [
+          "/root/dsh-plugins/.fenix/verify-evidence/bridge-projects-inline-section/s1-section-inline.png"
+        ],
+        "evidence": {
+          "failed_assertions": []
+        }
+      },
+      {
+        "scenario_id": "section-title-click-toggles-only",
+        "kind": "web",
+        "description": "点击分区标题行仅切换展开/折叠（列表不渲染/恢复），不切换主面板（无项目 iframe、无深链跳转）",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "step: 点击 [data-testid='fenix-projects-section-title']（折叠）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_not_exist: 折叠后列表不渲染（listGone=true）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_visible: 标题行仍常驻（titleStillThere=true）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_not_exist: 无项目 iframe（projectIframes=0，hash 空——未切主面板）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "step: 再次点击标题行 → 列表恢复渲染（listBack=true，展开/折叠可逆）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "复验（最终构建，实例 B）: 点击标题行 listGone=true 且主面板 iframe 保持 #/projects/mock-proj-03 不变"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "no_console_error: 控制台 0 错误"
+          }
+        ],
+        "screenshots": [
+          "/root/dsh-plugins/.fenix/verify-evidence/bridge-projects-inline-section/s2-expanded-restored.png",
+          "/root/dsh-plugins/.fenix/verify-evidence/bridge-projects-inline-section/s2-collapsed-final.png"
+        ],
+        "evidence": {
+          "failed_assertions": []
+        }
+      },
+      {
+        "scenario_id": "project-row-click-switches-panel",
+        "kind": "web",
+        "description": "点击项目行 fenixd → 主面板切至该项目 iframe（深链 #/projects/fenixd）且行高亮；「项目」条目行图标直选项目总览面板",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "step: 点击 [data-testid='fenix-project-row-fenixd']"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_visible: iframe src=/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/projects/fenixd（深链契约逐字符一致）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "attribute_match: 该行 data-active=true（高亮）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "style: 高亮行 background=var(--dsw-alias-interactive-bg-hover, …)"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "step: 点击 nav 内「项目」条目行 → 主面板切至 #/projects（Portal 生效时条目退化图标直选形态）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "no_console_error: 控制台 0 错误"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "复验（最终构建，实例 B）: 点击 mock-proj-03 行 → iframe src=…#/projects/mock-proj-03，data-active=true"
+          }
+        ],
+        "screenshots": [
+          "/root/dsh-plugins/.fenix/verify-evidence/bridge-projects-inline-section/s3-fenixd-panel.png"
+        ],
+        "evidence": {
+          "failed_assertions": []
+        }
+      },
+      {
+        "scenario_id": "section-max-height-internal-scroll",
+        "kind": "web",
+        "description": "10 项目隔离实例（mock 上游，桥接与 client 均真实）：分区 maxHeight=min(222px,46vh) 内部滚动，侧栏高度不被撑破",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "step: 打开 10 项目上游隔离实例（端口 3445）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_count: 分区内项目行=10（全部渲染）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_visible: 限高滚动列表容器可见"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "style: maxHeight=min(222px, 46vh) 且 overflowY=auto"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "量测: scrollHeight=318 > clientHeight=222 → 内部滚动生效；滚动到底后末行 mock-proj-10 可见"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "量测: 侧栏根高度=viewport 高度（720），无全局溢出（scrollHeight<=clientHeight）——侧栏高度不被撑破"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "no_console_error: 控制台 0 错误"
+          }
+        ],
+        "screenshots": [
+          "/root/dsh-plugins/.fenix/verify-evidence/bridge-projects-inline-section/s4-scroll-10-projects.png"
+        ],
+        "evidence": {
+          "failed_assertions": []
+        }
+      },
+      {
+        "scenario_id": "narrow-rail-badge-stack",
+        "kind": "web",
+        "description": "侧栏折叠窄轨（宿主宽 35px）→ 分区收敛为计数徽标 + 首字母徽标栈（无项目名文本），无横向溢出",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "step: 点击 Collapse sidebar 折叠侧栏"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_visible: 窄态分区仍常驻可见"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_visible: 标题行收敛为计数徽标（count='6'）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_not_exist: 窄态行无项目名文本（nameSpans=0，仅徽标栈 6 行）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "量测: 分区/宿主 scrollWidth-clientWidth=0 → 无横向溢出"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "product-fix（验证中发现并已修复）: 首版窄态固定 30px 徽标行在 35px 窄轨内产生 3px 横向溢出——修复为随容器收缩后复验 0 溢出（commit 4afc697）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "no_console_error: 控制台 0 错误"
+          }
+        ],
+        "screenshots": [
+          "/root/dsh-plugins/.fenix/verify-evidence/bridge-projects-inline-section/s5-narrow-rail-fixed.png"
+        ],
+        "evidence": {
+          "failed_assertions": []
+        }
+      },
+      {
+        "scenario_id": "anchor-drift-degrade-and-recover",
+        "kind": "web",
+        "description": "运行期删除 Portal 宿主 DOM → 立即回落浮层分组（可观察降级窗口）、无未处理异常；巡检重挂宿主 → 分区重现且宿主唯一；reload 无残留",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "step: eval 删除 [data-testid='fenix-projects-portal-host']（t0 分区在场）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "降级: 删除后 ~40ms 起浮层分组（fenix-projects-group）接管、Portal 分区不再渲染（40–762ms 持续可观察）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "恢复: ~807ms 分区重现（MutationObserver 去抖 + 轮询兜底巡检重挂宿主），宿主恰 1 个（无重复挂载）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_not_exist: 重现分区仍在 nav 之外内嵌位（sectionInNav=false）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "no_console_error: 演练全程控制台 0 错误 0 警告"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_count: reload 后 host=1/section=1/anchor=1（卸载清理与重挂循环无残留）"
+          }
+        ],
+        "screenshots": [
+          "/root/dsh-plugins/.fenix/verify-evidence/bridge-projects-inline-section/s6-drift-recovered.png"
+        ],
         "evidence": {
           "failed_assertions": [],
-          "output": ".fenix/verify-evidence/polish-dsh-plugins-ui/unit-contracts-bridge.txt + .fenix/verify-evidence/polish-dsh-plugins-ui/unit-contracts-ccimport.txt",
-          "kind_note": "CLI 场景证据为命令输出文件，无截图属合法形态"
+          "timeline": "/root/dsh-plugins/.fenix/verify-evidence/bridge-projects-inline-section/s6-drift-timeline.json"
+        }
+      },
+      {
+        "scenario_id": "empty-upstream-empty-state",
+        "kind": "web",
+        "description": "上游停机（桥接 502）→ 分区空态「暂无项目」、无项目行，无未处理 JS 异常",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "step: 打开上游停机隔离实例（端口 3446，上游指向无监听端口，桥接返回 502）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_visible: 分区仍常驻呈现（sectionPresent=true）"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "text_contains: 空态提示「暂无项目」渲染"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_count: 项目行=0"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "控制台无未处理 JS 异常：仅浏览器对 502 响应的自动资源日志（Failed to load resource，预期刺激）与本插件捕获失败后的 warn（设计内可见降级）；fetch 502 被同步循环捕获处理，非 unhandled exception"
+          },
+          {
+            "type": "assertion",
+            "pass": true,
+            "message": "element_visible: 标题行仍可交互（分区未崩坏）"
+          }
+        ],
+        "screenshots": [
+          "/root/dsh-plugins/.fenix/verify-evidence/bridge-projects-inline-section/s7-empty-upstream.png"
+        ],
+        "evidence": {
+          "failed_assertions": []
         }
       }
     ],
     "verdict": "verified",
-    "bugs": [],
-    "quality_gates": ".fenix/verify-progress/polish-dsh-plugins-ui/quality-gates.json",
-    "issues_found_and_fixed_in_run": [
-      "cc-import ensureDialogStyle 用 dataset 整体赋值，真机 Chromium 上 data-plugin-css 未落盘、幂等守卫失效（7b48944 修复）",
-      "bridge 分组行为限高 flex 容器子项，默认 flex-shrink:1 把行高压扁致 scrollHeight==clientHeight、滚动条永不出现（2566360 修复）"
-    ]
+    "bugs": []
   }
 }
