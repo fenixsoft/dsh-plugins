@@ -1,34 +1,332 @@
 {
   "status": "success",
-  "spec": "verify-dsh-plugins-live",
-  "summary": "cc-import/bridge 双插件真机验收全量通过：定位并修复 cc-import client 真机激活根因（revealToken 入参需 strict codec）后，验收期再发现并修复第二处真机缺陷——远程调用统一返回 RemoteResult 信封而客户端按业务返回直用，导致导入对话框 scan 后 TypeError 崩溃；改为信封拆包（scan/revealToken 先拆 {ok,value|error} 再判业务联合）+ dsh-runtime.d.ts 类型面同步修正，42/42 测试与 typecheck 全绿。真机闭环：10+1 候选与 cc-switch 一致、全选导入 Imported 10（apiKeyEnv 引用无明文）、重复导入 Already exists/Will update 覆盖无 -2 副本、非 loopback hosts+trusted-host 路径无 memory 横幅且全程自愈清理；bridge 侧栏 5 固定+项目动态条目（与上游一致且按名排序）、5 视图 iframe 深链逐字符正确、会话条目点击回对话面板（隔离 profile 真实会话实测：概览 iframe 打开时点会话条目 iframe 移除、对话面板复原）、静态资源 sha256 与直连一致、上游停机 502 提示页且 dsh 设置不受影响、原命令恢复探活 200、SSE 自动同步（夹具项目出现 ~7s/移除消失 ~21s ≤60s）、24 轮切换连接数有界不累积，3.1-3.6 未发现 bridge 缺陷故无修复面。文档：两份安装文档按实测修正（- insert: 补丁语义、pnpm add link: 实测写法、loopback-trust 前置小节、live 刷新 pkill 自匹配警示），新增隔离 profile 从零演练方法论文档并按其在全新 profile（3445）完成从零重装走查（按钮/侧栏/对话框 10 候选一次通过）。tasks.md 17 项全部勾选；证据存 .fenix/verify-evidence/verify-dsh-plugins-live/。",
+  "spec": "add-fenix-skill-provider-plugin",
+  "mode": "fast-track",
+  "summary": "新增 fenix-skill-provider 插件（仅 host 半，零 client 代码）：经 ctx.skills.registerProvider 把外部 Claude 风格 skill 目录（默认 ~/.claude/skills 下 fenix-*，真机 8 条）动态注册进 dsh web 原生 skill 体系；list 动态扫描（rank 500/source custom/受限 frontmatter 解析/非法条目 contained + warn/重名取首个），get 按 locator 读盘剥 frontmatter（文件删除返回 undefined），fs.watch 非递归 300ms 去抖 invalidate 实现免重启自动同步，config 两键 sourceDir/pattern 可覆盖（非法 pattern 含键名报错拒绝装载），watch 失败降级静态注册。pnpm install/typecheck/build/test 全绿（vitest 35 例）；12 个真实环境 CLI 场景（真实编译产物 + 真机 ~/.claude/skills、/root/fenixd/skills、真实 fs.watch 计时）全部通过，其中 s11 首轮判失败系驱动断言过严（把规范分别要求的「空集 warn」与「watch 降级 warn」合并计数），归类 test-defect 修正驱动后复跑通过，无遗留 product-bug。",
   "completed_tasks": [
     "1.1",
-    "1.2",
-    "1.3",
-    "1.4",
     "2.1",
-    "2.2",
-    "2.3",
-    "2.4",
     "3.1",
     "3.2",
-    "3.3",
-    "3.4",
-    "3.5",
-    "3.6",
     "4.1",
-    "4.2",
-    "4.3"
+    "5.1",
+    "5.2",
+    "5.3",
+    "5.4",
+    "6.1",
+    "6.2"
   ],
-  "findings": [],
-  "host_changes": [
-    {
-      "object": "/etc/hosts",
-      "kind": "hosts-entry",
-      "detail": "任务 2.4 非 loopback 验收临时追加 `127.0.0.1 home.icyfenix.cn`（隔离 profile 3444 已带 --trusted-host）；验收完成后即时删除并复核（getent 解析回到真实公网地址、/etc/hosts 与备份 diff 为空）——变更已不在位，无需回滚",
-      "backup": "/root/.fenix-verify/hosts.backup.vdl",
-      "rollback": "已回滚（sed -i 删除该行）；如需复现验收见 docs/help/dsh-plugin-live-verification.md"
-    }
-  ]
+  "implementation": {
+    "deliverables": [
+      "fenix-skill-provider/package.json",
+      "fenix-skill-provider/pnpm-workspace.yaml",
+      "fenix-skill-provider/tsconfig.json",
+      "fenix-skill-provider/tsdown.config.ts",
+      "fenix-skill-provider/vitest.config.ts",
+      "fenix-skill-provider/pnpm-lock.yaml",
+      "fenix-skill-provider/src/shared/providerConfig.ts",
+      "fenix-skill-provider/src/host/frontmatter.ts",
+      "fenix-skill-provider/src/host/scanner.ts",
+      "fenix-skill-provider/src/host/index.ts",
+      "fenix-skill-provider/tests/providerConfig.test.ts",
+      "fenix-skill-provider/tests/scanner.test.ts",
+      "fenix-skill-provider/tests/provider.test.ts",
+      "fenix-skill-provider/README.zh.md",
+      "docs/help/fenix-skill-provider-install.md"
+    ]
+  },
+  "verification": {
+    "scenarios": [
+      {
+        "scenario_id": "s1-default-config-registers-real-fenix-skills",
+        "kind": "cli",
+        "description": "以默认 config（sourceDir=~/.claude/skills、pattern=fenix-*）装载真实编译产物，provider list() 恰返回真机 8 个 fenix-* candidate：name 与来源目录一一对应、description 与各 SKILL.md frontmatter 一致（独立原文交叉核对）、invocation 缺省双真、rank 500、source custom、locator/resourceBase 真实存在",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s1.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s1.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s2-pattern-filters-non-matching-anysearch",
+        "kind": "cli",
+        "description": "pattern 过滤不匹配条目：真机来源目录同时存在合法 anysearch/SKILL.md 与 fenix-new，默认 pattern fenix-* 下 list() 只返回 fenix-* 匹配项，anysearch 不产生 candidate",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s2.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s2.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s3-illegal-entries-skipped-with-warns",
+        "kind": "cli",
+        "description": "非法条目跳过且互不影响：夹具含缺 SKILL.md、frontmatter 缺 name、name 非 kebab-case 三个非法目录与一个合法 fenix-new；三个非法目录各自跳过且各留一条含目录名与原因的 warn，fenix-new 正常注册，不抛未处理异常",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s3.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s3.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s4-duplicate-name-keeps-first",
+        "kind": "cli",
+        "description": "同 provider 内重名取首个：两个匹配 pattern 的条目（fenix-x/ 与 fenix-y/，frontmatter name 均为 fenix-x）解析出相同 skill name，list() 只产出目录序靠前者一个 candidate，留一条重名 warn，不因重名抛错",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s4.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s4.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s5-get-injects-body-without-frontmatter",
+        "kind": "cli",
+        "description": "点选注入语义（provider.get 契约）：真机 fenix-new 的 get() 返回 content 与 SKILL.md 剥离 frontmatter 后的 Markdown 正文逐字一致（无 frontmatter 残留），其余元数据字段与 candidate 一致",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s5.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s5.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s6-get-returns-undefined-for-deleted-file",
+        "kind": "cli",
+        "description": "get 对已删除文件返回 undefined：candidate 已列入目录但其 SKILL.md 在 get 前被删除，get() 返回 undefined 且不抛异常",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s6.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s6.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s7-watch-sync-add-and-remove-realtime",
+        "kind": "cli",
+        "description": "来源目录变化自动同步（真实 fs.watch + 300ms 去抖 + control.invalidate，真实计时无 fake）：consumer 缓存语义下新增 fenix-demo/SKILL.md 后数秒内自动出现该条目，移除后自动消失且其余条目不受影响，全程无需重启",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s7.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s7.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s8-config-override-pattern-openspec",
+        "kind": "cli",
+        "description": "loader 行覆盖 pattern：config 写 pattern: openspec-*，来源目录同时存在 openspec-propose 与 fenix-new 时只出现 openspec-propose 而不出现 fenix-new",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s8.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s8.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s9-config-override-sourcedir-fenixd",
+        "kind": "cli",
+        "description": "loader 行覆盖 sourceDir：config 写 sourceDir: /root/fenixd/skills（pattern 默认），条目集合与来源目录独立枚举一致（真机 7 个 fenix 条目），内容与来源目录一致",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s9.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s9.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s10-illegal-pattern-rejects-load",
+        "kind": "cli",
+        "description": "非法 pattern 拒绝装载：config 写 pattern: fen[x]-* 时装载失败并输出含键名 pattern、非法字符 [ 与原因（仅支持段内 * 通配）的可读错误，不牵连其余 loader 条目",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s10.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s10.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s11-missing-sourcedir-tolerated",
+        "kind": "cli",
+        "description": "来源目录缺失容错：config 写 sourceDir 指向不存在目录时插件装载成功、provider list() 返回空集并留恰一条含该路径的 warn，不抛异常",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s11.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s11.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      },
+      {
+        "scenario_id": "s12-watch-unavailable-degrades-static",
+        "kind": "cli",
+        "description": "watch 不可用降级：fs.watch 初始化抛错（模拟 inotify 上限）时插件仍装载成功且 skill 正常注册，留一条说明自动同步降级为重启生效的 warn，无未处理异常",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "driver 全部检查通过"
+          },
+          {
+            "type": "json_output",
+            "pass": true,
+            "message": "pass==true（.fenix/verify-evidence/add-fenix-skill-provider-plugin/s12.json）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "output": ".fenix/verify-evidence/add-fenix-skill-provider-plugin/s12.json",
+          "kind_note": "CLI 场景证据为命令 JSON 输出（主树相对路径），无截图属合法形态"
+        }
+      }
+    ],
+    "verdict": "verified",
+    "bugs": []
+  }
 }
