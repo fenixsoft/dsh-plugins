@@ -346,7 +346,7 @@ export function snapshotFromScan(
 interface StyleHost {
   head: { appendChild(node: unknown): unknown }
   querySelector(selector: string): unknown
-  createElement(tag: string): { dataset: Record<string, string>; textContent?: string }
+  createElement(tag: string): { setAttribute(name: string, value: string): void; textContent?: string }
 }
 
 export function ensureDialogStyle(doc: StyleHost | undefined): void {
@@ -354,7 +354,10 @@ export function ensureDialogStyle(doc: StyleHost | undefined): void {
   const tagId = 'cc-import/dialog-width'
   if (doc.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return
   const tag = doc.createElement('style')
-  tag.dataset = { plugin: 'cc-import', pluginCss: tagId }
+  // dataset 整体赋值在部分引擎上不落 data-plugin-css（实测 0.2.0-rc.2 web），
+  // 逐条 setAttribute 保证幂等标记可靠。
+  tag.setAttribute('data-plugin', 'cc-import')
+  tag.setAttribute('data-plugin-css', tagId)
   tag.textContent = `.${DIALOG_WIDE_CLASS}.${DIALOG_WIDE_CLASS}{width:80vw;max-width:none}`
   doc.head.appendChild(tag)
 }
