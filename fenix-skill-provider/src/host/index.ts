@@ -37,6 +37,11 @@ export const SERVICE_NAME = 'fenix-skill-provider'
 
 /** Host 插件：装载即注册 skill provider 与来源目录 watch。 */
 export default class FenixSkillProvider extends Service {
+  /** 依赖 skill registry 服务：声明后构造器内方可访问 `this.ctx.skills`
+   * （cordis 规则——未声明 inject 访问 ctx.<name> 抛
+   * 「cannot get property "skills" without inject」并拒绝装载）。 */
+  static readonly inject = ['skills']
+
   constructor(ctx: Context, config?: ProviderConfigInput | null) {
     super(ctx, SERVICE_NAME)
     // 非法 pattern 在此抛含键名的可读 error → 插件拒绝装载（该 loader 条目失败，

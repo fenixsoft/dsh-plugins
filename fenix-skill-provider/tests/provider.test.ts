@@ -109,6 +109,13 @@ describe('FenixSkillProvider 装配', () => {
     expect(typeof h.provider().list).toBe('function')
     expect(typeof h.provider().get).toBe('function')
   })
+
+  // 回归：构造器访问 this.ctx.skills，cordis 规则要求 Service 声明 static inject，
+  // 否则真机装载报「cannot get property "skills" without inject」拒绝激活
+  // （本文件的 ctx 桩不做该校验，故此处对静态声明做契约断言）。
+  it('声明 static inject 含 skills（cordis 装载契约）', () => {
+    expect(FenixSkillProvider.inject).toContain('skills')
+  })
 })
 
 describe('provider.list', () => {
