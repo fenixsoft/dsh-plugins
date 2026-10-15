@@ -294,6 +294,11 @@ const groupRowStyle = (active: boolean): CSSProperties => ({
   alignItems: 'center',
   gap: 8,
   height: GROUP_ROW_HEIGHT,
+  // 行是限高滚动容器（flex column）的直接子项：默认 flex-shrink:1 会在内容
+  // 超限时压缩行高而不是溢出滚动，滚动条永不出现（真机 3942 验证发现），
+  // 必须钉死行高让容器真实溢出。
+  flexShrink: 0,
+  flexGrow: 0,
   padding: '0 8px',
   borderRadius: 'var(--dsw-radius-sm, 6px)',
   border: 'none',
