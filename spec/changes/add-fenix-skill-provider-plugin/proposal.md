@@ -1,6 +1,6 @@
 ## Why
 
-fenix 工作流的 7 个 skill（fenix-new / fenix-setup / fenix-status / fenix-process / fenix-ready / fenix-approve / fenix-archive，真身在 `/root/fenixd/skills/`，`~/.claude/skills/fenix-*` 为软链）目前只能在 Claude Code 侧使用。dsh web 原生 skill 体系的磁盘扫描根不含 `~/.claude/skills`，这些 skill 对 dsh web 完全不可见——用户无法在 dsh web 输入框按 "/" 直接调起 fenix 命令。需要一个 dsh 插件把外部 Claude 风格 skill 目录自动注册进 dsh，使 fenix 工作流在 dsh web 会话中可用。
+fenix 工作流的 8 个 skill（fenix-new / fenix-setup / fenix-status / fenix-process / fenix-ready / fenix-approve / fenix-archive / fenix-dashboard，真身在 `/root/fenixd/skills/`，`~/.claude/skills/fenix-*` 多为指向它们的软链，`fenix-ready` 为真目录）目前只能在 Claude Code 侧使用。dsh web 原生 skill 体系的磁盘扫描根不含 `~/.claude/skills`，这些 skill 对 dsh web 完全不可见——用户无法在 dsh web 输入框按 "/" 直接调起 fenix 命令。需要一个 dsh 插件把外部 Claude 风格 skill 目录自动注册进 dsh，使 fenix 工作流在 dsh web 会话中可用。
 
 ## What Changes
 

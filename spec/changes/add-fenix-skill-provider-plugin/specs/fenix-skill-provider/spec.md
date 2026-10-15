@@ -4,8 +4,8 @@
 插件装载时 SHALL 经 `ctx.skills.registerProvider(...)` 注册名为 `fenix-skill-provider` 的 skill provider；该 provider SHALL 扫描 config `sourceDir`（默认 `~/.claude/skills`，支持 `~` 展开为绝对路径）下名字匹配 config `pattern`（默认 `fenix-*`）的**目录**条目（含指向目录的符号链接），并对每个含 `SKILL.md` 的目录产出恰好一个 skill candidate。candidate SHALL 满足：`name` 与 `description` 取自 SKILL.md frontmatter；`invocation` 缺省为 `{ modelInvocable: true, userInvocable: true }`，frontmatter 显式声明时 SHALL 尊重（`user-invocable: false` → `userInvocable: false`；`disable-model-invocation: true` → `modelInvocable: false`）；`source` 为 `custom`；`resourceBase` 为 `{ kind: 'directory', path: <该 skill 目录绝对路径> }`；`locator` 指向该 SKILL.md 绝对路径；`rank` 取用户级量级（不得高于项目级扫描根 `dsh-skill-filesystem` 的 project 档 rank）。
 
 #### Scenario: 默认配置注册 fenix skill
-- **WHEN** 以默认 config（sourceDir=`~/.claude/skills`、pattern=`fenix-*`）装载插件，且来源目录下存在 7 个 `fenix-*` skill 目录（各含合法 SKILL.md）
-- **THEN** provider `list()` 恰好返回 7 个 candidate，name 与来源目录名一一对应，description 与各 frontmatter 一致，`invocation` 均为 `{ modelInvocable: true, userInvocable: true }`，dsh web "/" 菜单出现全部 7 个 `fenix-*` 条目
+- **WHEN** 以默认 config（sourceDir=`~/.claude/skills`、pattern=`fenix-*`）装载插件，且来源目录下存在 8 个 `fenix-*` skill 目录（各含合法 SKILL.md）
+- **THEN** provider `list()` 恰好返回 8 个 candidate，name 与来源目录名一一对应，description 与各 frontmatter 一致，`invocation` 均为 `{ modelInvocable: true, userInvocable: true }`，dsh web "/" 菜单出现全部 8 个 `fenix-*` 条目
 
 #### Scenario: pattern 过滤不匹配条目
 - **WHEN** 来源目录下同时存在 `fenix-new/` 与 `anysearch/`（后者含合法 SKILL.md），pattern 为默认 `fenix-*`
@@ -34,12 +34,12 @@
 provider SHALL 监听 `sourceDir` 目录变更（`fs.watch` 或等价机制）：监听事件经去抖（≥200ms 窗口）后调用注册时获得的 `control.invalidate()`，使注册表缓存失效并触发 `skills/change`。目录条目新增、删除、改名（进入或离开 pattern 匹配集）SHALL 在下次 catalog 读取时反映，无需重启 dsh web。对目录内 SKILL.md 内容编辑无实时性要求（`get()` 每次读盘，天然最新）。
 
 #### Scenario: 新增 skill 自动出现
-- **WHEN** 插件已装载且 "/" 菜单已展示 7 个 fenix 条目，随后在来源目录新建匹配 pattern 的 `fenix-demo/SKILL.md`（合法 frontmatter），数秒后在 dsh web 重新展开 "/" 菜单
+- **WHEN** 插件已装载且 "/" 菜单已展示 8 个 fenix 条目，随后在来源目录新建匹配 pattern 的 `fenix-demo/SKILL.md`（合法 frontmatter），数秒后在 dsh web 重新展开 "/" 菜单
 - **THEN** 菜单出现 `fenix-demo` 条目（无需重启 dsh web）
 
 #### Scenario: 移除 skill 自动消失
 - **WHEN** 将来源目录下 `fenix-demo/` 删除（或改名为不匹配 pattern），数秒后重新展开 "/" 菜单
-- **THEN** `fenix-demo` 条目消失，其余 7 条不受影响
+- **THEN** `fenix-demo` 条目消失，其余 8 条不受影响
 
 ### Requirement: config 可覆盖来源与模式
 插件 config SHALL 支持两键并均有代码默认值：`sourceDir`（默认 `~/.claude/skills`；接受绝对路径与 `~` 起始路径）与 `pattern`（默认 `fenix-*`；仅支持段内 `*` 通配符语义，含其它 glob 元字符（如 `?`、`[`、`{`）时 MUST 在装载期给出可读错误并拒绝装载）。两键经 cordis.patch.yml loader 行 `config:` 覆盖。

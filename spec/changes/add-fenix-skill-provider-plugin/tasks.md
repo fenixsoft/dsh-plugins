@@ -48,7 +48,7 @@
 
 ## 4. Provider 装配
 
-- [ ] 4.1 实现 `src/host/index.ts`：默认导出 cordis 插件类（对齐 bridge 的 `Service` 形态与 loader 行 config 读取模式，经 `resolveProviderConfig` 解析 `sourceDir`/`pattern`）；`ctx.skills.registerProvider(control => provider)` 注册 `{ name: 'fenix-skill-provider', list, get }`——`list(options)` 调 scanner 并感知 `options.signal`（abort 时尽早 settle），`sourceDir` 不存在/不可读时返回空集 + 一条 warn；`get(candidate, options)` 按 `candidate.locator` 读文件、经 frontmatter 解析剥除围栏后返回 `SkillDefinition`（元数据字段与 candidate 一致），文件不存在/不可读返回 undefined；`fs.watch(sourceDir)`（非递归）事件 300ms 去抖后调 `control.invalidate()`，watch 初始化失败降级为静态注册 + warn（不抛未处理异常）；插件卸载时 watch 经 disposer 注销（provider 随 fiber 卸载自动注销）
+- [ ] 4.1 实现 `src/host/index.ts`：默认导出 cordis 插件类（对齐 bridge 的 `Service` 形态与 loader 行 config 读取模式，经 `resolveProviderConfig` 解析 `sourceDir`/`pattern`；`resolveProviderConfig` 因非法 pattern 抛错时，插件以含键名的可读 error 拒绝注册 provider（即拒绝装载），不得以未捕获异常牵连同一 `- insert:` 列表中的其余条目）；`ctx.skills.registerProvider(control => provider)` 注册 `{ name: 'fenix-skill-provider', list, get }`——`list(options)` 调 scanner 并感知 `options.signal`（abort 时尽早 settle），`sourceDir` 不存在/不可读时返回空集 + 一条 warn；`get(candidate, options)` 按 `candidate.locator` 读文件、经 frontmatter 解析剥除围栏后返回 `SkillDefinition`（元数据字段与 candidate 一致），文件不存在/不可读返回 undefined；`fs.watch(sourceDir)`（非递归）事件 300ms 去抖后调 `control.invalidate()`，watch 初始化失败降级为静态注册 + warn（不抛未处理异常）；插件卸载时 watch 经 disposer 注销（provider 随 fiber 卸载自动注销）
 
 ## 5. 测试与构建验证
 
@@ -60,4 +60,4 @@
 ## 6. 文档
 
 - [ ] 6.1 写 `fenix-skill-provider/README.zh.md`：对齐 `fenix-dsh-dashboard-bridge/README.zh.md` 结构——插件形态（仅 host 半）、机制小节（scan → registerProvider、get 读盘、fs.watch 去抖 invalidate）、配置键表（`sourceDir` / `pattern`：默认值、语法、覆盖方式）、loader 行示例（`- insert:` 容器键写法，config 省略即默认）、已知限制（SKILL.md 为 Claude Code 语境原文注入、frontmatter 受限解析、pattern 仅段内 `*`）、dsh 版本兼容表（0.2.0-rc.2 唯一钉版）、构建与测试
-- [ ] 6.2 写 `docs/help/fenix-skill-provider-install.md`：人工安装步骤（profile 内 `pnpm add link:<repo>/fenix-skill-provider`、cordis.patch.yml `- insert:` 条目、重启；非 loopback 场景与 live 实例刷新引用 `cc-import-install.md` 对应小节）+ 真机验收清单（默认 config 下 "/" 菜单出现 7 个 fenix-* 条目且描述与 SKILL.md 一致；点选 fenix-new 发送 `/fenix-new` 且注入内容无 frontmatter 残留；来源目录新增/移除 skill 后数秒内菜单自动增减、无需重启；`pattern: openspec-*` 覆盖生效；`sourceDir` 指向不存在目录时插件容错且 dsh 其余功能不受影响；卸载步骤与回滚）——真机执行部分明确标注「不由实现 Agent 执行」，对齐 `fenix-dashboard-bridge-install.md` 口径
+- [ ] 6.2 写 `docs/help/fenix-skill-provider-install.md`：人工安装步骤（profile 内 `pnpm add link:<repo>/fenix-skill-provider`、cordis.patch.yml `- insert:` 条目、重启；非 loopback 场景与 live 实例刷新引用 `cc-import-install.md` 对应小节）+ 真机验收清单（默认 config 下 "/" 菜单出现全部 fenix-* 匹配条目（当前实测 8 个）且描述与 SKILL.md 一致；点选 fenix-new 发送 `/fenix-new` 且注入内容无 frontmatter 残留；来源目录新增/移除 skill 后数秒内菜单自动增减、无需重启；`pattern: openspec-*` 覆盖生效；`sourceDir` 指向不存在目录时插件容错且 dsh 其余功能不受影响；卸载步骤与回滚）——真机执行部分明确标注「不由实现 Agent 执行」，对齐 `fenix-dashboard-bridge-install.md` 口径
