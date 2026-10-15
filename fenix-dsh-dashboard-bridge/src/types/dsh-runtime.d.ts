@@ -12,6 +12,14 @@
  *   （kind/prefix、path 无尾斜杠、handler 持有完整响应生命周期），声明为
  *   Context 上的 `webServer` 服务。
  *
+ * 侧栏语义锚点缝（2026-11 Portal 内嵌分区，spec「每项目动态条目」）：
+ * ui-sidebar 0.2.0-rc.2 侧栏根为 flex 列——`nav.panelList`（条目列表，语义
+ * `<nav aria-label>`，本插件分区锚点）→ `div.regionArea`（`renderSlot(
+ * "sidebar.workspaces", {wide, expandSidebar})`）→ `div.footArea`。二者的
+ * class 为 CSS module 哈希（构建期生成，升级即变），不可作定位依据；插件
+ * 锚点探测只依赖语义元素（条目组件 `closest('nav')`），宿主插 nav 紧后
+ * 兄弟位。此结构缝以发行包 lib/client.js 源码为据钉死，不进入运行时声明。
+ *
  * 运行时形态以发行包实际行为为准（design.md Risks 条款）。文件不入交付
  * 声明段（basename 与 cc-import 同名文件唯一命中会被 lint 疑似笔误规则
  * 拒绝），按 cc-import 的 src/types/dsh-runtime.d.ts 先例原样留存。

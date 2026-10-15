@@ -5,9 +5,11 @@
  * 新增注册面板、消失注销面板、无变化零操作；拉取失败仅保留既有状态且无未
  * 处理异常。
  *
- * 项目不再逐个注册顶层侧栏条目（spec 变更：平铺条目改为「项目」分组，见
- * panels.tsx 分组组件）；同步目标 = main keyed 面板（契约不变）+ 分组组件
- * 数据源（setProjects 整体替换，store 内去重排序、无变化零通知）。
+ * 项目不再逐个注册顶层侧栏条目（spec 变更：平铺条目改为「项目」分组，2026-11
+ * Portal 化为常驻内嵌分区——条目列表 nav 与工作区之间，浮层分组保留为锚点
+ * 漂移时的自动降级路径，见 panels.tsx projectSectionComponent/renderProjectGroup）；
+ * 分区与降级浮层共享同一数据源 projectGroupStore（setProjects 整体替换，
+ * store 内去重排序、无变化零通知），同步目标 = main keyed 面板（契约不变）。
  *
  * 不订阅 dashboard SSE 拿项目表（design D6：避免常驻第二长连接 + 解析负担），
  * 60s 窗口对「侧栏多/少一个项目行」的时效足够。

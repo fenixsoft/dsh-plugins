@@ -3,8 +3,9 @@
  * 向 `sidebar.panellist` 列表插槽注册 5 个固定菜单条目（概览/项目/设置/运维/
  * 帮助，order 10–14）并在 layout `main` keyed 插槽以相同 id 挂对应 iframe
  * 面板（hash 深链直达）；启动时拉取 `<prefix>/api/projects`，项目不再逐个
- * 注册顶层侧栏条目，而是驱动「项目」条目（order 11）内的分组块数据源与每
- * 项目 main keyed 面板（深链 `#/projects/<name>` 契约不变），60s 周期 +
+ * 注册顶层侧栏条目，而是驱动「项目」条目（order 11）的 Portal 内嵌分区
+ * （条目列表 nav 与工作区之间的常驻分区；锚点漂移自动降级浮层分组）数据源
+ * 与每项目 main keyed 面板（深链 `#/projects/<name>` 契约不变），60s 周期 +
  * window focus 重拉并幂等同步（见 projectSync.ts）。
  *
  * 注册形态对照发行包 @deepseek-ai/dsh-client-ui-plugin-manager/lib/client.js：
@@ -17,7 +18,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { buildPanelSrc, resolveBridgeConfig } from '../shared/config.js'
 import type { BridgeConfigInput } from '../shared/config.js'
-import { DashboardPanel, fixedIconComponent, projectGroupComponent, projectGroupStore } from './panels.js'
+import { DashboardPanel, fixedIconComponent, projectSectionComponent, projectGroupStore } from './panels.js'
 import type { FixedEntryId } from './panels.js'
 import { DEFAULT_POLL_INTERVAL_MS, parseProjectNames, startProjectSync } from './projectSync.js'
 import type { ProjectEntrySink, ProjectListFetcher, SyncTimer } from './projectSync.js'
@@ -152,13 +153,14 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   const resolved = resolveBridgeConfig(options)
   const prefix = resolved.prefix
 
-  // 5 固定侧栏条目（order 10–14）；「项目」条目组件为分组块，其余为线性图标。
+  // 5 固定侧栏条目（order 10–14）；「项目」条目组件为 Portal 内嵌分区（锚点
+  // 漂移自动降级浮层分组，见 panels.tsx projectSectionComponent），其余为线性图标。
   ctx.slots.inject('sidebar.panellist', () => {
     const selectProject = projectPanelSelector(ctx)
     const disposers = FIXED_ENTRIES.map((entry) =>
       ctx.slots.register(
         { name: 'sidebar.panellist', id: entry.id, order: entry.order, label: entry.label },
-        entry.id === 'fenix-projects' ? projectGroupComponent({ selectProject }) : fixedIconComponent(entry.id),
+        entry.id === 'fenix-projects' ? projectSectionComponent({ selectProject }) : fixedIconComponent(entry.id),
       ),
     )
     return () => {

@@ -11,9 +11,30 @@ import {
   startProjectSync,
 } from '../src/client/projectSync.js'
 import type { ProjectEntrySink, SyncTimer } from '../src/client/projectSync.js'
-import { projectGroupStore } from '../src/client/panels.js'
+import { projectGroupStore, renderProjectSection } from '../src/client/panels.js'
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+/** 按 data-testid 收集元素树命中的 React 元素（与 srcContract 同款最小实现）。 */
+function collectByTestId(node: unknown, testId: string, acc: ElementLike[] = []): ElementLike[] {
+  if (node === null || node === undefined) return acc
+  if (typeof node === 'string' || typeof node === 'number' || typeof node === 'boolean') return acc
+  if (Array.isArray(node)) {
+    for (const child of node) collectByTestId(child, testId, acc)
+    return acc
+  }
+  if (typeof node === 'object' && 'type' in node && 'props' in node) {
+    const element = node as ElementLike
+    if (element.props?.['data-testid'] === testId) acc.push(element)
+    collectByTestId(element.props?.children, testId, acc)
+  }
+  return acc
+}
+
+interface ElementLike {
+  readonly type?: unknown
+  readonly props?: { readonly children?: unknown; readonly [key: string]: unknown }
+}
 
 interface RecordingSink extends ProjectEntrySink {
   readonly added: string[]
@@ -293,5 +314,34 @@ describe('projectGroupStore（分组数据源契约）', () => {
     expect(projectGroupStore.getSnapshot().expanded).toBe(false)
     projectGroupStore.toggleExpanded()
     expect(projectGroupStore.getSnapshot().expanded).toBe(true)
+  })
+
+  it('同步驱动共享数据源：setProjects 后 Portal 分区纯渲染面直接可见（分区/降级浮层同源）', async () => {
+    const sink: ProjectEntrySink = {
+      addProject() {},
+      removeProject() {},
+      setProjects(names) {
+        projectGroupStore.setProjects(names)
+      },
+    }
+    const timer = fakeTimer()
+    const stop = startProjectSync({
+      fetchProjects: async () => ['fenixd', 'dsh-plugins'],
+      sink,
+      intervalMs: 1000,
+      timer,
+    })
+    await tick()
+    const snapshot = projectGroupStore.getSnapshot()
+    expect(snapshot.projects).toEqual(['dsh-plugins', 'fenixd'])
+    // Portal 分区纯渲染面（renderProjectSection）从同一快照渲染项目行。
+    const tree = renderProjectSection(
+      { projects: snapshot.projects, expanded: true, activeProject: null, wide: true, rowWidth: 260 },
+      { toggleHeader() {}, selectProject() {} },
+    )
+    expect(collectByTestId(tree, 'fenix-projects-section')).toHaveLength(1)
+    expect(collectByTestId(tree, 'fenix-project-row-fenixd')).toHaveLength(1)
+    expect(collectByTestId(tree, 'fenix-project-row-dsh-plugins')).toHaveLength(1)
+    stop()
   })
 })
