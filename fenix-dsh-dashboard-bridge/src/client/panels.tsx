@@ -524,6 +524,22 @@ export function sidebarNavFrom(origin: AnchorOriginLike | null | undefined): unk
   return origin?.closest(SECTION_ANCHOR_SELECTOR) ?? null
 }
 
+/**
+ * 行锚点选择器：「项目」条目所在的行按钮（PanelRow 的 `<button class="panelRow">`）。
+ * 分区宿主插在该行正下方（nav 内部），成为「项目」菜单的下挂列表而非列表末尾
+ * 的独立分区——用户口径：分区应在项目菜单下面，且与菜单同属一个「项目」。
+ */
+export const SECTION_ROW_SELECTOR = 'button'
+
+/**
+ * 纯锚点判定（分区插入点）：优先取「项目」行按钮（宿主紧贴菜单行下方）；
+ * 行按钮不可得（结构漂移）回落条目列表 nav（现行为：列表末尾）；均不可得
+ * 返回 null（交由挂载状态机累计失败 → 浮层降级）。
+ */
+export function sectionAnchorFrom(origin: AnchorOriginLike | null | undefined): unknown {
+  return origin?.closest(SECTION_ROW_SELECTOR) ?? sidebarNavFrom(origin)
+}
+
 /** 纯可达性判定：节点已连接到文档（duck-typed isConnected，桩可测）。 */
 export function isAnchorReachable(node: unknown): boolean {
   return typeof node === 'object' && node !== null && (node as { isConnected?: boolean }).isConnected === true
@@ -544,19 +560,21 @@ export interface SectionHostDocument {
 }
 
 /**
- * 在条目列表 nav 的紧后兄弟位创建并插入宿主 div（spec：分区位于条目列表与
- * 工作区 regionArea 之间）。insertAdjacentElement 返回 null 表示插入失败
- * （如 nav 已断连），返回 null 时本函数同样返回 null（交由状态机累计失败）。
- * 宿主由插件创建/清理：flex 允许收缩 + minHeight 0，不撑破侧栏整体高度。
+ * 在锚点元素的紧后兄弟位创建并插入宿主 div（锚点 = 「项目」行按钮：分区紧贴
+ * 菜单行下方；行按钮漂移时锚点回落 nav，分区位于列表末尾）。位于 nav 内部时
+ * 宿主是行间 div，位于 nav 后时是 regionArea 前的兄弟块。insertAdjacentElement
+ * 返回 null 表示插入失败（如锚点已断连），返回 null 时本函数同样返回 null
+ * （交由状态机累计失败）。宿主由插件创建/清理：flex 允许收缩 + minHeight 0，
+ * 不撑破侧栏整体高度。
  */
 export function mountSectionHost(
-  nav: { insertAdjacentElement(position: string, element: unknown): unknown },
+  anchor: { insertAdjacentElement(position: string, element: unknown): unknown },
   doc: SectionHostDocument,
 ): SectionHostElement | null {
   const host = doc.createElement('div')
   host.dataset.testid = SECTION_HOST_TESTID
   host.style.cssText = 'flex:0 1 auto;min-height:0;min-width:0;'
-  return nav.insertAdjacentElement('afterend', host) === host ? host : null
+  return anchor.insertAdjacentElement('afterend', host) === host ? host : null
 }
 
 /* ---------------------------- 挂载状态机（纯判定） ---------------------------- */
@@ -624,74 +642,28 @@ export const SECTION_MAX_HEIGHT = `min(${GROUP_MAX_HEIGHT}px, 46vh)`
 /** 渲染分区的全部输入（纯渲染面，测试可直接构造）。 */
 export interface ProjectSectionView {
   readonly projects: readonly string[]
+  /** 历史契约字段：分区已常驻展开（无折叠态），渲染不再消费。 */
   readonly expanded: boolean
   readonly activeProject: string | null
-  /** 宽态（列宽 ≥ SECTION_WIDE_MIN_WIDTH）= true；窄态渲染徽标栈/计数。 */
+  /** 宽态（列宽 ≥ SECTION_WIDE_MIN_WIDTH）= true；窄态渲染徽标栈。 */
   readonly wide: boolean
   /** 量测得到的行宽基准（px；随宿主 ResizeObserver 更新）。 */
   readonly rowWidth: number
 }
 
-/** 分区容器样式（官方工作区同款视觉：标题行 + 徽标行 + 限高滚动）。 */
+/** 分区容器样式（紧贴「项目」菜单行下方：无自带标题——上方菜单即「项目」）。 */
 const sectionStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 4,
+  gap: 2,
   boxSizing: 'border-box',
   width: 'auto',
-  margin: '2px 10px 8px',
+  margin: '0 10px 8px',
   padding: 6,
   minHeight: 0,
   borderRadius: 'var(--dsw-radius-md, 8px)',
   border: '1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.25))',
   background: 'var(--dsw-specific-sidebar-fill, transparent)',
-}
-
-/** 分区标题行样式（点击仅切换展开/折叠，不切换主面板）。 */
-const sectionTitleStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  height: 28,
-  flexShrink: 0,
-  padding: '0 6px',
-  borderRadius: 'var(--dsw-radius-sm, 6px)',
-  cursor: 'pointer',
-  color: 'var(--dsw-alias-label-secondary, inherit)',
-  font: 'inherit',
-  fontSize: 12,
-  fontWeight: 600,
-  lineHeight: '28px',
-  userSelect: 'none',
-}
-
-/** 分区标题行文案样式。 */
-const sectionTitleLabelStyle: CSSProperties = {
-  flex: 1,
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  textAlign: 'left',
-}
-
-/** 分区项目计数徽标样式（宽窄态共用）。 */
-const sectionCountStyle: CSSProperties = {
-  flexShrink: 0,
-  minWidth: 18,
-  height: 18,
-  boxSizing: 'border-box',
-  padding: '0 5px',
-  borderRadius: 9,
-  background: 'var(--dsw-alias-state-business-primary, #5b7cfa)',
-  color: '#fff',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontSize: 10,
-  fontWeight: 600,
-  lineHeight: 1,
-  userSelect: 'none',
 }
 
 /** 分区列表容器样式：最大高度 + 内部滚动（行钉死高度让容器真实溢出）。 */
@@ -729,30 +701,6 @@ const sectionRailRowStyle = (active: boolean): CSSProperties => ({
   cursor: 'pointer',
   background: active ? 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.18))' : 'transparent',
 })
-
-/** 分区项目行 chevron 指示（展开/折叠态）。 */
-function sectionChevron(expanded: boolean): ReactElement {
-  return (
-    <svg
-      width={12}
-      height={12}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      style={{
-        flexShrink: 0,
-        transition: 'transform var(--ds-transition-duration, 0.15s) var(--ds-ease-in-out, ease)',
-        transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-      }}
-    >
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  )
-}
 
 /** 宽态分区行（首字母徽标 + 项目名，当前项高亮）。 */
 function sectionRow(
@@ -801,39 +749,24 @@ function sectionRailRow(
 
 /**
  * 「项目」分区纯渲染面（无 hook，测试可直接求值元素树）：
- * - 宽态：标题行（项目 + 计数 + chevron，点击仅折叠/展开）+ 展开时限高滚动
- *   项目行列表（首字母徽标 + 项目名，当前项高亮）或空态提示；
- * - 窄态（收起轨）：标题行收敛为计数徽标，展开时徽标栈（仅徽标、居中、
- *   无横向溢出）。
+ * - 分区紧贴「项目」菜单行下方，**不带自带标题**（上方菜单即「项目」，避免
+ *   双「项目」菜单）；常驻渲染项目行（无折叠态）。
+ * - 宽态：限高滚动项目行列表（首字母徽标 + 项目名，当前项高亮）或空态提示；
+ * - 窄态（收起轨）：徽标栈（仅徽标、居中、无横向溢出）。
  *
- * 事件契约与浮层分组共用 ProjectGroupHandlers：标题行 toggleHeader、
- * 项目行 selectProject（内部 stopPropagation 阻断冒泡）。
+ * 事件契约与浮层分组共用 ProjectGroupHandlers：项目行 selectProject（内部
+ * stopPropagation 阻断冒泡到行按钮）。`expanded` 字段保留于视图契约但不再
+ * 生效（分区常驻展开，折叠语义由「项目」菜单行的主面板切换承担）。
  */
 export function renderProjectSection(view: ProjectSectionView, handlers: ProjectGroupHandlers): ReactElement {
-  const count = (
-    <span data-testid="fenix-projects-section-count" style={sectionCountStyle}>
-      {view.projects.length}
-    </span>
-  )
   if (!view.wide) {
     return (
       <section
         data-testid="fenix-projects-section"
         aria-label="项目"
-        style={{ ...sectionStyle, margin: '2px 2px 8px', padding: 4, alignItems: 'center' }}
+        style={{ ...sectionStyle, margin: '0 2px 8px', padding: 4, alignItems: 'center' }}
       >
-        <span
-          role="button"
-          tabIndex={-1}
-          data-testid="fenix-projects-section-title"
-          title="项目"
-          aria-label="项目"
-          onClick={handlers.toggleHeader}
-          style={{ ...sectionTitleStyle, padding: 0, justifyContent: 'center', height: 22 }}
-        >
-          {count}
-        </span>
-        {view.expanded && view.projects.length > 0 ? (
+        {view.projects.length > 0 ? (
           <span data-testid="fenix-projects-list" style={sectionRailListStyle} onClick={(e) => e.stopPropagation()}>
             {view.projects.map((name) => sectionRailRow(name, view.activeProject === name, handlers))}
           </span>
@@ -843,37 +776,24 @@ export function renderProjectSection(view: ProjectSectionView, handlers: Project
   }
   return (
     <section data-testid="fenix-projects-section" aria-label="项目" style={sectionStyle}>
-      <span
-        role="button"
-        tabIndex={-1}
-        data-testid="fenix-projects-section-title"
-        onClick={handlers.toggleHeader}
-        style={sectionTitleStyle}
-      >
-        <span style={sectionTitleLabelStyle}>项目</span>
-        {count}
-        {sectionChevron(view.expanded)}
+      <span data-testid="fenix-projects-list" style={sectionListStyle} onClick={(e) => e.stopPropagation()}>
+        {view.projects.length === 0 ? (
+          <span
+            data-testid="fenix-projects-empty"
+            style={{
+              display: 'block',
+              padding: '8px 10px',
+              fontSize: 12,
+              opacity: 0.6,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            暂无项目
+          </span>
+        ) : (
+          view.projects.map((name) => sectionRow(name, view.activeProject === name, handlers))
+        )}
       </span>
-      {view.expanded ? (
-        <span data-testid="fenix-projects-list" style={sectionListStyle} onClick={(e) => e.stopPropagation()}>
-          {view.projects.length === 0 ? (
-            <span
-              data-testid="fenix-projects-empty"
-              style={{
-                display: 'block',
-                padding: '8px 10px',
-                fontSize: 12,
-                opacity: 0.6,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              暂无项目
-            </span>
-          ) : (
-            view.projects.map((name) => sectionRow(name, view.activeProject === name, handlers))
-          )}
-        </span>
-      ) : null}
     </section>
   )
 }
@@ -883,10 +803,11 @@ export function renderProjectSection(view: ProjectSectionView, handlers: Project
 /**
  * 分区条目内部组件（hook 层）：锚点探测 + 宿主生命周期 + Portal 渲染 +
  * 降级浮层。挂载循环（useLayoutEffect 一次性建立）：
- * - 首挂即尝试：从条目组件 `closest('nav')` 取锚点 → nav 兄弟位插宿主 →
- *   createPortal 渲染分区；
+ * - 首挂即尝试：从条目组件 `sectionAnchorFrom` 取锚点（优先「项目」行按钮，
+ *   宿主紧贴菜单行下方成为下挂列表；行按钮漂移回落 nav）→ 锚点紧后位插宿主
+ *   → createPortal 渲染分区；
  * - 巡检 = `setInterval` 轮询兜底 + MutationObserver（document.body 子树，
- *   去抖）双通道触发同一 `tick`：锚点可达且宿主健康（紧贴 nav 之后）则幂等
+ *   去抖）双通道触发同一 `tick`：锚点可达且宿主健康（紧贴锚点之后）则幂等
  *   保持；宿主被移除/漂移则清陈旧宿主重挂（侧栏过渡动画时序竞争自愈）；
  * - 锚点不可达连续 `PORTAL_DEGRADE_FAILURES` 次 → `degraded` 暂停 Portal
  *   渲染，浮层分组自动接管；轮询兜底持续运行，锚点恢复可达即自动重挂并
@@ -922,14 +843,14 @@ function ProjectSectionEntry({
 
     const tick = (): void => {
       if (disposed) return
-      const nav = sidebarNavFrom(anchorRef.current)
-      if (!isAnchorReachable(nav)) {
+      const anchor = sectionAnchorFrom(anchorRef.current)
+      if (!isAnchorReachable(anchor)) {
         detach()
         setMountState((state) => nextPortalMountState(state, false))
         return
       }
       const current = hostRef.current
-      if (current !== null && current.isConnected && current.previousElementSibling === nav) {
+      if (current !== null && current.isConnected && current.previousElementSibling === anchor) {
         // 健康幂等：状态不变时不触发重渲染。
         setMountState((state) => nextPortalMountState(state, true))
         return
@@ -942,10 +863,10 @@ function ProjectSectionEntry({
         setMountState((state) => nextPortalMountState(state, false))
         return
       }
-      // 从未挂载（首挂或降级后重挂）：nav 可达即插宿主。
+      // 从未挂载（首挂或降级后重挂）：锚点可达即插宿主。
       detach()
-      const navElement = nav as HTMLElement
-      const mounted = mountSectionHost(navElement, {
+      const anchorElement = anchor as HTMLElement
+      const mounted = mountSectionHost(anchorElement, {
         createElement: (tag) => document.createElement(tag),
       })
       if (mounted === null || !mounted.isConnected) {

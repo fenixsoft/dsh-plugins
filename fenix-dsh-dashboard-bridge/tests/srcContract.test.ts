@@ -19,6 +19,7 @@ import {
   PORTAL_DEGRADE_FAILURES,
   SECTION_ANCHOR_SELECTOR,
   SECTION_HOST_TESTID,
+  SECTION_ROW_SELECTOR,
   clampSectionRowWidth,
   isAnchorReachable,
   isPortalActive,
@@ -29,6 +30,7 @@ import {
   projectGroupHandlers,
   renderProjectGroup,
   renderProjectSection,
+  sectionAnchorFrom,
   sidebarNavFrom,
 } from '../src/client/panels.js'
 import type { PortalMountState, ProjectGroupHandlers, SectionHostElement } from '../src/client/panels.js'
@@ -499,18 +501,14 @@ describe('「项目」Portal 分区（纯渲染 + 交互契约）', () => {
     projectGroupStore.reset()
   })
 
-  it('宽态展开：常驻分区 = 标题行（项目 + 计数 + chevron）+ 首字母徽标项目行', () => {
+  it('宽态：常驻分区 = 纯项目行列表（无自带标题，避免与「项目」菜单重复）', () => {
     const tree = renderProjectSection(sectionView(), noopHandlers)
     const section = collectByTestId(tree, 'fenix-projects-section')
     expect(section).toHaveLength(1)
-    const title = collectByTestId(tree, 'fenix-projects-section-title')[0]
-    expect(title).toBeDefined()
-    const titleTexts = collectByType(title, 'span').flatMap((span) =>
-      typeof span.props?.children === 'string' ? [span.props.children] : [],
-    )
-    expect(titleTexts).toContain('项目')
-    const count = collectByTestId(tree, 'fenix-projects-section-count')[0]
-    expect(count?.props?.children).toBe(2)
+    expect(section[0]?.props?.['aria-label']).toBe('项目')
+    // 无自带标题/计数/折叠头：上方「项目」菜单行即唯一菜单。
+    expect(collectByTestId(tree, 'fenix-projects-section-title')).toHaveLength(0)
+    expect(collectByTestId(tree, 'fenix-projects-section-count')).toHaveLength(0)
     for (const name of ['fenixd', 'dsh-plugins']) {
       const row = collectByTestId(tree, `fenix-project-row-${name}`)
       expect(row, `项目行 ${name}`).toHaveLength(1)
@@ -553,30 +551,14 @@ describe('「项目」Portal 分区（纯渲染 + 交互契约）', () => {
     expect(String(style?.['background'])).toContain('var(')
   })
 
-  it('点击分区标题行：仅切换展开/折叠（不触发 selectProject）', () => {
-    let selected = 0
-    const tree = renderProjectSection(
-      sectionView(),
-      projectGroupHandlers(projectGroupStore, {
-        selectProject: () => {
-          selected += 1
-        },
-      }),
-    )
-    const title = collectByTestId(tree, 'fenix-projects-section-title')[0]
-    const onClick = title?.props?.['onClick'] as (event: { stopPropagation(): void }) => void
-    onClick({ stopPropagation: () => {} })
-    expect(projectGroupStore.getSnapshot().expanded).toBe(false)
-    expect(selected).toBe(0)
-  })
-
-  it('折叠态：列表不渲染；窄态（收起轨）：标题收敛为计数、展开时徽标栈无项目名文本', () => {
+  it('常驻展开：expanded 不再消费（任意值都渲染行）；窄态徽标栈无项目名文本', () => {
     const collapsed = renderProjectSection(sectionView({ expanded: false }), noopHandlers)
-    expect(collectByTestId(collapsed, 'fenix-projects-list')).toHaveLength(0)
-    expect(collectByTestId(collapsed, 'fenix-projects-section-title')).toHaveLength(1)
+    expect(collectByTestId(collapsed, 'fenix-projects-list')).toHaveLength(1)
+    expect(collectByTestId(collapsed, 'fenix-project-row-fenixd')).toHaveLength(1)
 
     const rail = renderProjectSection(sectionView({ wide: false }), noopHandlers)
-    expect(collectByTestId(rail, 'fenix-projects-section-count')[0]?.props?.children).toBe(2)
+    expect(collectByTestId(rail, 'fenix-projects-section-title')).toHaveLength(0)
+    expect(collectByTestId(rail, 'fenix-projects-section-count')).toHaveLength(0)
     const rows = collectByTestId(rail, 'fenix-project-row-fenixd')
     expect(rows).toHaveLength(1)
     // 徽标栈行：仅首字母徽标（文本=首字母，带 50% 圆角），无项目名文本 span。
@@ -596,11 +578,11 @@ describe('「项目」Portal 分区（纯渲染 + 交互契约）', () => {
 })
 
 describe('「项目」分区锚点/宿主/挂载状态机（纯判定，node 桩替身）', () => {
-  /** 桩锚点原点：closest('nav') 返回注入的候选。 */
-  function fakeOrigin(nav: unknown): { closest(selectors: string): unknown } {
+  /** 桩锚点原点：closest 按 selector 返回注入候选（未注入的 selector 返回 null）。 */
+  function fakeOrigin(candidates: Record<string, unknown>): { closest(selectors: string): unknown } {
     return {
       closest(selectors: string) {
-        return selectors === SECTION_ANCHOR_SELECTOR ? nav : null
+        return candidates[selectors] ?? null
       },
     }
   }
@@ -618,10 +600,22 @@ describe('「项目」分区锚点/宿主/挂载状态机（纯判定，node 桩
 
   it('sidebarNavFrom：语义锚点 closest(nav) 命中；非 nav/缺失原点返回 null', () => {
     const nav = { tag: 'nav' }
-    expect(sidebarNavFrom(fakeOrigin(nav))).toBe(nav)
-    expect(sidebarNavFrom(fakeOrigin(undefined))).toBeNull()
+    expect(sidebarNavFrom(fakeOrigin({ [SECTION_ANCHOR_SELECTOR]: nav }))).toBe(nav)
+    expect(sidebarNavFrom(fakeOrigin({}))).toBeNull()
     expect(sidebarNavFrom(null)).toBeNull()
     expect(sidebarNavFrom(undefined)).toBeNull()
+  })
+
+  it('sectionAnchorFrom：优先「项目」行按钮（宿主紧贴菜单行下方）；行漂移回落 nav', () => {
+    const row = { tag: 'button' }
+    const nav = { tag: 'nav' }
+    // 行按钮可达：优先行锚点（分区在项目菜单正下方）。
+    expect(sectionAnchorFrom(fakeOrigin({ [SECTION_ROW_SELECTOR]: row, [SECTION_ANCHOR_SELECTOR]: nav }))).toBe(row)
+    // 行按钮不可得（结构漂移）：回落 nav（现行为：列表末尾）。
+    expect(sectionAnchorFrom(fakeOrigin({ [SECTION_ANCHOR_SELECTOR]: nav }))).toBe(nav)
+    // 均不可得：null（状态机累计失败 → 浮层降级）。
+    expect(sectionAnchorFrom(fakeOrigin({}))).toBeNull()
+    expect(sectionAnchorFrom(null)).toBeNull()
   })
 
   it('isAnchorReachable：isConnected 判定可达性（null/非对象不可达）', () => {
