@@ -113,12 +113,14 @@
   - 建议：agent_runner 对单 run 累计停滞 >300 秒或单次 >180 秒升级 warning 并进 admin 信号面；同 run 内触发一次受控重试（该轮重发或收窄上下文），并把 stall 计数纳入 run 质量门，避免 6/6 全 success 的终态统计掩盖纯等待。
 
 - **cost 计量与 token 量纲失真，离群初筛误报**
+  - 自进化：问题部分成立 / 建议部分合理 / — 不需要
   - 影响：窗口内唯一初筛离群 run（批量修复 19 条台账）被按 cost_usd 为组中位 3.6 倍（$7.45 vs $2.06）标记，但其 token 量（input 1,155 + output 532 + cache_read 缓存命中 263,744）反小于随后 $3.62 的 run（约 565k tokens），单位成本相差约 4.4 倍；按条目摊薄 $0.39/条 vs $0.33/条基本持平——离群信号是计量/口径失真而非真实浪费。
   - 证据：fenixd.log 3101 行 run_metrics：code-fix-1792158323 cost_usd=7.445 对应 input_tokens=1155、output_tokens=532、cache_read=263744；对比 3167 行 code-fix-1792170715 cost 3.618 对应 input 104,080 + cache_read 461,248 + output 10,685；离群判定（组中位 2.060546 ×3）引自数据摘要第六节。
   - 调查评估：问题源：code-review 台账（评审发现清单）批量修复线的成本观测。已核实事实：同 agent_type 两次 run 的 cost/token 单位成本差 4.4 倍；初筛阈值按绝对 cost_usd ×组中位触发，而 code-fix 成本近似与条目数线性（本 run 19 条 vs 组内中位批约 5-6 条）。根因多假说并存：子 agent（该 run 派了 7 个 Agent）计费归并口径、模型档位差异、长上下文溢价、输出 token 漏计——现有 cost 记录无 model 字段，无法裁决。与存量工作关系：无在飞 SPEC。结论：观测口径缺陷，既会误报批量 run 也会漏报真实异常。
   - 建议：run_metrics/cost 记录补 model 字段、cache 计费细分与子 run 归并标记（先取证再改阈值）；离群初筛改按 cost/台账条目归一（或同 batch size 分组）后再乘阈值。
 
 - **已收工 SPEC 滞留 blocked 态 3 天未清算**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：一个工作已入库的 SPEC 在 STATE 里挂 blocked（因异常冻结的终态，此处为 worktree 创建失败重派循环）近 3 天，日数据持续占着「blocked: 1」却无任何机制消化——状态与实绩脱节，稀释后续真实 blocked 信号的辨识度。
   - 证据：.fenix/STATE.md 记 verify-dsh-plugins-live status=blocked、updated=2026-10-14T17:43:13、error「Failed to create worktree (gave up: parallel run or manual freeze)」（指纹 59c551238074 连续同因 3 轮）；而提交 2519ba2（10-15 00:44 合回）、44089c8（收工结果定稿 17/17）、ec996f5（10-15 01:43 verification-report 入库）证明工作已完成；STATE.md 顶部 Last updated 停在 2026-10-15T12:53。
   - 调查评估：问题源：日终 STATE 快照对账。已核实事实：blocked 由 10-14 的 worktree 并发冲突同因重派循环触发，其后实现车道照常完成并合回主树，STATE 再未更新；spec/changes/verify-dsh-plugins-live/tasks.md 尚有「原地打回第 1 轮」3 个未勾项，与已入库的 verification-report.md（内含上轮 5 个 fail 判定的复核更正、30 场景重跑，结论 bug-found 仅 1 个 minor 文档缺口）互不回写——无论哪边是最新事实，两边都停在中间态。根因（形态层）：SPEC 状态机缺「工作已落地后的 blocked 清算」路径；是 daemon 巡检缺口还是状态转移规则缺口未再深查。与存量工作关系：spec/changes/ 活跃区无相关 SPEC。结论：事件在窗前、状态在本窗仍占位的跨窗残留，系统性改进点，宜轻量立项。
