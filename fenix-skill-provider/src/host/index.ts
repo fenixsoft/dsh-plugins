@@ -6,8 +6,10 @@
  *   先例），loader 条目按包名装载，config 键 `sourceDir` / `pattern` 可省略。
  * - provider 注册：`ctx.skills.registerProvider(control => provider)` 注册
  *   `{ name, list, get }`；`list()` 每次动态扫描来源目录（design D2，不缓存），
- *   `get()` 按 candidate.locator 读盘剥 frontmatter，目录增删由 D3 的
- *   `fs.watch` 去抖 `control.invalidate()` 失效注册表缓存。
+ *   `get()` 按 candidate.locator 读盘剥 frontmatter，目录条目增删/改名由 D3 的
+ *   `fs.watch` 去抖 `control.invalidate()` 失效注册表缓存。watch 非递归、不覆盖
+ *   skill 子目录内部：既有条目的 SKILL.md 就地编辑（frontmatter 元数据变更）
+ *   不触发失效，列表元数据须重启宿主才更新（正文经 get() 每次读盘仍即时）。
  * - 容错：config 非法（pattern 含不支持 glob 元字符）时以含键名的可读 error
  *   拒绝装载（对齐 bridge 先例：loader 配置错误应在装载期显式失败）；来源目录
  *   缺失返回空集 + warn；`fs.watch` 初始化失败或运行期 error 均降级为静态
@@ -26,6 +28,7 @@ import type {
   SkillLookupOptions,
   SkillProviderObservation,
 } from '@deepseek-ai/dsh-skill'
+import { errorMessage } from '../shared/errorMessage.js'
 import { WATCH_DEBOUNCE_MS, resolveProviderConfig } from '../shared/providerConfig.js'
 import type { ProviderConfigInput, ResolvedProviderConfig } from '../shared/providerConfig.js'
 import { parseFrontmatter } from './frontmatter.js'
@@ -127,7 +130,10 @@ async function loadDefinition(
 /**
  * 来源目录 watch（design D3）：`fs.watch(sourceDir)` 非递归监听条目增删/改名，
  * 事件 300ms 去抖后调 `control.invalidate()`（失效 collect 缓存并广播
- * `skills/change`）。初始化失败（目录缺失、inotify 上限、平台不支持）与运行期
+ * `skills/change`）。非递归不覆盖 skill 子目录内部：既有条目的 SKILL.md
+ * 就地编辑（frontmatter 元数据变更）不产生事件，列表元数据须重启宿主才更新
+ * （正文经 get() 每次读盘仍即时）。
+ * 初始化失败（目录缺失、inotify 上限、平台不支持）与运行期
  * 'error'（目录被删/改名、句柄失效等）都降级为静态注册 + warn，不抛未处理异常。
  *
  * @returns 停止 watch 的 disposer；watch 未能建立时返回 undefined。
@@ -142,7 +148,7 @@ function startSourceDirWatcher(
     watcher = fs.watch(resolved.sourceDir, { persistent: false }, () => scheduleInvalidate())
   } catch (error) {
     log(
-      `fenix-skill-provider: fs.watch(${resolved.sourceDir}) 初始化失败，自动同步降级为「重启后生效」的静态注册（skill 注册本身不受影响）: ${errorMessage(error)}`,
+      `fenix-skill-provider: fs.watch(${resolved.sourceDir}) 初始化失败，自动同步降级为「重启后生效」的静态注册（skill 注册本身不受影响；watch 仅覆盖条目增删/改名，SKILL.md 就地编辑亦需重启生效）: ${errorMessage(error)}`,
     )
     return undefined
   }
@@ -184,7 +190,7 @@ function startSourceDirWatcher(
     if (degraded) return
     degraded = true
     log(
-      `fenix-skill-provider: fs.watch(${resolved.sourceDir}) 运行期失效，自动同步降级为「重启后生效」的静态注册（skill 注册本身不受影响）: ${errorMessage(error)}`,
+      `fenix-skill-provider: fs.watch(${resolved.sourceDir}) 运行期失效，自动同步降级为「重启后生效」的静态注册（skill 注册本身不受影响；watch 仅覆盖条目增删/改名，SKILL.md 就地编辑亦需重启生效）: ${errorMessage(error)}`,
     )
     try {
       stop()
@@ -193,8 +199,4 @@ function startSourceDirWatcher(
     }
   })
   return stop
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

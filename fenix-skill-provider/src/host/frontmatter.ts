@@ -146,6 +146,7 @@ function parseKeyValueBlock(block: string): Map<string, string | boolean | Recor
     if (isNested) return null // 首个嵌套行不属于任何已知容器键
 
     if (key === 'metadata' && valueText.length === 0) {
+      if (data.has('metadata')) return null // 重复 metadata: 声明与其他顶层键同口径：整体失败
       metadataIndent = indent
       data.set('metadata', metadata)
       continue
@@ -176,6 +177,7 @@ function parseScalar(text: string): string | boolean | null {
   // 多行 / 流集合（[ {）形态不支持，整体拒绝；# 的拒绝收窄为「注释起始」：
   // 仅值首（YAML `key: # …` 取到的是注释而非值）或空白后的 # 拒绝，
   // 值中部 # 是合法字面量（如「支持 C# 项目」），放行。
+  // [fenix-ignore:5ae61ac429c4] 成对引号值已在上方引号分支提前返回，引号内 # 不经过本检查，所述「引号值含空格+# 被拒」不成立
   if (/(?:^|\s)#|[\n[{[]/.test(text)) return null
   return text
 }
