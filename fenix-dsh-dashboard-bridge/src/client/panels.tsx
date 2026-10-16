@@ -325,7 +325,8 @@ const DEFAULT_HEADER_GEOMETRY: HeaderGeometry = {
  * 行高偏离基线过远（> 2 倍，疑似结构漂移——坏量测不如常量）。
  */
 export function measureHeaderGeometry(origin: MeasurableOrigin | null | undefined): HeaderGeometry | null {
-  const row = origin?.closest(SECTION_ROW_SELECTOR)
+  if (origin == null) return null
+  const row = origin.closest(SECTION_ROW_SELECTOR)
   if (typeof row !== 'object' || row === null || !('getBoundingClientRect' in row)) return null
   const rowRect = (row as MeasurableOrigin).getBoundingClientRect()
   const originRect = origin.getBoundingClientRect()
