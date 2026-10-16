@@ -2,9 +2,10 @@
  * Client 半单测（2026-10 分组化数据流）：reconcile 三态与幂等、失败兜底、
  * 同步循环（假定时器/焦点桩）、项目列表解析、分组数据源（store）契约。
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_POLL_INTERVAL_MS,
+  MIN_POLL_INTERVAL_MS,
   compareNames,
   parseProjectNames,
   reconcileProjects,
@@ -166,8 +167,20 @@ describe('parseProjectNames', () => {
     expect(parseProjectNames({ projects: [] })).toEqual([])
   })
 
-  it('缺失/非字符串 name 的行静默跳过', () => {
-    expect(parseProjectNames({ projects: [{ name: 'a' }, {}, { name: 42 }, null, { name: 'b' }] })).toEqual(['a', 'b'])
+  it('缺失/非字符串 name 的行跳过并计数 warn（行级漂移可观测）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(parseProjectNames({ projects: [{ name: 'a' }, {}, { name: 42 }, null, { name: 'b' }] })).toEqual(['a', 'b'])
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]?.[0])).toContain('3/5')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('projects 非空但全部行无有效 name → 抛形状异常（防「项目全部消失」静默故障）', () => {
+    expect(() => parseProjectNames({ projects: [{}, { name: 42 }] })).toThrow(/形状异常/)
+    expect(() => parseProjectNames({ projects: [{ title: 'renamed' }] })).toThrow(/形状异常/)
   })
 
   it('形状异常抛错（按拉取失败处理）', () => {
@@ -190,14 +203,15 @@ describe('startProjectSync 同步循环', () => {
         return list
       },
       sink,
-      intervalMs: 1234,
+      intervalMs: 6_000,
       timer,
     })
     await tick()
     expect(fetchCalls).toBe(1)
     expect(sink.added).toEqual(['a'])
     expect(sink.projectSets).toEqual([['a']])
-    expect(timer.intervalMs).toBe(1234)
+    // ≥ 下界的周期原样透传（< 下界的钳制行为见下方专测）。
+    expect(timer.intervalMs).toBe(6_000)
 
     // 周期触发：列表变化 → 差异注册 + 数据源整体替换。
     list = ['a', 'b']
@@ -247,7 +261,7 @@ describe('startProjectSync 同步循环', () => {
         return ['a']
       },
       sink,
-      intervalMs: 1000,
+      intervalMs: 5_000,
       timer,
     })
     await tick()
@@ -270,7 +284,7 @@ describe('startProjectSync 同步循环', () => {
     const stop = startProjectSync({
       fetchProjects: async () => list,
       sink,
-      intervalMs: 1000,
+      intervalMs: 5_000,
       timer,
     })
     await tick()
@@ -283,6 +297,59 @@ describe('startProjectSync 同步循环', () => {
     expect(sink.added).toHaveLength(2)
     expect(sink.projectSets.at(-1)).toEqual([])
     stop()
+  })
+})
+
+describe('startProjectSync intervalMs 规整（下界钳制防御）', () => {
+  it('非有限/非正数回退缺省 60s 并 warn 一次', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        const timer = fakeTimer()
+        const stop = startProjectSync({
+          fetchProjects: async () => [],
+          sink: recordingSink(),
+          intervalMs: bad,
+          timer,
+        })
+        expect(timer.intervalMs).toBe(DEFAULT_POLL_INTERVAL_MS)
+        stop()
+      }
+      expect(warn).toHaveBeenCalledTimes(4)
+      expect(String(warn.mock.calls[0]?.[0])).toContain('回退缺省')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('合法但低于 5s 下界的钳到 5s 并 warn；≥5s 原样透传且不 warn', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const clampedTimer = fakeTimer()
+      const stopClamped = startProjectSync({
+        fetchProjects: async () => [],
+        sink: recordingSink(),
+        intervalMs: MIN_POLL_INTERVAL_MS - 1,
+        timer: clampedTimer,
+      })
+      expect(clampedTimer.intervalMs).toBe(MIN_POLL_INTERVAL_MS)
+      stopClamped()
+
+      const passthroughTimer = fakeTimer()
+      const stopPassthrough = startProjectSync({
+        fetchProjects: async () => [],
+        sink: recordingSink(),
+        intervalMs: 30_000,
+        timer: passthroughTimer,
+      })
+      expect(passthroughTimer.intervalMs).toBe(30_000)
+      stopPassthrough()
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]?.[0])).toContain('钳制')
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 
@@ -328,7 +395,7 @@ describe('projectGroupStore（分组数据源契约）', () => {
     const stop = startProjectSync({
       fetchProjects: async () => ['fenixd', 'dsh-plugins'],
       sink,
-      intervalMs: 1000,
+      intervalMs: 5_000,
       timer,
     })
     await tick()
