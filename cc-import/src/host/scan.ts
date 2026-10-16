@@ -10,20 +10,12 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { resolveCandidateModel } from '../shared/mapping.js'
+import { envValue, resolveCandidateModel } from '../shared/mapping.js'
 import type { ScanCandidate, ScanResponse, ScanSkippedRow } from '../shared/mapping.js'
 
 /** 默认 cc-switch 数据库路径（可被 CC_IMPORT_CC_SWITCH_DB 覆盖，测试注入用）。 */
 export function defaultDbPath(): string {
   return process.env['CC_IMPORT_CC_SWITCH_DB'] ?? join(homedir(), '.cc-switch', 'cc-switch.db')
-}
-
-/** env 块取值：非字符串或纯空白视为缺失。 */
-function envValue(env: Readonly<Record<string, unknown>>, key: string): string | null {
-  const raw = env[key]
-  if (typeof raw !== 'string') return null
-  const trimmed = raw.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 /** 错误消息归一：Error 用 message，其余 String 化。 */

@@ -15,10 +15,15 @@ import {
 import type { ProviderProfile, ScanCandidate } from '../shared/mapping.js'
 import type { SettingsPathOp } from '@deepseek-ai/cordis'
 
-/** 既有 pi-ai provider 的计划期摘要（来自 settings 快照，不含密钥）。 */
+/**
+ * 既有 pi-ai provider 的计划期摘要（来自 settings 快照，不含密钥明文）。
+ * apiKeyEnv 是凭据引用名而非密钥，随摘要带走供 planImports 消解跨批次
+ * keyRef 碰撞。
+ */
 export interface ExistingProviderSummary {
   readonly displayName?: unknown
   readonly baseURL?: unknown
+  readonly apiKeyEnv?: unknown
 }
 
 /** 既有 providers 快照：route id → 摘要。 */
@@ -38,7 +43,7 @@ export interface PlannedImport {
   /** 实际写入的 route id（冲突已解析）。 */
   readonly routeId: string
   readonly profile: ProviderProfile
-  /** storeCredential 的凭据引用（`<ROUTE>_API_KEY`；批次内派生冲突时带 `_2` 递增后缀）。 */
+  /** storeCredential 的凭据引用（`<ROUTE>_API_KEY`；与既有 providers 或批次内先到者派生冲突时带 `_2` 递增后缀）。 */
   readonly keyRef: string
   /** slug 命中既有 providers（对话框标「已存在」）。 */
   readonly existed: boolean
@@ -87,8 +92,9 @@ export function rowState(
  * - 同名候选只保留首个、后续同名跳过（`duplicate`）：勾选集/行 key/revealToken
  *   全程以 name 寻址，而 cc-switch 的 providers.name 未见唯一约束，重名行会让
  *   勾选与计划互相串扰。
- * - keyRef 派生把 `-` 折叠成 `_`，不同 route id 可派生同一凭据引用：批次内
- *   冲突时对后到者加 `_2`/`_3` 递增后缀（`resolveApiKeyEnvConflict`）。
+ * - keyRef 派生把 `-` 折叠成 `_`，不同 route id 可派生同一凭据引用：与既有
+ *   providers 已占用引用或批次内先到者碰撞时，对后到者加 `_2`/`_3` 递增后缀
+ *   （`resolveApiKeyEnvConflict`）；覆盖更新例外，沿用既有条目当前引用原位替换。
  */
 export function planImports(
   candidates: readonly ScanCandidate[],
@@ -96,7 +102,14 @@ export function planImports(
   existing: ExistingProviders,
 ): ImportPlan {
   const existingKeys = new Set(Object.keys(existing))
-  const usedKeyRefs = new Set<string>()
+  // keyRef 消解不只看批次内：既有 providers 已占用的凭据引用一并入集。路由
+  // 键不同不代表引用不同（既有 `a_b` 与新候选 `a-b` 大写折叠后同得
+  // A_B_API_KEY），不跨批次消解会让 set 直接覆盖别家 token 且无任何警告。
+  const usedKeyRefs = new Set<string>(
+    Object.values(existing)
+      .map((summary) => summary.apiKeyEnv)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0),
+  )
   const seenNames = new Set<string>()
   const ops: SettingsPathOp[] = []
   const planned: PlannedImport[] = []
@@ -123,8 +136,14 @@ export function planImports(
     const built = buildProviderProfile(routeId, candidate)
     // routeId 在批次内已唯一，但 keyRef 派生不单射（`a-b` 与 `a--b` 同得
     // A_B_API_KEY），后到者若不消解会覆盖先到者的 token：按 routeId 同风格
-    // 的递增后缀策略给后到者派生独立 keyRef。
-    const keyRef = resolveApiKeyEnvConflict(built.apiKeyEnv, usedKeyRefs)
+    // 的递增后缀策略给后到者派生独立 keyRef（既有占用已入集，跨批次碰撞
+    // 同样加后缀）。覆盖更新例外：同一条既有 provider 原地更新沿用它当前
+    // 的引用，token 原位替换、不留孤儿凭据。
+    const currentRef = update ? existing[slug]?.apiKeyEnv : undefined
+    const keyRef =
+      typeof currentRef === 'string' && currentRef.length > 0
+        ? currentRef
+        : resolveApiKeyEnvConflict(built.apiKeyEnv, usedKeyRefs)
     const profile = keyRef === built.apiKeyEnv ? built : { ...built, apiKeyEnv: keyRef }
     usedKeyRefs.add(keyRef)
     existingKeys.add(routeId)
