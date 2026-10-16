@@ -90,6 +90,7 @@
 
 ### 浪费
 - **两个 code-fix run 零产出空转，管线滞留待重试**
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
   - 影响：一个已被上一 run 处置过的 code-review 台账条目仍按 open 条目重修，连烧 2 个零产出 run：合计约 268 秒 run 时长、$0.89，另遗留 2 个未清理的 worktree 与同名分支；修复管线被置为 blocked，下轮还将对同一已处置条目再烧一次。
   - 证据：fenixd.log 17:23:14Z 与 17:47:55Z（本地 01:23/01:47）两条「code-fix 零有效修复（fixed=0, commits=0, ignored=0），拒合回」，分别对应 run code-fix-1792171264（修 code-review 发现的修复 run，123 秒、$0.39）与 code-fix-1792172724（144 秒、$0.50）；fix-progress.json 记 total=1、done=0、chain_skipped（修复链内跳过）=["5ae61ac429c4"]、reason=failed_batch_retained（零有效修复批次留存待重试）；git worktree list 仍列出 impl-code-review-fix-1792171264/-1792172724 两个残留目录及分支。
   - 调查评估：问题源：处置第 2 轮周期代码评审 code-review-1792170044（01:11 本地产出 12 条台账）的修复链。已核实事实：批 1 run code-fix-1792170715（01:11-01:21）resolved 11/12 并合回（7c1415f），其中 01cbd8f 已给剩余条目对应的 fenix-skill-provider/src/host/frontmatter.ts 落了 [fenix-ignore:5ae61ac429c4] 豁免注释（fenix-ignore，代码注释形式的评审条目豁免标记，判定原发现「引号值含空格+# 被拒」不成立——成对引号值在引号分支提前返回，已核对现码）；其后两个 run 均因无可修内容产出为零被拒合回。根因（形态层）：台账 items.jsonl 该条目仍 status=open，fenix-ignore 注释未被任何环节折算成台账 resolved/ignored，调度器遂反复重派——系统性闭环缺口而非单次失误，至于是 fixer 未上报处置动作还是 runner 未解析注释，本次证据不足以裁决（详见改进条）。与存量工作关系：spec/changes/ 活跃区无覆盖 code-review 闭环机制的 SPEC。结论：本次直接损失小（$0.89、约 4.5 分钟、2 个 worktree 残留），但「下轮自动重试」使其成为每轮评审遇无效/已处置条目必复发的空转循环；另注意 6 个 run 终态全部 success，终态统计对这类零产出空转完全失明。
@@ -97,6 +98,7 @@
 
 ### 失误
 - **散件 WIP 收编双路径重放，空转误报 ERROR**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：主树散件 WIP 已被 admin run 手动提交成功 41 秒后，框架又重放同一裁决选项（choice，管理员预置的一键处置动作），命中陈旧清单守卫空转一次，落 1 条 ERROR 日志和 1 条 result=failed 处置记录——本次无实际损失（守卫拦住了空提交），但错误统计被污染，双路径重放仅靠守卫兜底。
   - 证据：ERROR 日志 2026-10-16T13:24:26.720756Z（admin_monitor：「处置 choice 执行失败 choice_id=commit_stray_wip…清单陈旧，不产生空提交」，本地 21:24:26）；admin_alerts.json 中处置 4919170f0cb9（result=failed）与 c97b6ddf8a51（result=resolved，附提交 42e0673）相隔 31 毫秒；admin run 存档 admin-dsh-plugins-1792156839.jsonl 记录 13:23:45Z 执行 git add+commit（提交 42e0673，2 文件 +94/-179，提交前 pnpm test 60/60）。
   - 调查评估：问题源：处置 maintree_stray_wip_stale 信号（主树散件未提交改动滞留告警：2 个 tracked 文件无主滞留 30.1 分钟，信号 91d365247837，21:19 升级）。已核实事实链：admin run 读裁决选项源码后于 21:23:45 直接 git add+commit 完成收编，21:24:26 monitor 侧再执行推荐选项 commit_stray_wip，发现清单文件已全部不在工作区，守卫拒绝空提交并记 ERROR+failed；信号本体至今 handled=False、result=failed、escalated=True，处置 resolved 未回写信号。根因（形态层）：同一处置动作存在「agent 手动等价执行」与「monitor 重放推荐选项」两条路径，后者执行前不核对清单是否已生效——归因只能到此，至于是 agent 绕过选项机制违约、还是 monitor 缺「已等效处置则跳过」逻辑，证据不足、两假说并存。与存量工作关系：无在飞 SPEC 覆盖 admin 处置链路。结论：一次性形态但结构性可复发（凡 agent 手动等价执行即复现），属低危高噪失误。
@@ -104,6 +106,7 @@
 
 ### 可改进
 - **评审 run API 停滞占墙钟过半，无处置只记日志**
+  - 自进化：问题部分成立 / 建议部分合理 / — 不需要
   - 影响：最近两轮周期代码评审 run 连续出现多分钟级 API 停滞（stall，单轮往返超阈值）：窗口内 run 停滞 3 轮共 386.1 秒、单次最长 227.4 秒，占该 run 671.5 秒墙钟的约 57%；前一日轮次也停滞 4 轮（最长 125.4 秒）——复发敞口为每轮评审白等 5-7 分钟。
   - 证据：fenixd.log 3153-3154 行（2026-10-16T17:07Z「API round-trip stall: 227.4s (round #6 > 120s)」及「16 rounds…stalls>60s=3 (19%)」，run code-review-1792170044）；2587/2593 行为前一日 code-review-1792083770 同类记录（28 轮停滞 4 轮、max 125.4 秒）；窗口内 code-fix-1792158323 另有 1 次 75.2 秒停滞；两 run provider 均为 bigmodel.cn。
   - 调查评估：问题源：code-review agent（周期代码评审）运行期。已核实事实：停滞由 agent_runner 的 api_round_stall 探测捕获，但 grade=info 仅落日志，无任何处置动作；停滞集中出现在长上下文低轮数的评审 run。根因写到形态层：单轮往返 2-4 分钟（服务端排队/长上下文 prefill/本地网络，现有证据不足未裁决）；框架停留在观测面、无止损。与存量工作关系：spec/changes/ 活跃区无 stall 处置相关 SPEC。结论：系统性缺口，评审 run 是最易吃满停滞的形态，值得立项。
