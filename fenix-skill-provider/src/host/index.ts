@@ -10,8 +10,8 @@
  *   `fs.watch` 去抖 `control.invalidate()` 失效注册表缓存。
  * - 容错：config 非法（pattern 含不支持 glob 元字符）时以含键名的可读 error
  *   拒绝装载（对齐 bridge 先例：loader 配置错误应在装载期显式失败）；来源目录
- *   缺失返回空集 + warn；`fs.watch` 初始化失败降级为静态注册 + warn，不抛
- *   未处理异常。
+ *   缺失返回空集 + warn；`fs.watch` 初始化失败或运行期 error 均降级为静态
+ *   注册 + warn，不抛未处理异常。
  * - 生命周期：watch 随 provider registration 的 `control.signal` abort 注销
  *   （fiber 卸载 = registration dispose = watch close）；provider 本身随 fiber
  *   卸载自动注销。
@@ -56,8 +56,16 @@ export default class FenixSkillProvider extends Service {
       }
     }
 
+    // 幂等守卫：本实现假设 dsh skill registry 的 registerProvider 工厂只被调用
+    // 一次（invalidate / 重收集只重复调用 list/get，不重调工厂；该契约未在本仓库
+    // 内可核实）。若 registry 实际会重调工厂，以闭包级标记跳过重复启动，防止每次
+    // 新起一个 fs.watch 而旧 watcher 的 stop 被丢弃（watcher 泄漏 + 重复 invalidate）。
+    let watchStarted = false
     const unregister = this.ctx.skills.registerProvider((control) => {
-      const stopWatch = startSourceDirWatcher(resolved, control, log)
+      if (!watchStarted) {
+        watchStarted = true
+        startSourceDirWatcher(resolved, control, log)
+      }
       // 插件卸载（loader 条目移除 / fiber 卸载）时经 disposer 注销 registration，
       // provider 与 watch 一并退出（signal abort 兜底关闭 watcher）。
       return {
@@ -119,8 +127,8 @@ async function loadDefinition(
 /**
  * 来源目录 watch（design D3）：`fs.watch(sourceDir)` 非递归监听条目增删/改名，
  * 事件 300ms 去抖后调 `control.invalidate()`（失效 collect 缓存并广播
- * `skills/change`）。初始化失败（目录缺失、inotify 上限、平台不支持）降级为
- * 静态注册 + warn，不抛未处理异常。
+ * `skills/change`）。初始化失败（目录缺失、inotify 上限、平台不支持）与运行期
+ * 'error'（目录被删/改名、句柄失效等）都降级为静态注册 + warn，不抛未处理异常。
  *
  * @returns 停止 watch 的 disposer；watch 未能建立时返回 undefined。
  */
@@ -164,6 +172,26 @@ function startSourceDirWatcher(
     return stop
   }
   control.signal.addEventListener('abort', stop, { once: true })
+
+  // 运行期 'error' 事件（来源目录被删/改名、inotify 句柄失效等）：Node 的
+  // EventEmitter 约定是 error 事件无监听即抛未捕获异常，在 dsh 宿主进程里会
+  // 拖垮整个 web 进程。与初始化失败同口径降级：warn 一条后关闭 watcher，并置
+  // degraded 避免重复报错（error 后 watcher 通常已死，自动同步失效，按「重启后
+  // 生效」的静态注册口径运行）。自动重建 watcher 需与本 signal 的 abort 联动
+  // 重建，当前最小实现不做，留注释备忘。
+  let degraded = false
+  watcher.on('error', (error) => {
+    if (degraded) return
+    degraded = true
+    log(
+      `fenix-skill-provider: fs.watch(${resolved.sourceDir}) 运行期失效，自动同步降级为「重启后生效」的静态注册（skill 注册本身不受影响）: ${errorMessage(error)}`,
+    )
+    try {
+      stop()
+    } catch {
+      // watcher 已被运行期故障杀死时 close 可能再抛：降级路径尽力清理即可
+    }
+  })
   return stop
 }
 

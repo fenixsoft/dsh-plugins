@@ -49,11 +49,22 @@ export class CcimportController extends TypertRemoteService {
   }
 
   /**
-   * 按候选名读取 AUTH_TOKEN 明文；仅导入确认后由 client 调用。
-   * 单次开库按 name 定点查行并就地完成 hasToken 语义校验，不依赖 scanCcSwitch
-   * 的整体成败（无关候选的坏行不再连带挡住本候选）；行缺失 / token 未配置 /
-   * 行配置在导入时被并发修改，都按结构化错误返回，client 将其计入该候选的
-   * 失败明细，不阻断批次。
+   * 安全前提（design 留档）：
+   *
+   * `revealToken` 是按候选名拉取 token 明文的公开 RPC 面，本身无调用方校验或
+   * 审批门；安全性完全押在 dsh fence 只把 `remote.ccimport` 命名空间授予本插件
+   * apply 时 inject 的 UI 子 ctx（见 client/index.ts apply 中的
+   * `['remote.ccimport', 'remote.settings', 'remote.credentials']` inject，子 ctx
+   * 的 reflect fence 对其放行）这一前提上。该前提在本仓库内无法核实——
+   * dsh-runtime.d.ts 只是构建期类型缝，运行时形态以发行包行为为准；若宿主侧
+   * 存在其他可触达该命名空间的上下文（如共享 remote gateway），读取面即对其
+   * 敞开：可按名枚举、逐个拉出 cc-switch 里全部 claude provider 的 AUTH_TOKEN
+   * 明文（文件头「token 只在 client 内存瞬时经过、落库走官方凭据路径」约束的
+   * 是本插件自身的写入面，约束不了读取面被谁调用）。
+   *
+   * 后续收紧方向（待 dsh 侧可核实 fence 行为后落地）：scan 时签发短时效一次性
+   * reveal 许可，revealToken 校验该许可与调用来源（仅接受确认导入流程 uiCtx
+   * 闭包的调用），把「任意按名读取」收敛为「一次确认导入对应一次定点 reveal」。
    */
   async revealToken(providerName: string): Promise<TokenResponse> {
     return readCcSwitchToken(defaultDbPath(), providerName)

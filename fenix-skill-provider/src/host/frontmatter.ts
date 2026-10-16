@@ -173,6 +173,9 @@ function parseScalar(text: string): string | boolean | null {
     const inner = text.slice(1, -1)
     return inner.includes(quote) ? null : inner
   }
-  if (/[\n#[{[]/.test(text)) return null // 多行/注释/流集合形态：不支持
+  // 多行 / 流集合（[ {）形态不支持，整体拒绝；# 的拒绝收窄为「注释起始」：
+  // 仅值首（YAML `key: # …` 取到的是注释而非值）或空白后的 # 拒绝，
+  // 值中部 # 是合法字面量（如「支持 C# 项目」），放行。
+  if (/(?:^|\s)#|[\n[{[]/.test(text)) return null
   return text
 }

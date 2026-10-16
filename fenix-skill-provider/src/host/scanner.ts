@@ -56,8 +56,14 @@ export async function scanSkillDir(
     return []
   }
 
+  // readdir 的条目顺序平台/文件系统相关（ext4 哈希序、apfs 目录序各不相同），
+  // 先按目录名字典序排序，让「重名保留首个」有稳定可解释的语义：字典序最小
+  // 者胜出，与遍历时的平台顺序无关。
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+
   const candidates: SkillCandidate[] = []
-  const seenNames = new Set<string>()
+  // skill name → 获胜条目的 SKILL.md 路径（重名 warn 中指认保留方用）
+  const seenNames = new Map<string, string>()
   for (const entry of entries) {
     if (signal?.aborted) return { candidates, complete: false }
     if (!patternRe.test(entry.name)) continue
@@ -106,11 +112,12 @@ export async function scanSkillDir(
       warn(log, dirName, `name "${parsed.name}" 不符 skill 命名语法（须为 kebab-case，对齐 dsh-skill isSkillName）`)
       continue
     }
-    if (seenNames.has(parsed.name)) {
-      warn(log, dirName, `skill name "${parsed.name}" 与先前条目重名，保留首个、跳过本条目`)
+    const winnerPath = seenNames.get(parsed.name)
+    if (winnerPath !== undefined) {
+      warn(log, dirName, `skill name "${parsed.name}" 与先前条目 ${winnerPath} 重名，保留先前条目、跳过本条目`)
       continue
     }
-    seenNames.add(parsed.name)
+    seenNames.set(parsed.name, skillMdPath)
 
     candidates.push({
       path: skillMdPath,

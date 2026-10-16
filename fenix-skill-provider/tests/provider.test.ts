@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
+import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,12 +15,15 @@ function createHost(sourceDir: string, pattern?: string): {
   warns: string[]
   invalidate: ReturnType<typeof vi.fn>
   dispose: () => void
+  /** 模拟 dsh registry 重收集时重调工厂（该行为契约未定，用于测 watch 幂等守卫）。 */
+  recreate: () => void
 } {
   const warns: string[] = []
   const invalidate = vi.fn()
   const controller = new AbortController()
   const control: SkillProviderControl = { signal: controller.signal, invalidate }
   let provider: SkillProvider | undefined
+  let createProvider: ((control: SkillProviderControl) => SkillProvider) | undefined
   const effects: Array<() => void> = []
   const ctx = {
     logger: {
@@ -31,6 +35,7 @@ function createHost(sourceDir: string, pattern?: string): {
     },
     skills: {
       registerProvider: (create: (control: SkillProviderControl) => SkillProvider) => {
+        createProvider = create
         provider = create(control)
         return () => {
           provider = undefined
@@ -56,6 +61,10 @@ function createHost(sourceDir: string, pattern?: string): {
     invalidate,
     dispose: () => {
       for (const fn of effects) fn()
+    },
+    recreate: () => {
+      if (createProvider === undefined) throw new Error('工厂未捕获')
+      provider = createProvider(control)
     },
   }
 }
@@ -246,5 +255,42 @@ describe('fs.watch 自动同步', () => {
     // 降级 warn 可观测
     expect(h.warns.join('\n')).toMatch(/fs\.watch/)
     expect(h.warns.join('\n')).toMatch(/降级/)
+  })
+
+  it('watcher 运行期 error：与初始化失败同口径降级 + 关闭 watcher，不重复报错、不抛未处理异常', async () => {
+    const dir = await makeSourceDir()
+    const close = vi.fn()
+    const fake = new EventEmitter() as unknown as fs.FSWatcher
+    fake.close = (): void => close()
+    // 用假 watcher 替换 fs.watch，便于手动 emit 运行期 'error'（目录被删/句柄失效等）
+    const spy = vi.spyOn(fs, 'watch').mockImplementation((() => fake) as unknown as typeof fs.watch)
+    let h: ReturnType<typeof createHost>
+    try {
+      h = track(createHost(dir))
+    } finally {
+      spy.mockRestore()
+    }
+    fake.emit('error', new Error('ENOENT: no such file or directory, watch 已被删除'))
+    // 降级 warn 可观测（同初始化失败口径，含具体错误）
+    expect(h.warns.join('\n')).toMatch(/fs\.watch/)
+    expect(h.warns.join('\n')).toMatch(/降级/)
+    expect(h.warns.join('\n')).toContain('ENOENT')
+    expect(close).toHaveBeenCalledTimes(1)
+    // 已降级：重复 error 不再重复 warn（也不再抛未处理异常）
+    fake.emit('error', new Error('again'))
+    expect(h.warns).toHaveLength(1)
+    // 后续 dispose（signal abort → stop → close）不抛
+    h.dispose()
+  })
+
+  it('registerProvider 工厂被重入时 watch 幂等：fs.watch 只启动一次', async () => {
+    const dir = await makeSourceDir()
+    const spy = vi.spyOn(fs, 'watch')
+    const h = track(createHost(dir))
+    expect(spy).toHaveBeenCalledTimes(1)
+    // 模拟 registry 重收集重调工厂：不再叠加 watcher
+    h.recreate()
+    expect(spy).toHaveBeenCalledTimes(1)
+    spy.mockRestore()
   })
 })

@@ -124,7 +124,7 @@ export function splitModelAlias(model: string): ModelRow {
 }
 
 /** env 值判空：非字符串 / null / undefined / 纯空白都算缺失。 */
-function envValue(env: Readonly<Record<string, unknown>>, key: string): string | null {
+export function envValue(env: Readonly<Record<string, unknown>>, key: string): string | null {
   const raw = env[key]
   if (typeof raw !== 'string') return null
   const trimmed = raw.trim()

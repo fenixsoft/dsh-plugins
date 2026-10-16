@@ -18,6 +18,30 @@
 /** 项目列表轮询周期。 */
 export const DEFAULT_POLL_INTERVAL_MS = 60_000
 
+/** 轮询周期下界：合法但低于该值的配置按笔误钳到下界，防高频请求轰炸后端。 */
+export const MIN_POLL_INTERVAL_MS = 5_000
+
+/**
+ * 规整轮询周期（仅在启动时调用一次，warn 只发一次、不随轮询刷屏）：
+ * 非有限/非正数视为配置笔误，回退缺省值；合法但低于下界的钳到下界。
+ */
+function normalizeIntervalMs(raw: number | undefined): number {
+  if (raw === undefined) return DEFAULT_POLL_INTERVAL_MS
+  if (!Number.isFinite(raw) || raw <= 0) {
+    console.warn(
+      `[fenix-dsh-dashboard-bridge] intervalMs 配置非法（${String(raw)}），回退缺省 ${DEFAULT_POLL_INTERVAL_MS}ms`,
+    )
+    return DEFAULT_POLL_INTERVAL_MS
+  }
+  if (raw < MIN_POLL_INTERVAL_MS) {
+    console.warn(
+      `[fenix-dsh-dashboard-bridge] intervalMs=${String(raw)}ms 低于下界，钳制为 ${MIN_POLL_INTERVAL_MS}ms（防高频轰炸后端）`,
+    )
+    return MIN_POLL_INTERVAL_MS
+  }
+  return raw
+}
+
 /**
  * 项目条目汇：reconcile 差异（main keyed 面板注册/注销）与分组数据源
  * （setProjects 整体替换）的落点。
@@ -42,8 +66,10 @@ export function compareNames(a: string, b: string): number {
 
 /**
  * 解析 `/api/projects` 应答为项目名数组：`{ projects: [{ name }] }`；
- * 非 projects 数组抛错（按拉取失败处理），空数组合法，缺失/非字符串 name
- * 的行静默跳过。
+ * 非 projects 数组抛错（按拉取失败处理），空数组合法；缺失/非字符串 name
+ * 的行跳过并计数 warn（行级形状漂移可观测）；projects 非空但全部行无有效
+ * name 视为形状漂移（如 name 字段改名），抛错走「拉取失败保留既有状态」
+ * 路径，防止把「项目全部消失」伪装成合法空列表而注销全部面板。
  */
 export function parseProjectNames(payload: unknown): string[] {
   const projects = (payload as { projects?: unknown } | null | undefined)?.projects
@@ -51,9 +77,21 @@ export function parseProjectNames(payload: unknown): string[] {
     throw new Error('fenix-dsh-dashboard-bridge: /api/projects 应答形状异常（projects 非数组）')
   }
   const names: string[] = []
+  let skipped = 0
   for (const item of projects) {
     const name = (item as { name?: unknown } | null | undefined)?.name
     if (typeof name === 'string' && name.length > 0) names.push(name)
+    else skipped += 1
+  }
+  if (projects.length > 0 && names.length === 0) {
+    throw new Error(
+      `fenix-dsh-dashboard-bridge: /api/projects 应答形状异常（${projects.length} 行均无有效 name，疑似字段漂移）`,
+    )
+  }
+  if (skipped > 0) {
+    console.warn(
+      `[fenix-dsh-dashboard-bridge] /api/projects ${skipped}/${projects.length} 行缺失/非字符串 name，已跳过`,
+    )
   }
   return names
 }
@@ -112,7 +150,7 @@ export interface ProjectSyncOptions {
   readonly fetchProjects: ProjectListFetcher
   /** 差异落点（main keyed 面板注册/注销 + 分组数据源）。 */
   readonly sink: ProjectEntrySink
-  /** 轮询周期；缺省 60s。 */
+  /** 轮询周期；缺省 60s；非有限/非正数回退缺省，低于 5s 下界的钳到 5s（均 warn 一次）。 */
   readonly intervalMs?: number
   /** 计时/焦点钩子；缺省真实 setInterval + window focus。 */
   readonly timer?: SyncTimer
@@ -123,7 +161,7 @@ export interface ProjectSyncOptions {
  * 返回停止函数：清定时器、退订焦点、丢弃在途拉取结果；再次调用安全。
  */
 export function startProjectSync(options: ProjectSyncOptions): () => void {
-  const intervalMs = options.intervalMs ?? DEFAULT_POLL_INTERVAL_MS
+  const intervalMs = normalizeIntervalMs(options.intervalMs)
   const timer = options.timer ?? defaultTimer()
   let current: ReadonlySet<string> = new Set()
   let stopped = false

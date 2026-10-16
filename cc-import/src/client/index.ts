@@ -14,7 +14,7 @@ import type { Context, SettingsPathOp } from '@deepseek-ai/cordis'
 import { inject, TYPERT_REMOTE } from './contract.js'
 import { ImportFooterEntry, snapshotFromScan } from './dialog.js'
 import type { DialogSnapshot, ImportOutcome } from './dialog.js'
-import type { ExistingProviders, ImportPlan } from './importer.js'
+import type { ExistingProviderSummary, ExistingProviders, ImportPlan } from './importer.js'
 import { LOCALE_NS, localeBundles } from './locales.js'
 
 export { inject }
@@ -27,16 +27,20 @@ interface ContextWithInject {
   inject(inject: string[], apply: (ctx: unknown) => void): { dispose(): void | Promise<void> }
 }
 
-/** settings 快照里的 pi-ai providers 形状（只取计划期需要的摘要字段）。 */
+/**
+ * settings 快照里的 pi-ai providers 形状（只取计划期需要的摘要字段）。
+ * apiKeyEnv 是凭据引用名（`<ROUTE>_API_KEY`）而非密钥明文，随摘要带走供
+ * planImports 消解跨批次 keyRef 碰撞，不违反「快照不含密钥」约束。
+ */
 function extractProviders(value: unknown): ExistingProviders {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return {}
   const providers = (value as { readonly providers?: unknown }).providers
   if (providers === null || typeof providers !== 'object' || Array.isArray(providers)) return {}
-  const result: Record<string, { displayName?: unknown; baseURL?: unknown }> = {}
+  const result: Record<string, ExistingProviderSummary> = {}
   for (const [routeId, profile] of Object.entries(providers as Record<string, unknown>)) {
     if (profile === null || typeof profile !== 'object' || Array.isArray(profile)) continue
-    const summary = profile as { readonly displayName?: unknown; readonly baseURL?: unknown }
-    result[routeId] = { displayName: summary.displayName, baseURL: summary.baseURL }
+    const summary = profile as ExistingProviderSummary
+    result[routeId] = { displayName: summary.displayName, baseURL: summary.baseURL, apiKeyEnv: summary.apiKeyEnv }
   }
   return result
 }
@@ -138,10 +142,6 @@ async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutc
 }
 
 /**
- * Client 插件体：注册词典、挂载本插件 Remote 贡献、向 Models 页 footer 注入
- * 导入入口。slot 未声明（dsh 升级改名）时注入不生效，页面不崩（design.md Risks）。
- */
-/**
  * 激活失败可观测（spec ADDED「激活失败可观测」）：dsh bootloader 把底层 reject
  * 吞成 `web boot: 1 entry did not activate / cc-import: failed` 一行词，插件侧
  * 在每个激活环节的失败路径上补一条含环节名与错误栈的 `console.warn`，使具体
@@ -152,6 +152,10 @@ function logStageFailure(stage: string, err: unknown): void {
   console.warn(`[cc-import:apply] activation stage "${stage}" rejected: ${detail}`)
 }
 
+/**
+ * Client 插件体：注册词典、挂载本插件 Remote 贡献、向 Models 页 footer 注入
+ * 导入入口。slot 未声明（dsh 升级改名）时注入不生效，页面不崩（design.md Risks）。
+ */
 export async function apply(ctx: Context): Promise<() => Promise<void>> {
   ctx.effect(() => {
     try {
@@ -183,9 +187,18 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
     (uiCtx) => registerUi(uiCtx as Context),
   )
 
+  // 卸载路径：dispose 失败不跳过 unmountRemote（否则 ccimport 命名空间与
+  // footer slot 半卸载残留，热重载后 remote.$mount 行为异常）；失败按
+  // logStageFailure 同款口径记录后继续上抛。
   return async () => {
-    await ui.dispose()
-    await unmountRemote()
+    try {
+      await ui.dispose()
+    } catch (err) {
+      logStageFailure('ui.dispose', err)
+      throw err
+    } finally {
+      await unmountRemote()
+    }
   }
 }
 

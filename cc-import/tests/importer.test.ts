@@ -1,7 +1,7 @@
 /**
  * importer 测试：写入计划构造——set-only、勾选集之外零 ops、已存在判定、
  * 显式「将更新」同键覆盖、批次内 id 冲突 -2 递增、重名候选去重（duplicate）、
- * keyRef 派生冲突加后缀、displayName 携带规则。
+ * keyRef 派生冲突加后缀（批次内与跨批次）、displayName 携带规则。
  */
 import { describe, expect, it } from 'vitest'
 import { planImports, rowState } from '../src/client/importer.js'
@@ -137,6 +137,41 @@ describe('计划项的 profile 与凭据引用', () => {
     const bigmodel = plan.planned.find((item) => item.routeId === 'bigmodel-cn')
     expect('displayName' in (deepseek?.profile ?? {})).toBe(false)
     expect(bigmodel?.profile.displayName).toBe('bigmodel.cn')
+  })
+
+  it('既有 route 含下划线（a_b 占用 A_B_API_KEY）→ 新候选 a-b 跨批次碰撞加后缀，不覆盖别家 token', () => {
+    const existing: ExistingProviders = { a_b: { apiKeyEnv: 'A_B_API_KEY' } }
+    const plan = planImports(
+      [candidate('a-b')],
+      { names: new Set(['a-b']), updateNames: new Set() },
+      existing,
+    )
+    expect(plan.ops[0]?.path).toEqual(['providers', 'a-b'])
+    expect(plan.planned[0]?.keyRef).toBe('A_B_2_API_KEY')
+    expect(plan.planned[0]?.profile.apiKeyEnv).toBe('A_B_2_API_KEY')
+  })
+
+  it('既有 route 含连续连字符（a--b 占用 A_B_API_KEY）→ 新候选 a-b 同样跨批次加后缀', () => {
+    const existing: ExistingProviders = { 'a--b': { apiKeyEnv: 'A_B_API_KEY' } }
+    const plan = planImports(
+      [candidate('a-b')],
+      { names: new Set(['a-b']), updateNames: new Set() },
+      existing,
+    )
+    expect(plan.ops[0]?.path).toEqual(['providers', 'a-b'])
+    expect(plan.planned[0]?.keyRef).toBe('A_B_2_API_KEY')
+    expect(plan.planned[0]?.profile.apiKeyEnv).toBe('A_B_2_API_KEY')
+  })
+
+  it('覆盖更新沿用既有条目当前占用的 keyRef（token 原位替换、不加后缀）', () => {
+    const existing: ExistingProviders = { 'a-b': { apiKeyEnv: 'A_B_API_KEY' } }
+    const plan = planImports(
+      [candidate('a-b')],
+      { names: new Set(['a-b']), updateNames: new Set(['a-b']) },
+      existing,
+    )
+    expect(plan.planned[0]).toMatchObject({ existed: true, update: true, routeId: 'a-b', keyRef: 'A_B_API_KEY' })
+    expect(plan.planned[0]?.profile.apiKeyEnv).toBe('A_B_API_KEY')
   })
 
   it('planImports 为纯函数：不改写传入的既有键集', () => {

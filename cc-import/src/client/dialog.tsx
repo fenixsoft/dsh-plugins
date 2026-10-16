@@ -5,7 +5,7 @@
  * 勾选态管理（全选新增 / 取消全部选择）、批次结果反馈。数据加载（scan +
  * settings 快照）与导入执行由 index.ts 以回调注入，本组件不触碰任何服务。
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Translate } from '@deepseek-ai/cordis'
 import { Button, Checkbox, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -112,7 +112,7 @@ function CandidateRow({
   const candidate = row.candidate
   const model = candidate.model === null ? null : splitModelAlias(candidate.model)
   return (
-    <div style={rowStyle} data-testid={`ccimport-row-${candidate.name}`}>
+    <div style={rowStyle} role="listitem" data-testid={`ccimport-row-${candidate.name}`}>
       {candidate.importable ? (
         <Checkbox
           checked={row.checked}
@@ -147,6 +147,8 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
   /** busy 的来源：false=加载快照，true=执行导入（busy 文案随此区分）。 */
   const [importing, setImporting] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
+  /** 导入请求代数：effect 清理（关窗等）即自增失效，confirm 的迟到回写据此丢弃。 */
+  const importTokenRef = useRef(0)
 
   useEffect(() => {
     if (!open) {
@@ -184,6 +186,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
       })
     return () => {
       cancelled = true
+      importTokenRef.current += 1
     }
   }, [open, loadSnapshot, reloadToken])
 
@@ -218,16 +221,19 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
 
   const confirm = (): void => {
     if (preview === null || preview.planned.length === 0) return
+    const token = importTokenRef.current
     setBusy(true)
     setImporting(true)
     setOutcome(null)
     void runImport(preview)
       .then((result) => {
+        if (token !== importTokenRef.current) return
         setOutcome(result)
         setBusy(false)
         setImporting(false)
       })
       .catch((error: unknown) => {
+        if (token !== importTokenRef.current) return
         setOutcome({
           succeeded: 0,
           failures: [

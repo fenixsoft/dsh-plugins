@@ -51,11 +51,23 @@ beforeAll(() => {
     skillMd('fenix-link-target', 'name: fenix-link\ndescription: 经软链暴露的条目'),
   )
   symlinkSync(join(root, 'fenix-link-target'), join(root, 'fenix-link'), 'dir')
-  // 重名：两个目录 frontmatter name 相同（目录序靠前者胜出）
+  // 重名：两个目录 frontmatter name 相同（排序后字典序最小者胜出，与 readdir
+  // 平台顺序无关）
   mkdirSync(join(root, 'fenix-x'))
   writeFileSync(join(root, 'fenix-x', 'SKILL.md'), skillMd('fenix-x', 'name: fenix-x\ndescription: 首个同名'))
   mkdirSync(join(root, 'fenix-y'))
   writeFileSync(join(root, 'fenix-y', 'SKILL.md'), skillMd('fenix-y', 'name: fenix-x\ndescription: 后到同名'))
+  // 重名裁决确定性：目录名字典序最小者（fenix-aa-dup）胜出
+  mkdirSync(join(root, 'fenix-aa-dup'))
+  writeFileSync(
+    join(root, 'fenix-aa-dup', 'SKILL.md'),
+    skillMd('fenix-aa-dup', 'name: fenix-dup\ndescription: 字典序小者'),
+  )
+  mkdirSync(join(root, 'fenix-zz-dup'))
+  writeFileSync(
+    join(root, 'fenix-zz-dup', 'SKILL.md'),
+    skillMd('fenix-zz-dup', 'name: fenix-dup\ndescription: 字典序大者'),
+  )
   // 非法条目族
   mkdirSync(join(root, 'fenix-noskill')) // 缺 SKILL.md
   mkdirSync(join(root, 'fenix-badfm'))
@@ -97,8 +109,10 @@ async function scan(sourceDir = root, re = patternRe): Promise<readonly SkillCan
 describe('scanSkillDir', () => {
   it('只收录匹配 pattern 的目录条目，平文件与不匹配项不产生 candidate', async () => {
     const names = (await scan()).map((c) => c.name).sort()
-    // 含 symlink 条目 fenix-link；重名保留首个（fenix-x），fenix-y 被跳过
+    // 含 symlink 条目 fenix-link；重名保留首个（fenix-x、字典序小的 fenix-aa-dup），
+    // fenix-y 与 fenix-zz-dup 被跳过
     expect(names).toEqual([
+      'fenix-dup',
       'fenix-link',
       'fenix-model-off',
       'fenix-new',
@@ -123,6 +137,16 @@ describe('scanSkillDir', () => {
     expect(fenixNew?.invocation).toEqual({ modelInvocable: true, userInvocable: true })
     expect(fenixNew?.whenToUse).toBeUndefined()
     expect(fenixNew?.metadata).toBeUndefined()
+  })
+
+  it('重名裁决与 readdir 平台顺序无关：目录名字典序最小者胜出，并指认保留方路径', async () => {
+    const candidates = await scan()
+    const dup = candidates.find((c) => c.name === 'fenix-dup')
+    expect(dup?.description).toBe('字典序小者')
+    expect(dup?.locator).toBe(join(root, 'fenix-aa-dup', 'SKILL.md'))
+    const dupWarn = warns.find((w) => w.includes('fenix-zz-dup'))
+    expect(dupWarn).toMatch(/重名/)
+    expect(dupWarn).toContain(join(root, 'fenix-aa-dup', 'SKILL.md'))
   })
 
   it('frontmatter 引号值与 whenToUse/metadata 解析', async () => {
@@ -156,6 +180,9 @@ describe('scanSkillDir', () => {
     expect(byDir('fenix-locked')).toMatch(/不可读/)
     expect(byDir('fenix-broken')).toMatch(/符号链接/)
     expect(byDir('fenix-y')).toMatch(/重名/)
+    expect(byDir('fenix-zz-dup')).toMatch(/重名/)
+    // 重名 warn 指认保留方路径（字典序最小目录胜出）
+    expect(byDir('fenix-zz-dup')).toContain(join(root, 'fenix-aa-dup', 'SKILL.md'))
     // 不匹配 pattern 与平文件不打扰日志
     expect(warns.some((w) => w.includes('anysearch'))).toBe(false)
     expect(warns.some((w) => w.includes('fenix-x.md'))).toBe(false)
@@ -210,5 +237,18 @@ describe('parseFrontmatter', () => {
       '---\nname: a\ndescription: b\nmetadata:\n  owner: fenix\n  pinned: false\n---\nbody',
     )
     expect(parsed?.metadata).toEqual({ owner: 'fenix', pinned: false })
+  })
+
+  it('值中部 # 是合法字面量（不再一票拒绝含 # 的正常文案）', () => {
+    const parsed = parseFrontmatter(
+      '---\nname: fenix-csharp\ndescription: 支持 C# 项目与 .NET 运行时\n---\n正文',
+    )
+    expect(parsed?.name).toBe('fenix-csharp')
+    expect(parsed?.description).toBe('支持 C# 项目与 .NET 运行时')
+  })
+
+  it('值首或空白后的 # 仍是注释起始，受限解析拒绝', () => {
+    expect(parseFrontmatter('---\nname: a\ndescription: # 注释即空值\n---\n正文')).toBeNull()
+    expect(parseFrontmatter('---\nname: a\ndescription: 值 # 尾部注释\n---\n正文')).toBeNull()
   })
 })
