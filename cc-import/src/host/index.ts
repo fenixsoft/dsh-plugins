@@ -15,11 +15,10 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { RemoteMethodDecoratorContext } from '@deepseek-ai/dsh-typert-protocol'
 import type { ScanResponse } from '../shared/mapping.js'
 import { defaultDbPath, readCcSwitchToken, scanCcSwitch } from './scan.js'
+import type { TokenLookup } from './scan.js'
 
-/** revealToken 的结构化应答。 */
-export type TokenResponse =
-  | { readonly ok: true; readonly token: string }
-  | { readonly ok: false; readonly code: string; readonly message: string }
+/** revealToken 的结构化应答；直接复用 TokenLookup，错误码字面量联合单源自 scan.ts。 */
+export type TokenResponse = TokenLookup
 
 /** 经公开 Remote decorator 的标准 decorator-context 合同，手工打方法标记。 */
 function markRemoteMethod(prototype: object, method: string): void {
@@ -65,6 +64,13 @@ export class CcimportController extends TypertRemoteService {
    * 后续收紧方向（待 dsh 侧可核实 fence 行为后落地）：scan 时签发短时效一次性
    * reveal 许可，revealToken 校验该许可与调用来源（仅接受确认导入流程 uiCtx
    * 闭包的调用），把「任意按名读取」收敛为「一次确认导入对应一次定点 reveal」。
+   *
+   * 显式验证项（闭环前置条件，核实后回填 design）：
+   * 1. 核实 dsh fence 是否确实只把 `remote.ccimport` 命名空间授予本插件 apply
+   *    时 inject 的 UI 子 ctx——重点覆盖「共享 remote gateway / 其他 ctx 同样
+   *    被授予该命名空间」的反例场景；
+   * 2. 验证项 1 通过后再落地上述 reveal 许可机制；在此之前，本 RPC 面一律按
+   *    「对宿主内可达该命名空间的任意上下文敞开」的威胁模型对待。
    */
   async revealToken(providerName: string): Promise<TokenResponse> {
     return readCcSwitchToken(defaultDbPath(), providerName)

@@ -144,15 +144,26 @@ export function readCcSwitchToken(dbPath: string, providerName: string): TokenLo
     }
     const parsed = parseEnvBlock(providerName, row.settings_config)
     if (!parsed.ok) {
-      return { ok: false, code: 'token_unreadable', message: `候选 "${providerName}" 的 AUTH_TOKEN 在导入时已不可读` }
+      // 具体损坏形态（坏 JSON / 非对象 / 缺 env 块）并入消息，粒度与 scanCcSwitch
+      // 的 skippedRows 明细对齐（parseEnvBlock 的 message 不含敏感值）。
+      return {
+        ok: false,
+        code: 'token_unreadable',
+        message: `候选 "${providerName}" 的 AUTH_TOKEN 在导入时已不可读：${parsed.message}`,
+      }
     }
     const token = envValue(parsed.env, 'ANTHROPIC_AUTH_TOKEN')
     if (token === null) {
       return { ok: false, code: 'missing_token', message: `候选 "${providerName}" 未配置 ANTHROPIC_AUTH_TOKEN，无法导入` }
     }
     return { ok: true, token }
-  } catch {
-    return { ok: false, code: 'token_unreadable', message: `候选 "${providerName}" 的 AUTH_TOKEN 在导入时已不可读` }
+  } catch (error) {
+    // 底层 error 的 message 一并带出（同样不含 token 明文），排障可定位到具体读库失败点。
+    return {
+      ok: false,
+      code: 'token_unreadable',
+      message: `候选 "${providerName}" 的 AUTH_TOKEN 在导入时已不可读：${messageOf(error)}`,
+    }
   } finally {
     db.close()
   }

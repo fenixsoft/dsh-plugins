@@ -99,24 +99,28 @@ function statusLabel(t: Translate, row: RowState): string {
 }
 
 /** 单个候选行：跳过行无勾选框；已存在行默认不勾选、勾选即「将更新」。
- *  列布局（80vw 对话框下）：勾选框 / 名称 / baseURL / 模型摘要 / 状态标。 */
+ *  列布局（80vw 对话框下）：勾选框 / 名称 / baseURL / 模型摘要 / 状态标。
+ *  行寻址用下标而非 name：cc-switch 的 providers.name 未见唯一约束，重名候选
+ *  以 name 寻址会让 React key 冲突、勾选与 toggle 同时改写两行。 */
 function CandidateRow({
   t,
   row,
+  index,
   onToggle,
 }: {
   readonly t: Translate
   readonly row: RowState
-  readonly onToggle: (name: string, checked: boolean) => void
+  readonly index: number
+  readonly onToggle: (index: number, checked: boolean) => void
 }) {
   const candidate = row.candidate
   const model = candidate.model === null ? null : splitModelAlias(candidate.model)
   return (
-    <div style={rowStyle} role="listitem" data-testid={`ccimport-row-${candidate.name}`}>
+    <div style={rowStyle} role="listitem" data-testid={`ccimport-row-${index}-${candidate.name}`}>
       {candidate.importable ? (
         <Checkbox
           checked={row.checked}
-          onChange={(next) => onToggle(candidate.name, next)}
+          onChange={(next) => onToggle(index, next)}
           label={candidate.name}
           title={row.existed ? t('check.update') : undefined}
         />
@@ -190,12 +194,14 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
     }
   }, [open, loadSnapshot, reloadToken])
 
+  /** 勾选按行下标寻址（重名候选各自独立改写；写入计划面由 planImports 按
+   *  duplicate 去重，不受同名行勾选态影响）。 */
   const toggle = useMemo(
     () =>
-      (name: string, checked: boolean): void => {
+      (index: number, checked: boolean): void => {
         setRows((current) =>
-          current.map((row) => {
-            if (row.candidate.name !== name) return row
+          current.map((row, rowIndex) => {
+            if (rowIndex !== index) return row
             return { ...row, checked, update: checked && row.existed }
           }),
         )
@@ -269,8 +275,9 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
       {errorText !== null ? <p role="alert">{errorText}</p> : null}
       {snapshot?.ok === true && rows.length > 0 ? (
         <div style={listStyle} role="list">
-          {rows.map((row) => (
-            <CandidateRow key={row.candidate.name} t={t} row={row} onToggle={toggle} />
+          {rows.map((row, index) => (
+            // key 用下标：rows 只整表重建、不重排，下标稳定且对重名候选唯一。
+            <CandidateRow key={index} t={t} row={row} index={index} onToggle={toggle} />
           ))}
         </div>
       ) : null}
