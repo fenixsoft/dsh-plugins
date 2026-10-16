@@ -84,3 +84,39 @@
   - 证据：数据摘要第 6 节：verify-verify-dsh-plugins-live-1791997595-a1 时长 2196.227s 对 verifier 组中位 20.254s（108 倍）、planner-plan-verify-dsh-plugins-live-1791992263-a1 3598.203s 对组中位 867.27s（4.1 倍）；6 条离群 run 均 stall=0 且成功收尾。
   - 调查评估：已核实：离群阈值为组中位 3 倍，而 verifier 组中位 20.254s 表明该组由轻量复核 run 主导，重型 run 必然越线——指标基线未按 run 性质分层（系统性）。与存量关系：fenixd 已落地 evo-api-stall-signal-grading（10-15，stall 信号分级与成功 run latency 统计），本条是同族的上游另一维度（离群初筛），互补不重复。结论：基线分层可与 stall 分级一并推进，属自省数据质量类小进化。
   - 建议：run_metrics 离群基线按 agent_type 乘 spec 类型（验证型/功能型）分层计算，或剔除 P25-P75 外尾部后再取中位；离群标记附该组历史分布上下文以降低误报。
+
+
+## 2026-10-17
+
+### 浪费
+- **两个 code-fix run 零产出空转，管线滞留待重试**
+  - 影响：一个已被上一 run 处置过的 code-review 台账条目仍按 open 条目重修，连烧 2 个零产出 run：合计约 268 秒 run 时长、$0.89，另遗留 2 个未清理的 worktree 与同名分支；修复管线被置为 blocked，下轮还将对同一已处置条目再烧一次。
+  - 证据：fenixd.log 17:23:14Z 与 17:47:55Z（本地 01:23/01:47）两条「code-fix 零有效修复（fixed=0, commits=0, ignored=0），拒合回」，分别对应 run code-fix-1792171264（修 code-review 发现的修复 run，123 秒、$0.39）与 code-fix-1792172724（144 秒、$0.50）；fix-progress.json 记 total=1、done=0、chain_skipped（修复链内跳过）=["5ae61ac429c4"]、reason=failed_batch_retained（零有效修复批次留存待重试）；git worktree list 仍列出 impl-code-review-fix-1792171264/-1792172724 两个残留目录及分支。
+  - 调查评估：问题源：处置第 2 轮周期代码评审 code-review-1792170044（01:11 本地产出 12 条台账）的修复链。已核实事实：批 1 run code-fix-1792170715（01:11-01:21）resolved 11/12 并合回（7c1415f），其中 01cbd8f 已给剩余条目对应的 fenix-skill-provider/src/host/frontmatter.ts 落了 [fenix-ignore:5ae61ac429c4] 豁免注释（fenix-ignore，代码注释形式的评审条目豁免标记，判定原发现「引号值含空格+# 被拒」不成立——成对引号值在引号分支提前返回，已核对现码）；其后两个 run 均因无可修内容产出为零被拒合回。根因（形态层）：台账 items.jsonl 该条目仍 status=open，fenix-ignore 注释未被任何环节折算成台账 resolved/ignored，调度器遂反复重派——系统性闭环缺口而非单次失误，至于是 fixer 未上报处置动作还是 runner 未解析注释，本次证据不足以裁决（详见改进条）。与存量工作关系：spec/changes/ 活跃区无覆盖 code-review 闭环机制的 SPEC。结论：本次直接损失小（$0.89、约 4.5 分钟、2 个 worktree 残留），但「下轮自动重试」使其成为每轮评审遇无效/已处置条目必复发的空转循环；另注意 6 个 run 终态全部 success，终态统计对这类零产出空转完全失明。
+  - 建议：为 code-fix 增加无效条目闭环：fixer 判定条目不成立时以结构化输出上报（而非只写 fenix-ignore 注释），runner 据此把台账条目置 ignored 并终止重试；派发前扫描目标文件是否已带 [fenix-ignore:条目id] 注释，命中即跳过；并清理 1792171264/-1792172724 两个残留 worktree 与分支。
+
+### 失误
+- **散件 WIP 收编双路径重放，空转误报 ERROR**
+  - 影响：主树散件 WIP 已被 admin run 手动提交成功 41 秒后，框架又重放同一裁决选项（choice，管理员预置的一键处置动作），命中陈旧清单守卫空转一次，落 1 条 ERROR 日志和 1 条 result=failed 处置记录——本次无实际损失（守卫拦住了空提交），但错误统计被污染，双路径重放仅靠守卫兜底。
+  - 证据：ERROR 日志 2026-10-16T13:24:26.720756Z（admin_monitor：「处置 choice 执行失败 choice_id=commit_stray_wip…清单陈旧，不产生空提交」，本地 21:24:26）；admin_alerts.json 中处置 4919170f0cb9（result=failed）与 c97b6ddf8a51（result=resolved，附提交 42e0673）相隔 31 毫秒；admin run 存档 admin-dsh-plugins-1792156839.jsonl 记录 13:23:45Z 执行 git add+commit（提交 42e0673，2 文件 +94/-179，提交前 pnpm test 60/60）。
+  - 调查评估：问题源：处置 maintree_stray_wip_stale 信号（主树散件未提交改动滞留告警：2 个 tracked 文件无主滞留 30.1 分钟，信号 91d365247837，21:19 升级）。已核实事实链：admin run 读裁决选项源码后于 21:23:45 直接 git add+commit 完成收编，21:24:26 monitor 侧再执行推荐选项 commit_stray_wip，发现清单文件已全部不在工作区，守卫拒绝空提交并记 ERROR+failed；信号本体至今 handled=False、result=failed、escalated=True，处置 resolved 未回写信号。根因（形态层）：同一处置动作存在「agent 手动等价执行」与「monitor 重放推荐选项」两条路径，后者执行前不核对清单是否已生效——归因只能到此，至于是 agent 绕过选项机制违约、还是 monitor 缺「已等效处置则跳过」逻辑，证据不足、两假说并存。与存量工作关系：无在飞 SPEC 覆盖 admin 处置链路。结论：一次性形态但结构性可复发（凡 agent 手动等价执行即复现），属低危高噪失误。
+  - 建议：monitor 重放 choice 前先核对信号清单文件是否已不在工作区改动中，命中时记「守卫生效/已等效处置」INFO 并把处置与信号回写 resolved；约定 Administrator 收工时输出「已手动等价执行」标记供 monitor 跳过重放；修正信号 91d365247837 的 handled/result 状态。
+
+### 可改进
+- **评审 run API 停滞占墙钟过半，无处置只记日志**
+  - 影响：最近两轮周期代码评审 run 连续出现多分钟级 API 停滞（stall，单轮往返超阈值）：窗口内 run 停滞 3 轮共 386.1 秒、单次最长 227.4 秒，占该 run 671.5 秒墙钟的约 57%；前一日轮次也停滞 4 轮（最长 125.4 秒）——复发敞口为每轮评审白等 5-7 分钟。
+  - 证据：fenixd.log 3153-3154 行（2026-10-16T17:07Z「API round-trip stall: 227.4s (round #6 > 120s)」及「16 rounds…stalls>60s=3 (19%)」，run code-review-1792170044）；2587/2593 行为前一日 code-review-1792083770 同类记录（28 轮停滞 4 轮、max 125.4 秒）；窗口内 code-fix-1792158323 另有 1 次 75.2 秒停滞；两 run provider 均为 bigmodel.cn。
+  - 调查评估：问题源：code-review agent（周期代码评审）运行期。已核实事实：停滞由 agent_runner 的 api_round_stall 探测捕获，但 grade=info 仅落日志，无任何处置动作；停滞集中出现在长上下文低轮数的评审 run。根因写到形态层：单轮往返 2-4 分钟（服务端排队/长上下文 prefill/本地网络，现有证据不足未裁决）；框架停留在观测面、无止损。与存量工作关系：spec/changes/ 活跃区无 stall 处置相关 SPEC。结论：系统性缺口，评审 run 是最易吃满停滞的形态，值得立项。
+  - 建议：agent_runner 对单 run 累计停滞 >300 秒或单次 >180 秒升级 warning 并进 admin 信号面；同 run 内触发一次受控重试（该轮重发或收窄上下文），并把 stall 计数纳入 run 质量门，避免 6/6 全 success 的终态统计掩盖纯等待。
+
+- **cost 计量与 token 量纲失真，离群初筛误报**
+  - 影响：窗口内唯一初筛离群 run（批量修复 19 条台账）被按 cost_usd 为组中位 3.6 倍（$7.45 vs $2.06）标记，但其 token 量（input 1,155 + output 532 + cache_read 缓存命中 263,744）反小于随后 $3.62 的 run（约 565k tokens），单位成本相差约 4.4 倍；按条目摊薄 $0.39/条 vs $0.33/条基本持平——离群信号是计量/口径失真而非真实浪费。
+  - 证据：fenixd.log 3101 行 run_metrics：code-fix-1792158323 cost_usd=7.445 对应 input_tokens=1155、output_tokens=532、cache_read=263744；对比 3167 行 code-fix-1792170715 cost 3.618 对应 input 104,080 + cache_read 461,248 + output 10,685；离群判定（组中位 2.060546 ×3）引自数据摘要第六节。
+  - 调查评估：问题源：code-review 台账（评审发现清单）批量修复线的成本观测。已核实事实：同 agent_type 两次 run 的 cost/token 单位成本差 4.4 倍；初筛阈值按绝对 cost_usd ×组中位触发，而 code-fix 成本近似与条目数线性（本 run 19 条 vs 组内中位批约 5-6 条）。根因多假说并存：子 agent（该 run 派了 7 个 Agent）计费归并口径、模型档位差异、长上下文溢价、输出 token 漏计——现有 cost 记录无 model 字段，无法裁决。与存量工作关系：无在飞 SPEC。结论：观测口径缺陷，既会误报批量 run 也会漏报真实异常。
+  - 建议：run_metrics/cost 记录补 model 字段、cache 计费细分与子 run 归并标记（先取证再改阈值）；离群初筛改按 cost/台账条目归一（或同 batch size 分组）后再乘阈值。
+
+- **已收工 SPEC 滞留 blocked 态 3 天未清算**
+  - 影响：一个工作已入库的 SPEC 在 STATE 里挂 blocked（因异常冻结的终态，此处为 worktree 创建失败重派循环）近 3 天，日数据持续占着「blocked: 1」却无任何机制消化——状态与实绩脱节，稀释后续真实 blocked 信号的辨识度。
+  - 证据：.fenix/STATE.md 记 verify-dsh-plugins-live status=blocked、updated=2026-10-14T17:43:13、error「Failed to create worktree (gave up: parallel run or manual freeze)」（指纹 59c551238074 连续同因 3 轮）；而提交 2519ba2（10-15 00:44 合回）、44089c8（收工结果定稿 17/17）、ec996f5（10-15 01:43 verification-report 入库）证明工作已完成；STATE.md 顶部 Last updated 停在 2026-10-15T12:53。
+  - 调查评估：问题源：日终 STATE 快照对账。已核实事实：blocked 由 10-14 的 worktree 并发冲突同因重派循环触发，其后实现车道照常完成并合回主树，STATE 再未更新；spec/changes/verify-dsh-plugins-live/tasks.md 尚有「原地打回第 1 轮」3 个未勾项，与已入库的 verification-report.md（内含上轮 5 个 fail 判定的复核更正、30 场景重跑，结论 bug-found 仅 1 个 minor 文档缺口）互不回写——无论哪边是最新事实，两边都停在中间态。根因（形态层）：SPEC 状态机缺「工作已落地后的 blocked 清算」路径；是 daemon 巡检缺口还是状态转移规则缺口未再深查。与存量工作关系：spec/changes/ 活跃区无相关 SPEC。结论：事件在窗前、状态在本窗仍占位的跨窗残留，系统性改进点，宜轻量立项。
+  - 建议：daemon 日终对 blocked 超 24 小时的 SPEC 做对账：分支已合回且收工结果/验证报告在库的自动转 done，未勾残余项（如该 minor 文档缺口）转 code-review 台账或新 SPEC，并把对账动作写入 STATE 变更日志留痕。
