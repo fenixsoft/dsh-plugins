@@ -11,7 +11,8 @@
  *   原始路径，便于排查；
  * - 响应状态 / 头原样回写：剥离 `content-length`（交由 node 按实际流重算，
  *   流式改道后长度不符）与 hop-by-hop 头（含 `connection` 列出的逐个头名，
- *   RFC 7230 §6.1/6.7），其余原样拷贝；
+ *   RFC 7230 §6.1/6.7）；Location 例外——指向上游 authority 的绝对地址
+ *   改写为前缀内路径（见 rewriteLocationHeader），其余原样拷贝；
  * - 响应体逐块 pipe 不聚合：node pipe 自带背压，SSE 天然透传；
  * - 「请求体收尾 → 收到响应头」阶段设 30s 超时（上游收齐请求后僵死不回响应
  *   头时降级 502，不让浏览器无限 pending；起点不设在发出请求时，避免把仍在
@@ -76,6 +77,36 @@ export function stripPrefix(
   if (raw === barePath) return '/'
   const rest = raw.slice(prefix.length)
   return rest.startsWith('/') ? rest : `/${rest}`
+}
+
+/**
+ * 上游 3xx 的 Location 改写：指向上游 authority 的绝对地址改写为前缀内路径
+ * （stripPrefix 的逆操作）——上游端口通常不对浏览器暴露，原样透传会让浏览器
+ * 拿到上游地址直连，表现为不可达跳转。相对路径 Location 由浏览器按当前代理
+ * 路径解析、天然落在前缀内；指向其他 authority 的绝对地址与本代理无关：
+ * 两者均原样透传不改写。
+ */
+export function rewriteLocationHeader(
+  location: string,
+  upstream: string,
+  prefix: string,
+): string {
+  let upstreamOrigin: string
+  let resolved: URL
+  try {
+    upstreamOrigin = new URL(upstream).origin
+    // 以 upstream 为 base 解析：同时覆盖绝对 URL 与协议相对（`//authority/x`）
+    // 两种自带 authority 的形态；解析失败（奇异值）原样透传，不因改写丢跳转。
+    resolved = new URL(location, upstream)
+  } catch {
+    return location
+  }
+  // 原文不含 authority（相对路径或根相对 `/x`）→ 不构成直连泄漏，不改写。
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(location) && !location.startsWith('//')) return location
+  if (resolved.origin !== upstreamOrigin) return location
+  // prefix 以 `/` 收尾、pathname 以 `/` 开头，去掉 prefix 尾斜杠拼接；根路径
+  // `/` 即映射回裸前缀，与 stripPrefix 的 barePath 分支对偶。
+  return `${prefix.slice(0, -1)}${resolved.pathname}${resolved.search}${resolved.hash}`
 }
 
 /** 组装转发头：白名单拷贝 + host 改写 + x-forwarded-* 追加。 */
@@ -157,7 +188,7 @@ export function createDashboardProxy(options: DashboardProxyOptions): DashboardP
       (upstreamRes) => {
         // 已收到响应头：清除该阶段超时，此后响应流（含 SSE 长连接）不再有超时。
         clearTimeout(responseHeaderTimer)
-        forwardUpstreamResponse(upstreamRes, res)
+        forwardUpstreamResponse(upstreamRes, res, upstream, prefix)
       },
     )
     // 「请求体收尾 → 收到响应头」阶段独立超时：上游收齐请求后僵死 / 连接池
@@ -236,10 +267,12 @@ const HOP_BY_HOP_HEADERS = [
   'upgrade',
 ] as const
 
-/** 上游响应回写：状态/头原样（剥 content-length 与 hop-by-hop 头），体逐块 pipe。 */
+/** 上游响应回写：状态/头原样（剥 content-length 与 hop-by-hop 头，Location 改写为前缀内路径），体逐块 pipe。 */
 function forwardUpstreamResponse(
   upstreamRes: IncomingMessage,
   res: ServerResponse,
+  upstream: string,
+  prefix: string,
 ): void {
   const headers: Record<string, string | string[] | undefined> = { ...upstreamRes.headers }
   // content-length 交由 node 按实际流重算（流式改道后长度不符）；hop-by-hop
@@ -253,6 +286,14 @@ function forwardUpstreamResponse(
     .map((name) => name.trim().toLowerCase())
     .filter((name) => name.length > 0)
   for (const name of [...HOP_BY_HOP_HEADERS, ...listed]) delete headers[name]
+  // 指向上游 authority 的绝对 Location 改写为前缀内路径：上游端口通常不对
+  // 浏览器暴露，原样透传会造成不可达直连跳转（相对路径天然落前缀内，不改写）。
+  const location = headers.location
+  if (typeof location === 'string') {
+    headers.location = rewriteLocationHeader(location, upstream, prefix)
+  } else if (Array.isArray(location)) {
+    headers.location = location.map((value) => rewriteLocationHeader(value, upstream, prefix))
+  }
   res.writeHead(upstreamRes.statusCode ?? 502, headers)
   upstreamRes.on('error', () => {
     res.destroy()

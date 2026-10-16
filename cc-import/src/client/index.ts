@@ -109,6 +109,17 @@ async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutc
         failures.push({ name: item.candidate.name, reason: reread.message })
         continue
       }
+      // 冲突可能正来自其他端在计划期之后新建了同 routeId 条目：仅刷新 revision
+      // 原样重放 set 会把它整体覆盖，conflict 守卫就失去「检测并发修改」的意义。
+      // 重试前按计划期判定校验目标键——非「既有条目的显式覆盖更新」却已被人
+      // 占用的 routeId，按该候选失败而不是覆盖。
+      if (reread.existing[item.routeId] !== undefined && !(item.existed && item.update)) {
+        failures.push({
+          name: item.candidate.name,
+          reason: `route "${item.routeId}" 在导入期间被其他端创建，为避免覆盖已跳过（请刷新后重试）`,
+        })
+        continue
+      }
       snapshot = reread
       written = await ctx.remote.settings.mutate(PI_AI_NS, [op], snapshot.revision)
     }

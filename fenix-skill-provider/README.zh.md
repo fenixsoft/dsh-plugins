@@ -26,7 +26,7 @@ dsh 0.2.0-rc.2 插件（对齐 `fenix-dsh-dashboard-bridge` 先例），**仅 ho
         │   complete:false 观察；来源目录缺失返回空集 + warn
         ├─ get(candidate)：按 candidate.locator 读盘 → 剥 frontmatter →
         │   SkillDefinition（元数据与 candidate 一致）；文件已删除返回 undefined；
-        │   每次读盘 = SKILL.md 内容编辑天然即时生效
+        │   每次读盘 = SKILL.md 正文编辑天然即时生效（元数据变更需重启，见已知限制）
         └─ fs.watch(sourceDir)（非递归）→ 事件 300ms 去抖 → control.invalidate()
             （失效注册表 collect 缓存并广播 skills/change）→ 下次展开 "/" 菜单重扫
 ```
@@ -83,7 +83,10 @@ loader 行示例：
 - **skill 名取自 frontmatter `name`** 而非目录名（目录名只用于 pattern 匹配）；
   名字须符 dsh-skill 命名语法（kebab-case）。
 - **目录内文件变化无实时性**：`fs.watch` 非递归，仅监听来源目录一层条目增删/
-  改名；SKILL.md 内容编辑经 `get()` 每次读盘天然即时，无需 invalidate。
+  改名，不覆盖 skill 子目录内部；SKILL.md 正文编辑经 `get()` 每次读盘即时
+  生效，但 name/description/invocation 等列表元数据来自 `list()` 的 candidate，
+  注册表在两次 invalidate 之间缓存——就地编辑既有 skill 的 SKILL.md 元数据
+  不触发失效，需重启宿主（或增删/改名条目触发 watch）后才生效。
 
 ## dsh 版本兼容表
 

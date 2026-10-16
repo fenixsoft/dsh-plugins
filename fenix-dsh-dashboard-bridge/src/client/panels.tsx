@@ -534,6 +534,11 @@ function ProjectGroupInner({
   const [rowWidth, setRowWidth] = useState(DEFAULT_ROW_WIDTH)
   // 头部拦截层几何：量测失败保持 null（渲染面回退缺省常量，不拦错位）。
   const [headerGeometry, setHeaderGeometry] = useState<HeaderGeometry | null>(null)
+  // 宽态判定：仅宽态分支把 glyphRef 挂到分组根 span（窄态渲染计数徽标、无
+  // ref），量测依赖 ref 可得。effect 以 wide 为依赖：首挂窄态量测不成（ref 为
+  // null 提前返回）后展开为宽列时重跑补测，避免 rowWidth/headerGeometry 永远
+  // 停在缺省常量；同态内的 size 数值变化不重跑，量测由 ResizeObserver 持续跟进。
+  const wide = (size ?? 18) <= WIDE_ICON_SIZE
 
   useLayoutEffect(() => {
     const nav = glyphRef.current?.closest('nav')
@@ -549,14 +554,14 @@ function ProjectGroupInner({
     return () => {
       observer.disconnect()
     }
-  }, [])
+  }, [wide])
 
   return renderProjectGroup(
     {
       projects: snapshot.projects,
       expanded: snapshot.expanded,
       activeProject: snapshot.activeProject,
-      wide: (size ?? 18) <= WIDE_ICON_SIZE,
+      wide,
       rowWidth,
       glyphRef,
       headerGeometry,

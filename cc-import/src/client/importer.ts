@@ -101,7 +101,12 @@ export function planImports(
   selection: ImportSelection,
   existing: ExistingProviders,
 ): ImportPlan {
-  const existingKeys = new Set(Object.keys(existing))
+  // existed 判定必须始终对齐 rowState 的「原始快照」口径：existingKeys 会随
+  // 批次把新 routeId 入集（冲突消解用），同批 slug 归一相撞（如「Alpha Labs」
+  // 与「alpha labs」）时，后者的 routeId 只是批次内消解产物，不应据此把
+  // 对话框仍视为新行的候选误标成「已存在」。
+  const originalKeys = new Set(Object.keys(existing))
+  const existingKeys = new Set(originalKeys)
   // keyRef 消解不只看批次内：既有 providers 已占用的凭据引用一并入集。路由
   // 键不同不代表引用不同（既有 `a_b` 与新候选 `a-b` 大写折叠后同得
   // A_B_API_KEY），不跨批次消解会让 set 直接覆盖别家 token 且无任何警告。
@@ -130,7 +135,7 @@ export function planImports(
       skipped.push({ name: candidate.name, reason: 'unnameable' })
       continue
     }
-    const existed = existingKeys.has(slug)
+    const existed = originalKeys.has(slug)
     const update = existed && selection.updateNames.has(candidate.name)
     const routeId = update ? slug : resolveRouteIdConflict(slug, existingKeys)
     const built = buildProviderProfile(routeId, candidate)

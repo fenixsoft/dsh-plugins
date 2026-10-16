@@ -11,6 +11,7 @@ import fs from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { join } from 'node:path'
 import type { SkillCandidate, SkillProviderObservation } from '@deepseek-ai/dsh-skill'
+import { errorMessage } from '../shared/errorMessage.js'
 import { parseFrontmatter } from './frontmatter.js'
 
 /** 本插件在 dsh skill 注册表中的 provider 名。 */
@@ -137,8 +138,4 @@ export async function scanSkillDir(
     })
   }
   return candidates
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
