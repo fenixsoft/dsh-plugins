@@ -24,7 +24,7 @@
  */
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
-import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement, RefObject } from 'react'
+import type { CSSProperties, ReactElement, RefObject } from 'react'
 import { compareNames } from './projectSync.js'
 
 /** ui-sidebar 传给图标组件的 owner props（SidebarPanelIconOwnerProps 子集）。 */
@@ -197,10 +197,19 @@ export interface ProjectGroupDeps {
   readonly selectProject: (name: string) => void
 }
 
+/**
+ * 行/头部交互事件最小结构面：项目行同时接受鼠标 click 与键盘 Enter/Space
+ * （KeyboardEvent 结构兼容），handler 只消费阻断冒泡所需的方法。
+ */
+export interface ProjectGroupEventLike {
+  stopPropagation(): void
+  preventDefault(): void
+}
+
 /** 分组块交互回调（事件已在内部 stopPropagation，阻断冒泡到行按钮的 selectPanel）。 */
 export interface ProjectGroupHandlers {
-  readonly toggleHeader: (event: ReactMouseEvent<HTMLElement>) => void
-  readonly selectProject: (name: string, event: ReactMouseEvent<HTMLElement>) => void
+  readonly toggleHeader: (event: ProjectGroupEventLike) => void
+  readonly selectProject: (name: string, event: ProjectGroupEventLike) => void
 }
 
 /**
@@ -241,6 +250,8 @@ export interface ProjectGroupView {
   readonly rowWidth: number
   /** 挂到分组根 span 的 ref（内部量测 nav 宽度用）。 */
   readonly glyphRef: RefObject<HTMLSpanElement>
+  /** 量测得到的头部拦截层几何（相对定位原点偏移 + 宿主行高）；缺省/失真回退常量。 */
+  readonly headerGeometry?: HeaderGeometry | null
 }
 
 /** iframe 面板组件：src 由调用方经 buildPanelSrc 拼装后传入。 */
@@ -276,6 +287,56 @@ export function DashboardPanel({ src }: { readonly src: string }): ReactElement 
 }
 
 /* ============================== 「项目」分组渲染与组件 ============================== */
+
+/**
+ * 头部拦截层缺省几何（fenix-projects-header）：相对分组图标定位原点的内缩
+ * 与宿主行高基线，与 ui-sidebar 当前行内边距/行高强耦合（宿主样式漂移即错位）。
+ * 运行时优先量测宿主行按钮 rect 推导真实几何（measureHeaderGeometry），
+ * 仅在量测不可得/失真时回退本常量。
+ */
+const HEADER_INSET = 10
+const HEADER_ROW_HEIGHT = 36
+
+/** 头部拦截层量测几何（相对分组图标定位原点的偏移与宿主行高）。 */
+export interface HeaderGeometry {
+  readonly top: number
+  readonly left: number
+  readonly height: number
+}
+
+/** 拦截层量测输入的最小元素结构面（真实 Element 天然满足；node 桩按形状构造）。 */
+export interface MeasurableOrigin {
+  closest(selectors: string): unknown
+  getBoundingClientRect(): { readonly top: number; readonly left: number; readonly height: number }
+}
+
+/** 拦截层缺省几何（量测不可得/失真时的回退值）。 */
+const DEFAULT_HEADER_GEOMETRY: HeaderGeometry = {
+  top: -HEADER_INSET,
+  left: -HEADER_INSET,
+  height: HEADER_ROW_HEIGHT,
+}
+
+/**
+ * 量测头部拦截层几何：从分组图标定位原点向上找宿主行按钮（SECTION_ROW_SELECTOR）
+ * 取其 rect，推导拦截层的行内偏移与行高——替代与 ui-sidebar 行样式强耦合的固定
+ * 魔数（宿主调整行高/内边距后拦截层不再错位）。量测不可得或失真时返回 null
+ * （渲染面回退缺省常量）：行按钮不可达、rect 高度为 0（未布局/无布局环境）、
+ * 行高偏离基线过远（> 2 倍，疑似结构漂移——坏量测不如常量）。
+ */
+export function measureHeaderGeometry(origin: MeasurableOrigin | null | undefined): HeaderGeometry | null {
+  const row = origin?.closest(SECTION_ROW_SELECTOR)
+  if (typeof row !== 'object' || row === null || !('getBoundingClientRect' in row)) return null
+  const rowRect = (row as MeasurableOrigin).getBoundingClientRect()
+  const originRect = origin.getBoundingClientRect()
+  if (rowRect.height <= 0 || originRect.height <= 0) return null
+  if (rowRect.height > HEADER_ROW_HEIGHT * 2) return null
+  return {
+    top: originRect.top - rowRect.top,
+    left: originRect.left - rowRect.left,
+    height: rowRect.height,
+  }
+}
 
 const groupListStyle = (rowWidth: number): CSSProperties => ({
   position: 'absolute',
@@ -365,6 +426,8 @@ export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGrou
       </span>
     )
   }
+  // 拦截层几何：量测值优先（抗宿主样式漂移），缺省/失真回退常量。
+  const headerGeometry = view.headerGeometry ?? DEFAULT_HEADER_GEOMETRY
   return (
     <span
       ref={view.glyphRef}
@@ -388,17 +451,19 @@ export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGrou
       >
         <path d="M9 6l6 6-6 6" />
       </svg>
-      {/* 头部行拦截层：覆盖整行，点击仅切换展开/折叠（阻断冒泡到行按钮 selectPanel）。 */}
+      {/* 头部行拦截层：覆盖整行，点击仅切换展开/折叠（阻断冒泡到行按钮 selectPanel）。
+          已知局限：本层 aria-hidden 且不可聚焦，展开/折叠交互对键盘与辅助技术
+          不可达；aria-expanded 迁移到宿主行按钮涉及宿主交互语义，暂未实施。 */}
       <span
         aria-hidden="true"
         data-testid="fenix-projects-header"
         onClick={handlers.toggleHeader}
         style={{
           position: 'absolute',
-          top: -10,
-          left: -10,
+          top: headerGeometry.top,
+          left: headerGeometry.left,
           width: view.rowWidth,
-          height: 36,
+          height: headerGeometry.height,
           cursor: 'pointer',
         }}
       />
@@ -420,15 +485,21 @@ export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGrou
           ) : (
             view.projects.map((name) => {
               const badge = projectBadgeComponent(name)({ size: 18 })
+              // 键盘可达：div[role=button] 非原生按钮，tabIndex 0 + Enter/Space 触发选中。
               return (
                 <div
                   key={name}
                   role="button"
-                  tabIndex={-1}
+                  tabIndex={0}
                   data-testid={`fenix-project-row-${name}`}
                   data-active={view.activeProject === name || undefined}
                   title={name}
                   onClick={(event) => handlers.selectProject(name, event)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault()
+                    handlers.selectProject(name, event)
+                  }}
                   style={groupRowStyle(view.activeProject === name)}
                 >
                   {badge}
@@ -460,12 +531,15 @@ function ProjectGroupInner({
   const snapshot = useSyncExternalStore(projectGroupStore.subscribe, projectGroupStore.getSnapshot)
   const glyphRef = useRef<HTMLSpanElement>(null)
   const [rowWidth, setRowWidth] = useState(DEFAULT_ROW_WIDTH)
+  // 头部拦截层几何：量测失败保持 null（渲染面回退缺省常量，不拦错位）。
+  const [headerGeometry, setHeaderGeometry] = useState<HeaderGeometry | null>(null)
 
   useLayoutEffect(() => {
     const nav = glyphRef.current?.closest('nav')
     if (!(nav instanceof HTMLElement)) return
     const update = (): void => {
       setRowWidth(Math.min(360, Math.max(160, nav.clientWidth)))
+      setHeaderGeometry(measureHeaderGeometry(glyphRef.current))
     }
     update()
     if (typeof ResizeObserver === 'undefined') return
@@ -484,6 +558,7 @@ function ProjectGroupInner({
       wide: (size ?? 18) <= WIDE_ICON_SIZE,
       rowWidth,
       glyphRef,
+      headerGeometry,
     },
     projectGroupHandlers(projectGroupStore, deps),
   )
@@ -647,7 +722,7 @@ export interface ProjectSectionView {
   readonly activeProject: string | null
   /** 宽态（列宽 ≥ SECTION_WIDE_MIN_WIDTH）= true；窄态渲染徽标栈。 */
   readonly wide: boolean
-  /** 量测得到的行宽基准（px；随宿主 ResizeObserver 更新）。 */
+  /** 历史契约字段：渲染不再消费（宽态容器 width auto、行 width 100%）。 */
   readonly rowWidth: number
 }
 
@@ -708,15 +783,21 @@ function sectionRow(
   active: boolean,
   handlers: ProjectGroupHandlers,
 ): ReactElement {
+  // 键盘可达：div[role=button] 非原生按钮，tabIndex 0 + Enter/Space 触发选中。
   return (
     <div
       key={name}
       role="button"
-      tabIndex={-1}
+      tabIndex={0}
       data-testid={`fenix-project-row-${name}`}
       data-active={active || undefined}
       title={name}
       onClick={(event) => handlers.selectProject(name, event)}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        handlers.selectProject(name, event)
+      }}
       style={groupRowStyle(active)}
     >
       {projectBadgeComponent(name)({ size: 18 })}
@@ -731,15 +812,21 @@ function sectionRailRow(
   active: boolean,
   handlers: ProjectGroupHandlers,
 ): ReactElement {
+  // 键盘可达：div[role=button] 非原生按钮，tabIndex 0 + Enter/Space 触发选中。
   return (
     <div
       key={name}
       role="button"
-      tabIndex={-1}
+      tabIndex={0}
       data-testid={`fenix-project-row-${name}`}
       data-active={active || undefined}
       title={name}
       onClick={(event) => handlers.selectProject(name, event)}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        handlers.selectProject(name, event)
+      }}
       style={sectionRailRowStyle(active)}
     >
       {projectBadgeComponent(name)({ size: 18 })}
