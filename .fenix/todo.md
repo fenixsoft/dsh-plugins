@@ -125,3 +125,22 @@
   - 证据：.fenix/STATE.md 记 verify-dsh-plugins-live status=blocked、updated=2026-10-14T17:43:13、error「Failed to create worktree (gave up: parallel run or manual freeze)」（指纹 59c551238074 连续同因 3 轮）；而提交 2519ba2（10-15 00:44 合回）、44089c8（收工结果定稿 17/17）、ec996f5（10-15 01:43 verification-report 入库）证明工作已完成；STATE.md 顶部 Last updated 停在 2026-10-15T12:53。
   - 调查评估：问题源：日终 STATE 快照对账。已核实事实：blocked 由 10-14 的 worktree 并发冲突同因重派循环触发，其后实现车道照常完成并合回主树，STATE 再未更新；spec/changes/verify-dsh-plugins-live/tasks.md 尚有「原地打回第 1 轮」3 个未勾项，与已入库的 verification-report.md（内含上轮 5 个 fail 判定的复核更正、30 场景重跑，结论 bug-found 仅 1 个 minor 文档缺口）互不回写——无论哪边是最新事实，两边都停在中间态。根因（形态层）：SPEC 状态机缺「工作已落地后的 blocked 清算」路径；是 daemon 巡检缺口还是状态转移规则缺口未再深查。与存量工作关系：spec/changes/ 活跃区无相关 SPEC。结论：事件在窗前、状态在本窗仍占位的跨窗残留，系统性改进点，宜轻量立项。
   - 建议：daemon 日终对 blocked 超 24 小时的 SPEC 做对账：分支已合回且收工结果/验证报告在库的自动转 done，未勾残余项（如该 minor 文档缺口）转 code-review 台账或新 SPEC，并把对账动作写入 STATE 变更日志留痕。
+
+## 2026-10-18
+
+### 浪费
+- **code-fix 链对已豁免条目又空转 10 个 run 才收敛**
+  - 影响：一条已被源码豁免标记（fenix-ignore 注释，代码注释形式的评审豁免标记）判误报的评审台账条目（code-review 发现清单条目）滞留 open，本窗 30 分钟一班的投递闸又空烧 10 个零产出 run 加 1 个收尾 run，合计约 26.8 分钟 runner 时长、$5.29；加上前窗 2 个 run，同一条目全链累计 13 个 run、约 $6.18。13 个 run 终态全部 success、零告警，终态统计对这类空转完全失明。
+  - 证据：fenixd.log 18:18:36Z 至 22:48:28Z 共 9 条 chain rollup（链收尾汇总日志）均为 trigger=chain_exhausted、resolved=0、ignored=0，覆盖 code-fix-1792174524 至 code-fix-1792190725 共 10 个零产出 run（时长 185.4/168.4/132.3/124.3/171.4/147.3/119.3/124.3/111.3/175.4 秒，合计 1459.4 秒、$4.80）。各 run 存档产物行均写 skipped 且 skip_reason 带解释后缀（如 code-fix-1792188925 写 'false_positive (位置已有 fenix-ignore:5ae61ac429c4 标记…)'）。收尾 run code-fix-1792192525（146.3 秒、$0.49）恰写裸枚举 'skip_reason':'false_positive'，23:18:00Z rollup 随即变 chain_converged、ignored=1，台账条目 5ae61ac429c4（条目指纹 id）转 ignored。
+  - 调查评估：问题源：处置周期评审 code-review-1792170044（上窗产出 12 条台账）修复链的遗留条目 5ae61ac429c4『成对引号值含空白+# 被误判』。已核实事实：fenixd/core/code_fix.py:125 白名单 IGNORE_ELIGIBLE_SKIP_REASONS={'false_positive','not_worth_fixing'}，:2812 对产物行 skip_reason 整串精确匹配；而 fixer 模板 agents/code-fix.md:84 要求 skip_reason 取裸枚举之一、:97 却自带『末尾附 (no_marker)』的后缀先例——模板自己示范了枚举可带后缀，模型自然附带解释文本，精确匹配必脱靶（(no_marker) 形态同样过不了白名单，读侧无任何前缀归一），脱靶 skipped 行被静默丢弃、零日志，条目保持 open，30 分钟闸次再派。根因（已裁决，单一）：fixer 模板契约与 runner 白名单口径不一致，链收敛只能靠模型偶然写裸值，第 11 轮才命中。与存量工作关系：10-17 浪费条（同链前 2 个 run）建议的『结构化上报』实际已存在（fix-out 产物行机制），本条以产物行原文加源码行号更正其双假说——fixer 已上报、runner 已解析，卡点纯在枚举匹配口径；spec/changes/ 活跃区 5 个 SPEC 均为业务插件，无覆盖本车道。结论：机制确定、可根治；复发敞口=每个带后缀的 skipped 判定至少再烧一班约 150 秒/$0.5 的 run，本链还靠夜静窗守卫（code-fix 每日 04:15-04:45 本地停投闸，告警 2a250e5f4ba1 与 14e301e34244 为入窗/出窗通知）才少烧一班。
+  - 建议：① code_fix.py 白名单改前缀归一：skip_reason 以枚举值开头即命中，完整原文存入 mark_ignored 的 reasons；② code-fix.md 统一口径：skip_reason 只允许裸枚举、解释挪独立 reason 字段，并同步修正 (no_marker) 后缀规则与读侧口径；③ 链级护栏：同链连续 2 轮 resolved+ignored=0 即发 admin 信号并暂停自动重派，不再依赖夜静窗偶然省班；④ 顺手清理已合并未删的 6 个 fenix/code-review-fix-* 分支。
+
+### 失误
+- （当日无）
+
+### 可改进
+- **离群初筛连续第二窗误报批量 run，纯文本轮通胀无维度覆盖**
+  - 影响：批量修复 run code-fix-1792257163（一次修 9 条台账）被离群初筛按绝对 cost 标为组中位 7.1 倍的异常——连续第二个窗口对批量 run 误报；该 run 实际摊薄 $0.38/条、58 秒/条，与基线批 $0.33/条、49 秒/条基本持平，无真实浪费，而本轮真正的过程异常——204 轮中 125 轮（61%）是无工具调用的纯文本轮（基线批仅 21%）——现有 cost/时长离群维度完全观测不到。
+  - 证据：数据摘要第六节初筛离群行：cost_usd=3.401 对组中位 0.483、duration_seconds=521.2 对组中位 146.9；fenixd.log 17:21:24Z run_metrics：turns=204、tool_uses=79、text_turns=125、latency_stalls=0（事件流深扫 max_gap 仅 19.7 秒，即离群与 API 停滞无关）；基线为上窗批量 run code-fix-1792170715（修 11 条：$3.62、541.2 秒、turns=104、text_turns=22、tools=82）。
+  - 调查评估：问题源：code-fix 批量收尾 run 的离群初筛（run 指标超同型组中位 3 倍即标离群）。已核实事实：本 run 与基线批的条目摊薄成本/时长持平，×3 组中位绝对阈值对批量 run 连续第二窗误报（上窗 code-fix-1792158323 修 19 条被标 $7.45 异常，即 10-17 改进条『cost 计量与 token 量纲失真』，其按条目归一建议未落地）；本 run 零停滞，轮数较基线接近翻倍全部来自纯文本轮通胀，是模型输出行为漂移的可见信号，但现有观测面（cost/时长/停滞）都不捕获。与存量工作关系：10-17 改进条已立『离群按条目归一』，本条为其复发佐证加维度扩展，不另立重复 SPEC。结论：维持原建议并扩展一个维度即可，落地成本低。
+  - 建议：落地 10-17 条建议（离群初筛按 cost/台账条目归一、run_metrics 补 model 字段）时，一并把 text_turns 占比纳入离群维度（如 turns>100 且纯文本轮占比>50% 即标记），让这类无停滞的轮次通胀可观测。
