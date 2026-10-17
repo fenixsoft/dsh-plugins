@@ -153,6 +153,9 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
   const [reloadToken, setReloadToken] = useState(0)
   /** 导入请求代数：effect 清理（关窗等）即自增失效，confirm 的迟到回写据此丢弃。 */
   const importTokenRef = useRef(0)
+  /** 批次结束触发的自动重扫标记：重扫完成时保留刚产出的批次 outcome 反馈
+   *  （初次加载与手动刷新仍按原样清洗旧反馈）。 */
+  const keepOutcomeRef = useRef(false)
 
   useEffect(() => {
     if (!open) {
@@ -162,6 +165,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
       setBusy(false)
       setImporting(false)
       setReloadToken(0)
+      keepOutcomeRef.current = false
       return
     }
     let cancelled = false
@@ -170,7 +174,10 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
       .then((loaded) => {
         if (cancelled) return
         setSnapshot(loaded)
-        setOutcome(null)
+        // 批次导入结束触发的自动重扫：outcome 是刚产出的批次结果（成功计数 +
+        // 失败明细），保留给用户；初次加载与手动刷新仍清洗旧反馈。
+        if (keepOutcomeRef.current) keepOutcomeRef.current = false
+        else setOutcome(null)
         setBusy(false)
         if (loaded.ok) {
           const existingNames = new Set(Object.keys(loaded.existing))
@@ -237,6 +244,12 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
         setOutcome(result)
         setBusy(false)
         setImporting(false)
+        // 批次已落盘（成功或部分失败），rows 与 snapshot.existing 均已过期：
+        // 已导入行仍标「可导入」、勾选态残留，再确认会基于过期快照静默重放/
+        // 覆盖写入。自动重扫重建行状态，关掉这条无提示的过期路径；重扫期间
+        // busy 挡住导入按钮，完成后该行按新快照转为「已存在」。
+        keepOutcomeRef.current = true
+        setReloadToken((current) => current + 1)
       })
       .catch((error: unknown) => {
         if (token !== importTokenRef.current) return
@@ -251,6 +264,10 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
         })
         setBusy(false)
         setImporting(false)
+        // 异常收尾同样可能已有部分写入：与成功路径一致地重扫，行状态对齐
+        // 后端事实，并保留本次失败明细（keepOutcomeRef）。
+        keepOutcomeRef.current = true
+        setReloadToken((current) => current + 1)
       })
   }
 
