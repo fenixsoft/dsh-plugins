@@ -37,6 +37,31 @@ function markRemoteMethod(prototype: object, method: string): void {
   for (const initializer of initializers) initializer.call(Object.create(prototype))
 }
 
+/** ctx.logger 的结构面（构建期类型缝未声明；按发行包 printf 风格钉最小面）。 */
+interface LoggerLike {
+  warn(format: string, ...args: unknown[]): void
+}
+
+/**
+ * revealToken 的审计痕迹（上方注释块威胁模型的底线缓解）：每次明文读取先落一条
+ * warn——候选名 + 服务侧 ctx 的 fiber uid。RPC 类型缝不携带调用方身份，fiber uid
+ * 是缝内唯一可得的上下文标识；logger 缺失或调用异常降级 console.warn，审计不得
+ * 因观测通道问题阻断或吞掉 reveal 本身。
+ */
+function auditReveal(ctx: Context, providerName: string): void {
+  const message = `[ccimport] revealToken 审计：候选「${providerName}」，ctx fiber=${ctx.fiber.uid ?? 'unknown'}`
+  const logger = (ctx as unknown as { logger?: LoggerLike | undefined }).logger
+  if (logger !== undefined) {
+    try {
+      logger.warn('%s', message)
+    } catch {
+      console.warn(message)
+    }
+  } else {
+    console.warn(message)
+  }
+}
+
 export class CcimportController extends TypertRemoteService {
   constructor(ctx: Context) {
     super(ctx, 'ccimport', { namespace: 'ccimport' })
@@ -71,8 +96,12 @@ export class CcimportController extends TypertRemoteService {
    *    被授予该命名空间」的反例场景；
    * 2. 验证项 1 通过后再落地上述 reveal 许可机制；在此之前，本 RPC 面一律按
    *    「对宿主内可达该命名空间的任意上下文敞开」的威胁模型对待。
+   *
+   * 该威胁模型下的底线缓解（已落地）：revealToken 每次调用先经 `auditReveal`
+   * 落审计痕迹（候选名 + 服务 ctx fiber uid），保证明文读取在日志里可观测、可追溯。
    */
   async revealToken(providerName: string): Promise<TokenResponse> {
+    auditReveal(this.ctx, providerName)
     return readCcSwitchToken(defaultDbPath(), providerName)
   }
 }

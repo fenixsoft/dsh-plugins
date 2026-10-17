@@ -193,10 +193,16 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
   // 永远 pending（真机实测死锁）。settings/credentials 一并声明，授予子 ctx
   // 对话框读写面的 fence 访问。ctx.inject 为 registry 运行时 mixin，类型面
   // 未声明（cordis context.ts 仅注释说明），此处按运行时形态结构化断言。
-  const ui = (ctx as unknown as ContextWithInject).inject(
-    ['remote.ccimport', 'remote.settings', 'remote.credentials'],
-    (uiCtx) => registerUi(uiCtx as Context),
-  )
+  let ui: { dispose(): void | Promise<void> }
+  try {
+    ui = (ctx as unknown as ContextWithInject).inject(
+      ['remote.ccimport', 'remote.settings', 'remote.credentials'],
+      (uiCtx) => registerUi(uiCtx as Context),
+    )
+  } catch (err) {
+    logStageFailure('ctx.inject', err)
+    throw err
+  }
 
   // 卸载路径：dispose 失败不跳过 unmountRemote（否则 ccimport 命名空间与
   // footer slot 半卸载残留，热重载后 remote.$mount 行为异常）；失败按

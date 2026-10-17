@@ -845,14 +845,17 @@ function sectionRailRow(
  * - 分区紧贴「项目」菜单行下方，**不带自带标题**（上方菜单即「项目」，避免
  *   双「项目」菜单）；常驻渲染项目行（无折叠态）。
  * - 宽态：限高滚动项目行列表（首字母徽标 + 项目名，当前项高亮）或空态提示；
- * - 窄态（收起轨）：徽标栈（仅徽标、居中、无横向溢出）。
+ * - 窄态（收起轨）：徽标栈（仅徽标、居中、无横向溢出）；空项目返回 null
+ *   （不渲染带边框内边距的空分区壳，与宽态空态口径一致）。
  *
  * 事件契约与浮层分组共用 ProjectGroupHandlers：项目行 selectProject（内部
  * stopPropagation 阻断冒泡到行按钮）。`expanded` 字段保留于视图契约但不再
  * 生效（分区常驻展开，折叠语义由「项目」菜单行的主面板切换承担）。
  */
-export function renderProjectSection(view: ProjectSectionView, handlers: ProjectGroupHandlers): ReactElement {
+export function renderProjectSection(view: ProjectSectionView, handlers: ProjectGroupHandlers): ReactElement | null {
   if (!view.wide) {
+    // 窄态空项目：不渲染空壳容器（避免收起轨上出现无边框信息的空白边框块）。
+    if (view.projects.length === 0) return null
     return (
       <section
         data-testid="fenix-projects-section"
@@ -1008,6 +1011,8 @@ function ProjectSectionEntry({
   }, [host])
 
   const portalActive = isPortalActive(mountState, host)
+  // 锚点图标尺寸随 ui-sidebar 实际请求（宽列 16 / 收起轨 18），缺省回落宽态尺寸。
+  const anchorIconSize = size ?? WIDE_ICON_SIZE
   const handlers = projectGroupHandlers(projectGroupStore, deps)
   return (
     <>
@@ -1021,12 +1026,12 @@ function ProjectSectionEntry({
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: portalActive ? WIDE_ICON_SIZE : 0,
-          height: portalActive ? WIDE_ICON_SIZE : 0,
+          width: portalActive ? anchorIconSize : 0,
+          height: portalActive ? anchorIconSize : 0,
           overflow: 'hidden',
         }}
       >
-        {portalActive ? fixedIconComponent('fenix-projects')({ size: WIDE_ICON_SIZE }) : null}
+        {portalActive ? fixedIconComponent('fenix-projects')({ size: anchorIconSize }) : null}
       </span>
       {portalActive && host !== null ? (
         createPortal(
