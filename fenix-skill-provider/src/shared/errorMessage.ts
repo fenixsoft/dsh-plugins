@@ -4,5 +4,12 @@
  * 各自定义造成漂移。
  */
 export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  if (error instanceof Error) return error.message
+  try {
+    return String(error)
+  } catch {
+    // 无原型对象等奇异 throw 值无法 ToPrimitive，String() 会自身抛 TypeError；
+    // 本函数服务于 catch/warn 容错路径，任何输入下都不允许再向外抛。
+    return '[unstringifiable thrown value]'
+  }
 }
