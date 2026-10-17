@@ -144,6 +144,8 @@ function parseKeyValueBlock(block: string): Map<string, string | boolean | Recor
       continue
     }
     if (isNested) return null // 首个嵌套行不属于任何已知容器键
+    // 回到顶层键即视为 metadata 块结束：其后的深缩进行不再归属 metadata，走整体失败路径
+    metadataIndent = undefined
 
     if (key === 'metadata' && valueText.length === 0) {
       if (data.has('metadata')) return null // 重复 metadata: 声明与其他顶层键同口径：整体失败
@@ -166,18 +168,17 @@ function parseScalar(text: string): string | boolean | null {
   if (text === 'false') return false
   if (text === '1') return true
   if (text === '0') return false
-  if (
-    (text.startsWith('"') && text.endsWith('"') && text.length >= 2) ||
-    (text.startsWith("'") && text.endsWith("'") && text.length >= 2)
-  ) {
+  if (text.startsWith('"') || text.startsWith("'")) {
     const quote = text[0] as string
+    // 以引号起始但不成对（如 `"abc`）：受限解析不理解，整体失败，避免引号残留在值中
+    if (text.length < 2 || !text.endsWith(quote)) return null
     const inner = text.slice(1, -1)
     return inner.includes(quote) ? null : inner
   }
-  // 多行 / 流集合（[ {）形态不支持，整体拒绝；# 的拒绝收窄为「注释起始」：
-  // 仅值首（YAML `key: # …` 取到的是注释而非值）或空白后的 # 拒绝，
-  // 值中部 # 是合法字面量（如「支持 C# 项目」），放行。
+  // 多行 / 流集合（[ {）起始形态不支持，整体拒绝；# 的拒绝收窄为「注释起始」：
+  // 仅值首（YAML `key: # …` 取到的是注释而非值）或空白后的 # 拒绝；
+  // 值中部的 # / [ / { 是合法字面量（如「支持 C# 项目」「支持 [实验] 标签」），放行。
   // [fenix-ignore:5ae61ac429c4] 成对引号值已在上方引号分支提前返回，引号内 # 不经过本检查，所述「引号值含空格+# 被拒」不成立
-  if (/(?:^|\s)#|[\n[{[]/.test(text)) return null
+  if (/(?:^|\s)#|^[{[]/.test(text)) return null
   return text
 }
