@@ -192,7 +192,10 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
       .catch((error: unknown) => {
         if (cancelled) return
         setSnapshot({ ok: false, message: error instanceof Error ? error.message : String(error) })
-        setOutcome(null)
+        // 与 then 分支同口径：批次结束触发的自动重扫失败时保留刚产出的批次
+        // outcome（成功计数 + 失败明细），仅初次加载与手动刷新清洗旧反馈。
+        if (keepOutcomeRef.current) keepOutcomeRef.current = false
+        else setOutcome(null)
         setBusy(false)
       })
     return () => {
@@ -343,6 +346,9 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
         >
           {t('dialog.deselectAll')}
         </Button>
+        {/* 取舍：导入进行中不禁用关闭——关窗只经 effect 清理自增 importTokenRef
+            丢弃迟到回写，已派发的写入批次不中断、仍在后台执行完毕；重开对话框
+            以重新扫描对齐后端事实。 */}
         <Button variant="ghost" size="sm" onClick={onClose}>
           {t('dialog.close')}
         </Button>
