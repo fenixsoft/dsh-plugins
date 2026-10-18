@@ -47,9 +47,13 @@ interface LoggerLike {
  * warn——候选名 + 服务侧 ctx 的 fiber uid。RPC 类型缝不携带调用方身份，fiber uid
  * 是缝内唯一可得的上下文标识；logger 缺失或调用异常降级 console.warn，审计不得
  * 因观测通道问题阻断或吞掉 reveal 本身。
+ *
+ * 候选名来自公开 RPC 调用方参数，经 JSON.stringify 转义后才拼入文案：未清洗的
+ * 换行/控制字符可在日志中伪造出额外「审计行」，转义保证一条 reveal 恰好一行
+ * 审计痕迹。
  */
 function auditReveal(ctx: Context, providerName: string): void {
-  const message = `[ccimport] revealToken 审计：候选「${providerName}」，ctx fiber=${ctx.fiber.uid ?? 'unknown'}`
+  const message = `[ccimport] revealToken 审计：候选 ${JSON.stringify(providerName)}，ctx fiber=${ctx.fiber.uid ?? 'unknown'}`
   const logger = (ctx as unknown as { logger?: LoggerLike | undefined }).logger
   if (logger !== undefined) {
     try {
