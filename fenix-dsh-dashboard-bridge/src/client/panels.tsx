@@ -846,7 +846,8 @@ function sectionRailRow(
  *   双「项目」菜单）；常驻渲染项目行（无折叠态）。
  * - 宽态：限高滚动项目行列表（首字母徽标 + 项目名，当前项高亮）或空态提示；
  * - 窄态（收起轨）：徽标栈（仅徽标、居中、无横向溢出）；空项目返回 null
- *   （不渲染带边框内边距的空分区壳，与宽态空态口径一致）。
+ *   （不渲染带边框内边距的空分区壳；宽态空项目则渲染「暂无项目」空态壳，
+ *   两态空态口径不同）。
  *
  * 事件契约与浮层分组共用 ProjectGroupHandlers：项目行 selectProject（内部
  * stopPropagation 阻断冒泡到行按钮）。`expanded` 字段保留于视图契约但不再
@@ -862,11 +863,9 @@ export function renderProjectSection(view: ProjectSectionView, handlers: Project
         aria-label="项目"
         style={{ ...sectionStyle, margin: '0 2px 8px', padding: 4, alignItems: 'center' }}
       >
-        {view.projects.length > 0 ? (
-          <span data-testid="fenix-projects-list" style={sectionRailListStyle} onClick={(e) => e.stopPropagation()}>
-            {view.projects.map((name) => sectionRailRow(name, view.activeProject === name, handlers))}
-          </span>
-        ) : null}
+        <span data-testid="fenix-projects-list" style={sectionRailListStyle} onClick={(e) => e.stopPropagation()}>
+          {view.projects.map((name) => sectionRailRow(name, view.activeProject === name, handlers))}
+        </span>
       </section>
     )
   }
