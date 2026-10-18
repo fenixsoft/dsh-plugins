@@ -208,14 +208,24 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
   // footer slot 半卸载残留，热重载后 remote.$mount 行为异常）；失败按
   // logStageFailure 同款口径记录后继续上抛。
   return async () => {
+    let disposeFailed = false
+    let disposeErr: unknown
     try {
       await ui.dispose()
     } catch (err) {
+      disposeFailed = true
+      disposeErr = err
       logStageFailure('ui.dispose', err)
-      throw err
-    } finally {
-      await unmountRemote()
     }
+    // unmount 失败同样走 logStageFailure 口径记录；dispose 已失败时优先
+    // 上抛原始 dispose 异常，unmount 错误仅保留在日志中（不覆盖原异常）。
+    try {
+      await unmountRemote()
+    } catch (err) {
+      logStageFailure('remote.$unmount', err)
+      if (!disposeFailed) throw err
+    }
+    if (disposeFailed) throw disposeErr
   }
 }
 

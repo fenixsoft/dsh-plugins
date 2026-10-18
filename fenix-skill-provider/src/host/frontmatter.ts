@@ -161,11 +161,12 @@ function parseKeyValueBlock(block: string): Map<string, string | boolean | Recor
   return data
 }
 
-/** 标量解析：去成对引号的字符串；true/false/1/0 布尔；空值与形态不明返回 null。 */
+/** 标量解析：去成对引号的字符串；true/false（大小写不敏感）与 1/0 布尔；空值与形态不明返回 null。 */
 function parseScalar(text: string): string | boolean | null {
   if (text.length === 0) return null
-  if (text === 'true') return true
-  if (text === 'false') return false
+  const lowered = text.toLowerCase()
+  if (lowered === 'true') return true
+  if (lowered === 'false') return false
   if (text === '1') return true
   if (text === '0') return false
   if (text.startsWith('"') || text.startsWith("'")) {

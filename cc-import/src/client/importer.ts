@@ -70,7 +70,9 @@ export interface ImportPlan {
 
 /**
  * 对话框行状态判定（纯函数）：slug 命中既有 providers → 已存在，默认不勾选；
- * 可导入行默认勾选；跳过行无勾选框（disabled）。
+ * 可导入且可命名（slug 非空）的行默认勾选；slug 为空的 unnameable 行与跳过行
+ * 一样默认不勾选（planImports 会把它按 unnameable 静默跳过，默认勾选会让
+ * 「导入所选（N）」与实际写入数不符）。
  */
 export function rowState(
   candidate: ScanCandidate,
@@ -78,8 +80,9 @@ export function rowState(
 ): { readonly existed: boolean; readonly defaultChecked: boolean } {
   if (!candidate.importable) return { existed: false, defaultChecked: false }
   const slug = slugifyRouteId(candidate.name)
-  const existed = slug.length > 0 && existingKeys.has(slug)
-  return { existed, defaultChecked: !existed }
+  const nameable = slug.length > 0
+  const existed = nameable && existingKeys.has(slug)
+  return { existed, defaultChecked: nameable && !existed }
 }
 
 /**
