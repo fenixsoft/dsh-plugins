@@ -4,7 +4,7 @@
  * - `DashboardPanel`：主面板内嵌 iframe——src 经 buildPanelSrc 拼装（hash 深链
  *   直达），铺满面板、无边框，并按 layout 契约预留顶部 clearance
  *   （`--dsh-frame-leading-clearance`，macOS 窗口控件带占位，缺省 0）；
- * - `fixedIconComponent`：4 个固定条目的线性图标组件（svg stroke 线性风格），
+ * - `fixedIconComponent`：5 个固定条目的线性图标组件（svg stroke 线性风格），
  *   props 对齐 ui-sidebar 的 SidebarPanelIconOwnerProps（size/active）；
  * - `projectSectionComponent`：「项目」条目（order 11）的 Portal 内嵌分区组件
  *   （spec 2026-11 Portal 化）——从条目组件 `closest('nav')` 取条目列表元素，
@@ -235,6 +235,16 @@ export function projectGroupHandlers(
 /** 宽态判定：ui-sidebar 宽列请求 16px 图标、收起轨请求 18px（SidebarPanelIconOwnerProps）。 */
 const WIDE_ICON_SIZE = 16
 
+/**
+ * 统一 size 缺省口径：宿主未传 size 时按收起轨 18（窄态）处理——未知请求下
+ * 按窄态降级最保守（分组回计数徽标、不铺头部拦截层）。宽态判定
+ * （ProjectGroupInner）与锚点图标尺寸（ProjectSectionEntry）共用本函数，
+ * 避免两条路径各持相反的缺省宽窄假设。
+ */
+function resolveIconSize(size: number | undefined): number {
+  return size ?? 18
+}
+
 /** 分组列表行高（px）与最大高度（约 7 行，超出内部滚动）。 */
 const GROUP_ROW_HEIGHT = 30
 const GROUP_MAX_HEIGHT = 7 * GROUP_ROW_HEIGHT + 12
@@ -319,7 +329,8 @@ const DEFAULT_HEADER_GEOMETRY: HeaderGeometry = {
 
 /**
  * 量测头部拦截层几何：从分组图标定位原点向上找宿主行按钮（SECTION_ROW_SELECTOR）
- * 取其 rect，推导拦截层的行内偏移与行高——替代与 ui-sidebar 行样式强耦合的固定
+ * 取其 rect，推导拦截层相对图标原点的行偏移（行在原点左上方，top/left 为负）
+ * 与行高——替代与 ui-sidebar 行样式强耦合的固定
  * 魔数（宿主调整行高/内边距后拦截层不再错位）。量测不可得或失真时返回 null
  * （渲染面回退缺省常量）：行按钮不可达、rect 高度为 0（未布局/无布局环境）、
  * 行高偏离基线过远（> 2 倍，疑似结构漂移——坏量测不如常量）。
@@ -332,9 +343,11 @@ export function measureHeaderGeometry(origin: MeasurableOrigin | null | undefine
   const originRect = origin.getBoundingClientRect()
   if (rowRect.height <= 0 || originRect.height <= 0) return null
   if (rowRect.height > HEADER_ROW_HEIGHT * 2) return null
+  // 行相对图标原点的偏移（行在原点左上方，恒为负），与 DEFAULT_HEADER_GEOMETRY
+  // 的内缩语义同向：消费处直接用作 style.top/left 即可盖住整行。
   return {
-    top: originRect.top - rowRect.top,
-    left: originRect.left - rowRect.left,
+    top: rowRect.top - originRect.top,
+    left: rowRect.left - originRect.left,
     height: rowRect.height,
   }
 }
@@ -538,7 +551,7 @@ function ProjectGroupInner({
   // ref），量测依赖 ref 可得。effect 以 wide 为依赖：首挂窄态量测不成（ref 为
   // null 提前返回）后展开为宽列时重跑补测，避免 rowWidth/headerGeometry 永远
   // 停在缺省常量；同态内的 size 数值变化不重跑，量测由 ResizeObserver 持续跟进。
-  const wide = (size ?? 18) <= WIDE_ICON_SIZE
+  const wide = resolveIconSize(size) <= WIDE_ICON_SIZE
 
   useLayoutEffect(() => {
     const nav = glyphRef.current?.closest('nav')
@@ -1010,8 +1023,9 @@ function ProjectSectionEntry({
   }, [host])
 
   const portalActive = isPortalActive(mountState, host)
-  // 锚点图标尺寸随 ui-sidebar 实际请求（宽列 16 / 收起轨 18），缺省回落宽态尺寸。
-  const anchorIconSize = size ?? WIDE_ICON_SIZE
+  // 锚点图标尺寸随 ui-sidebar 实际请求（宽列 16 / 收起轨 18）；缺省口径与
+  // 宽态判定共用 resolveIconSize（收起轨 18，同源窄态降级假设）。
+  const anchorIconSize = resolveIconSize(size)
   const handlers = projectGroupHandlers(projectGroupStore, deps)
   return (
     <>
