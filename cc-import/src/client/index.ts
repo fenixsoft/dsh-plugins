@@ -120,6 +120,24 @@ async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutc
         })
         continue
       }
+      // keyRef 派生不单射（不同 route id 可派生同一凭据引用，见 planImports 注释），
+      // 计划期消解只对计划期快照负责：导入窗口内其他端新建的条目若恰好派生出同
+      // 一引用，原样重放 set + storeCredential 会静默覆盖对方刚写入的 token。与
+      // routeId 占用同口径跳过（本项自身既有条目的引用除外——覆盖更新本就原位
+      // 替换它）。
+      const refOccupied = Object.entries(reread.existing).some(
+        ([routeId, summary]) =>
+          routeId !== item.routeId &&
+          typeof summary.apiKeyEnv === 'string' &&
+          summary.apiKeyEnv === item.keyRef,
+      )
+      if (refOccupied) {
+        failures.push({
+          name: item.candidate.name,
+          reason: `凭据引用 "${item.keyRef}" 在导入期间被其他端创建的条目占用，为避免覆盖其 token 已跳过（请刷新后重试）`,
+        })
+        continue
+      }
       snapshot = reread
       written = await ctx.remote.settings.mutate(PI_AI_NS, [op], snapshot.revision)
     }
@@ -201,6 +219,14 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
     )
   } catch (err) {
     logStageFailure('ctx.inject', err)
+    // 激活中间失败也须回滚已成功的 $mount：apply 直接上抛后不再有清理机会，
+    // 不回滚会留下 ccimport 命名空间半挂载残留（与下方卸载路径同一关注点）。
+    // unmount 失败只按同口径记录，不覆盖原 inject 异常。
+    try {
+      await unmountRemote()
+    } catch (unmountErr) {
+      logStageFailure('remote.$unmount', unmountErr)
+    }
     throw err
   }
 

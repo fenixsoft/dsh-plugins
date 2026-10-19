@@ -24,6 +24,7 @@ import {
   isAnchorReachable,
   isPortalActive,
   isWideSectionWidth,
+  measureHeaderGeometry,
   mountSectionHost,
   nextPortalMountState,
   projectGroupStore,
@@ -616,6 +617,22 @@ describe('「项目」分区锚点/宿主/挂载状态机（纯判定，node 桩
     // 均不可得：null（状态机累计失败 → 浮层降级）。
     expect(sectionAnchorFrom(fakeOrigin({}))).toBeNull()
     expect(sectionAnchorFrom(null)).toBeNull()
+  })
+
+  it('measureHeaderGeometry：行按钮在图标原点左上方，量测 top/left 为负偏移（与缺省几何同语义）', () => {
+    const rowRect = { top: 100, left: 8, height: 36 }
+    const originRect = { top: 110, left: 18, height: 16 }
+    const geometry = measureHeaderGeometry({
+      closest(selectors: string) {
+        return selectors === SECTION_ROW_SELECTOR ? { getBoundingClientRect: () => rowRect } : null
+      },
+      getBoundingClientRect: () => originRect,
+    })
+    expect(geometry).not.toBeNull()
+    expect(geometry?.top).toBe(rowRect.top - originRect.top)
+    expect(geometry?.left).toBe(rowRect.left - originRect.left)
+    expect(geometry?.top).toBeLessThanOrEqual(0)
+    expect(geometry?.left).toBeLessThanOrEqual(0)
   })
 
   it('isAnchorReachable：isConnected 判定可达性（null/非对象不可达）', () => {

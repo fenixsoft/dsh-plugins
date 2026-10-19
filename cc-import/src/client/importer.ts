@@ -3,8 +3,9 @@
  *
  * 从对话框勾选态 + 既有 pi-ai providers 快照，构造逐候选的官方路径写入计划：
  * 每个计划项一条 `set` op（writeSettings）+ 一条 `storeCredential` 参数。
- * 任何路径都不产生 `unset`、不整体替换 providers 命名空间（spec「官方路径写入」
- * 「只加不删幂等」）。
+ * 本计划构造层不产生 `unset`、不整体替换 providers 命名空间（spec「官方路径写入」
+ * 「只加不删幂等」）；全链路唯一的回滚 `unset` 只存在于 index.ts 的凭据落库失败
+ * 路径（见 executeImport 注释的「唯一例外」）。
  */
 import {
   buildProviderProfile,

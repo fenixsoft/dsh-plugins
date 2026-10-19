@@ -147,9 +147,11 @@ function parseKeyValueBlock(block: string): Map<string, string | boolean | Recor
     // 回到顶层键即视为 metadata 块结束：其后的深缩进行不再归属 metadata，走整体失败路径
     metadataIndent = undefined
 
-    if (key === 'metadata' && valueText.length === 0) {
+    // 键后无子键、或值恰为显式空 flow 映射 {}：同口径解析为空对象；
+    // {} 在 YAML 中不可能再有子键，故不开启嵌套归属（其后的深缩进行走整体失败）
+    if (key === 'metadata' && (valueText.length === 0 || valueText === '{}')) {
       if (data.has('metadata')) return null // 重复 metadata: 声明与其他顶层键同口径：整体失败
-      metadataIndent = indent
+      metadataIndent = valueText.length === 0 ? indent : undefined
       data.set('metadata', metadata)
       continue
     }
