@@ -35,6 +35,15 @@ export const localeBundles: LocaleBundles = {
     'import.running': '正在导入…',
     'import.done': '成功导入 {count} 个',
     'import.failures': '失败 {count} 个：',
+    'import.fail.snapshot': 'settings 快照读取失败，已中止导入：{message}',
+    'import.fail.route_taken':
+      'route "{route}" 在导入期间被其他端创建，为避免覆盖已跳过（请刷新后重试）',
+    'import.fail.keyref_taken':
+      '凭据引用 "{ref}" 在导入期间被其他端创建的条目占用，为避免覆盖其 token 已跳过（请刷新后重试）',
+    'import.fail.credential_rolled_back': '{message}（已回滚本轮写入的 provider 条目）',
+    'import.fail.rollback_failed':
+      '{message}（provider 条目回滚失败，Models 页可能留下无凭据条目，请重试导入：{error}）',
+    'import.fail.plan_broken': '计划结构异常，本批导入中止',
   },
   'en': {
     'action.import': 'Import from Claude Code',
@@ -61,5 +70,14 @@ export const localeBundles: LocaleBundles = {
     'import.running': 'Importing…',
     'import.done': 'Imported {count}',
     'import.failures': '{count} failed:',
+    'import.fail.snapshot': 'Failed to read the settings snapshot; import aborted: {message}',
+    'import.fail.route_taken':
+      'route "{route}" was created by another client during the import; skipped to avoid overwriting it (refresh and retry)',
+    'import.fail.keyref_taken':
+      'credential reference "{ref}" is occupied by an entry created during the import; skipped to avoid overwriting its token (refresh and retry)',
+    'import.fail.credential_rolled_back': '{message} (the provider entry written in this run was rolled back)',
+    'import.fail.rollback_failed':
+      '{message} (failed to roll back the provider entry; the Models page may keep a credential-less entry, retry the import: {error})',
+    'import.fail.plan_broken': 'Import plan structure error; the batch was terminated',
   },
 }

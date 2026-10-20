@@ -249,6 +249,18 @@ function resolveIconSize(size: number | undefined): number {
 const GROUP_ROW_HEIGHT = 30
 const GROUP_MAX_HEIGHT = 7 * GROUP_ROW_HEIGHT + 12
 
+/** 浮层列表的 fixed 视口锚点（px；滚动/尺寸变化时由 ProjectGroupInner 重锚）。 */
+export interface ProjectGroupFloatOrigin {
+  readonly top: number
+  readonly left: number
+}
+
+/** 浮层列表 portal 锚定：行按钮之外的宿主节点 + 视口坐标。 */
+export interface ProjectGroupFloatAnchor {
+  readonly target: HTMLElement
+  readonly origin: ProjectGroupFloatOrigin
+}
+
 /** 渲染分组的全部输入（纯渲染面，测试可直接构造）。 */
 export interface ProjectGroupView {
   readonly projects: readonly string[]
@@ -262,6 +274,14 @@ export interface ProjectGroupView {
   readonly glyphRef: RefObject<HTMLSpanElement>
   /** 量测得到的头部拦截层几何（相对定位原点偏移 + 宿主行高）；缺省/失真回退常量。 */
   readonly headerGeometry?: HeaderGeometry | null
+  /**
+   * 浮层列表 portal 锚定（DOM 结构合规）：展开列表渲染到行按钮之外——原生
+   * button 的后代不得含 tabIndex 可聚焦交互项（button 内容模型与 ARIA 嵌套
+   * 交互约束），target 为行外宿主节点、origin 为按行矩形推导的 fixed 视口
+   * 坐标。缺省时回退内联绝对定位（node 测试树内求值保持原语义；生产路径由
+   * ProjectGroupInner 始终提供）。
+   */
+  readonly float?: ProjectGroupFloatAnchor | null
 }
 
 /** iframe 面板组件：src 由调用方经 buildPanelSrc 拼装后传入。 */
@@ -352,10 +372,15 @@ export function measureHeaderGeometry(origin: MeasurableOrigin | null | undefine
   }
 }
 
+/** 浮层列表与分组根的间距（px）：列表顶挂在行下沿之下。 */
+const GROUP_FLOAT_GAP = 12
+/** 浮层列表相对分组根的水平内缩（px）。 */
+const GROUP_FLOAT_INSET = 10
+
 const groupListStyle = (rowWidth: number): CSSProperties => ({
   position: 'absolute',
-  top: 'calc(100% + 12px)',
-  left: -10,
+  top: `calc(100% + ${GROUP_FLOAT_GAP}px)`,
+  left: -GROUP_FLOAT_INSET,
   width: rowWidth,
   maxHeight: `min(${GROUP_MAX_HEIGHT}px, 46vh)`,
   overflowY: 'auto',
@@ -369,6 +394,17 @@ const groupListStyle = (rowWidth: number): CSSProperties => ({
   border: '1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.25))',
   background: 'var(--dsw-specific-sidebar-fill, #fff)',
   boxShadow: 'var(--dsw-elevation-prominent, 0 8px 24px rgba(0,0,0,0.16))',
+})
+
+/**
+ * 浮层列表 portal 态样式：视觉口径同 groupListStyle（同宽/同限高/同阴影），
+ * 定位改按行矩形 fixed 锚定（portal 脱离分组根的布局流后 absolute 原点失效）。
+ */
+const groupFloatListStyle = (origin: ProjectGroupFloatOrigin, rowWidth: number): CSSProperties => ({
+  ...groupListStyle(rowWidth),
+  position: 'fixed',
+  top: origin.top,
+  left: origin.left,
 })
 
 const groupRowStyle = (active: boolean): CSSProperties => ({
@@ -411,8 +447,11 @@ const projectNameStyle: CSSProperties = {
  * - 窄态（收起轨）：仅首字母徽标形态的计数徽标。
  *
  * 布局说明：本组件渲染在 ui-sidebar panellist 行按钮的图标槽内（span.panelGlyph）；
- * 列表以绝对定位浮层挂在行下沿（行按钮所在 nav 的 overflow 可见，仅侧栏列
- * overflow:hidden 兜底裁剪），宽度取量测的 nav 宽度以适配可拖拽侧栏列宽。
+ * 展开列表经 createPortal 渲染到行按钮之外（原生 button 后代不得含 tabIndex
+ * 可聚焦交互项），按行矩形 fixed 锚定挂行下沿，滚动/尺寸变化由 ProjectGroupInner
+ * 重锚；未提供锚定时（node 测试树内求值）回退内联绝对定位（行按钮所在 nav 的
+ * overflow 可见，仅侧栏列 overflow:hidden 兜底裁剪），宽度取量测的 nav 宽度
+ * 以适配可拖拽侧栏列宽。
  */
 export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGroupHandlers): ReactElement {
   if (!view.wide) {
@@ -442,6 +481,57 @@ export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGrou
   }
   // 拦截层几何：量测值优先（抗宿主样式漂移），缺省/失真回退常量。
   const headerGeometry = view.headerGeometry ?? DEFAULT_HEADER_GEOMETRY
+  // 浮层列表：展开时构建；提供 portal 锚定即渲染到行按钮之外（fixed 按行矩形
+  // 锚定），否则回退内联绝对定位（原语义）。点击阻断冒泡两条路径同义保留
+  //（portal 后 DOM 祖先已非行按钮，保留以防锚定缺失的回退路径冒泡触发 selectPanel）。
+  const float = view.float ?? null
+  const list = view.expanded ? (
+    <span
+      data-testid="fenix-projects-list"
+      style={float !== null ? groupFloatListStyle(float.origin, view.rowWidth) : groupListStyle(view.rowWidth)}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {view.projects.length === 0 ? (
+        <span
+          data-testid="fenix-projects-empty"
+          style={{
+            display: 'block',
+            padding: '8px 10px',
+            fontSize: 12,
+            opacity: 0.6,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          暂无项目
+        </span>
+      ) : (
+        view.projects.map((name) => {
+          const badge = projectBadgeComponent(name)({ size: 18 })
+          // 键盘可达：div[role=button] 非原生按钮，tabIndex 0 + Enter/Space 触发选中。
+          return (
+            <div
+              key={name}
+              role="button"
+              tabIndex={0}
+              data-testid={`fenix-project-row-${name}`}
+              data-active={view.activeProject === name || undefined}
+              title={name}
+              onClick={(event) => handlers.selectProject(name, event)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                handlers.selectProject(name, event)
+              }}
+              style={groupRowStyle(view.activeProject === name)}
+            >
+              {badge}
+              <span style={projectNameStyle}>{name}</span>
+            </div>
+          )
+        })
+      )}
+    </span>
+  ) : null
   return (
     <span
       ref={view.glyphRef}
@@ -481,49 +571,7 @@ export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGrou
           cursor: 'pointer',
         }}
       />
-      {view.expanded ? (
-        <span data-testid="fenix-projects-list" style={groupListStyle(view.rowWidth)} onClick={(e) => e.stopPropagation()}>
-          {view.projects.length === 0 ? (
-            <span
-              data-testid="fenix-projects-empty"
-              style={{
-                display: 'block',
-                padding: '8px 10px',
-                fontSize: 12,
-                opacity: 0.6,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              暂无项目
-            </span>
-          ) : (
-            view.projects.map((name) => {
-              const badge = projectBadgeComponent(name)({ size: 18 })
-              // 键盘可达：div[role=button] 非原生按钮，tabIndex 0 + Enter/Space 触发选中。
-              return (
-                <div
-                  key={name}
-                  role="button"
-                  tabIndex={0}
-                  data-testid={`fenix-project-row-${name}`}
-                  data-active={view.activeProject === name || undefined}
-                  title={name}
-                  onClick={(event) => handlers.selectProject(name, event)}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter' && event.key !== ' ') return
-                    event.preventDefault()
-                    handlers.selectProject(name, event)
-                  }}
-                  style={groupRowStyle(view.activeProject === name)}
-                >
-                  {badge}
-                  <span style={projectNameStyle}>{name}</span>
-                </div>
-              )
-            })
-          )}
-        </span>
-      ) : null}
+      {list !== null && float !== null ? createPortal(list, float.target) : list}
     </span>
   )
 }
@@ -532,8 +580,17 @@ export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGrou
 const DEFAULT_ROW_WIDTH = 260
 
 /**
- * 分组块内部组件（hook 层）：订阅分组 store、量测 panellist nav 宽度并把
- * 渲染委派给纯渲染面 renderProjectGroup。
+ * 行宽基准钳制（侧栏列可拖拽调宽）：浮层分组（ProjectGroupInner 量测 nav
+ * 宽度）与 Portal 分区（量测宿主宽度）共用，钳制口径的单一来源，避免
+ * 双实现各自硬编码边界后漂移。
+ */
+export function clampSectionRowWidth(width: number): number {
+  return Math.min(360, Math.max(160, width))
+}
+
+/**
+ * 分组块内部组件（hook 层）：订阅分组 store、量测 panellist nav 宽度与浮层
+ * portal 锚定（行矩形）并把渲染委派给纯渲染面 renderProjectGroup。
  */
 function ProjectGroupInner({
   size,
@@ -547,6 +604,8 @@ function ProjectGroupInner({
   const [rowWidth, setRowWidth] = useState(DEFAULT_ROW_WIDTH)
   // 头部拦截层几何：量测失败保持 null（渲染面回退缺省常量，不拦错位）。
   const [headerGeometry, setHeaderGeometry] = useState<HeaderGeometry | null>(null)
+  // 浮层列表 portal 锚定：行按钮之外宿主（document.body）+ 行矩形视口坐标。
+  const [float, setFloat] = useState<ProjectGroupFloatAnchor | null>(null)
   // 宽态判定：仅宽态分支把 glyphRef 挂到分组根 span（窄态渲染计数徽标、无
   // ref），量测依赖 ref 可得。effect 以 wide 为依赖：首挂窄态量测不成（ref 为
   // null 提前返回）后展开为宽列时重跑补测，避免 rowWidth/headerGeometry 永远
@@ -557,7 +616,7 @@ function ProjectGroupInner({
     const nav = glyphRef.current?.closest('nav')
     if (!(nav instanceof HTMLElement)) return
     const update = (): void => {
-      setRowWidth(Math.min(360, Math.max(160, nav.clientWidth)))
+      setRowWidth(clampSectionRowWidth(nav.clientWidth))
       setHeaderGeometry(measureHeaderGeometry(glyphRef.current))
     }
     update()
@@ -566,6 +625,38 @@ function ProjectGroupInner({
     observer.observe(nav)
     return () => {
       observer.disconnect()
+    }
+  }, [wide])
+
+  // 浮层锚定 effect：列表 portal 到行按钮之外后脱离分组根的布局流，按分组根
+  // span 行矩形（getBoundingClientRect）推导 fixed 视口坐标；滚动（捕获任意
+  // 祖先滚动容器）/窗口尺寸变化时重锚，保持列表挂在行下沿的既有几何关系
+  // （侧栏列拖拽调宽由上方 ResizeObserver → update 同步跟进）。
+  useLayoutEffect(() => {
+    if (!wide) return
+    const glyph = glyphRef.current
+    if (!(glyph instanceof HTMLElement) || document.body === null) return
+    const update = (): void => {
+      const rect = glyph.getBoundingClientRect()
+      // 零矩形（未布局/已断连）不锚定：坏量测不如保留上次量测（同
+      // measureHeaderGeometry 的失真回退口径）。
+      if (rect.height <= 0 && rect.width <= 0) return
+      const origin = { top: rect.bottom + GROUP_FLOAT_GAP, left: rect.left - GROUP_FLOAT_INSET }
+      setFloat((prev) =>
+        prev !== null &&
+        prev.target === document.body &&
+        prev.origin.top === origin.top &&
+        prev.origin.left === origin.left
+          ? prev
+          : { target: document.body, origin },
+      )
+    }
+    update()
+    document.addEventListener('scroll', update, { capture: true, passive: true })
+    window.addEventListener('resize', update, { passive: true })
+    return () => {
+      document.removeEventListener('scroll', update, { capture: true })
+      window.removeEventListener('resize', update)
     }
   }, [wide])
 
@@ -578,6 +669,7 @@ function ProjectGroupInner({
       rowWidth,
       glyphRef,
       headerGeometry,
+      float,
     },
     projectGroupHandlers(projectGroupStore, deps),
   )
@@ -715,11 +807,6 @@ export const SECTION_WIDE_MIN_WIDTH = 120
 /** 宽窄态纯判定（design：Portal 拿不到 renderSlot 的 {wide}，改从宿主宽度推断）。 */
 export function isWideSectionWidth(width: number): boolean {
   return width >= SECTION_WIDE_MIN_WIDTH
-}
-
-/** 分区行宽基准钳制（侧栏列可拖拽调宽）。 */
-export function clampSectionRowWidth(width: number): number {
-  return Math.min(360, Math.max(160, width))
 }
 
 /** 宿主重试巡检周期（ms）：轮询兜底（MutationObserver 之外的最终保底）。 */
@@ -917,6 +1004,8 @@ export function renderProjectSection(view: ProjectSectionView, handlers: Project
  * - 巡检 = `setInterval` 轮询兜底 + MutationObserver（document.body 子树，
  *   去抖）双通道触发同一 `tick`：锚点可达且宿主健康（紧贴锚点之后）则幂等
  *   保持；宿主被移除/漂移则清陈旧宿主重挂（侧栏过渡动画时序竞争自愈）；
+ *   观察器按 portalActive 占停（生效期 disconnect、探测/降级窗口恢复），
+ *   轮询兜底独立运行，分区重挂能力不丢；
  * - 锚点不可达连续 `PORTAL_DEGRADE_FAILURES` 次 → `degraded` 暂停 Portal
  *   渲染，浮层分组自动接管；轮询兜底持续运行，锚点恢复可达即自动重挂并
  *   清除 degraded（可恢复而非永久停用）；
@@ -936,6 +1025,9 @@ function ProjectSectionEntry({
   const [hostWidth, setHostWidth] = useState(0)
   // tick 闭包内读写宿主用 ref（setState 异步，避免重挂竞态下误判健康）。
   const hostRef = useRef<HTMLDivElement | null>(null)
+  // 观察器跨 effect 共享 ref：挂载 effect 创建，占停 effect 按 portalActive
+  // 接管 observe/disconnect（声明序在挂载 effect 之后，首挂即按初始态归位）。
+  const observerRef = useRef<MutationObserver | null>(null)
 
   useLayoutEffect(() => {
     let disposed = false
@@ -996,6 +1088,7 @@ function ProjectSectionEntry({
         if (debounce !== undefined) clearTimeout(debounce)
         debounce = setTimeout(tick, PORTAL_OBSERVER_DEBOUNCE_MS)
       })
+      observerRef.current = observer
       observer.observe(document.body, { childList: true, subtree: true })
     }
     return () => {
@@ -1003,6 +1096,7 @@ function ProjectSectionEntry({
       if (poll !== undefined) clearInterval(poll)
       if (debounce !== undefined) clearTimeout(debounce)
       observer?.disconnect()
+      observerRef.current = null
       detach()
     }
   }, [])
@@ -1023,6 +1117,20 @@ function ProjectSectionEntry({
   }, [host])
 
   const portalActive = isPortalActive(mountState, host)
+
+  // 观察器占停（document.body 全子树监听的开销收敛）：portal 生效期宿主健康
+  // 巡检由轮询兜底独立承担，观察器 disconnect——宿主任意位置的 DOM 插拔
+  // （聊天流式渲染、面板切换等）不再触发去抖 tick；退回探测/降级窗口即恢复
+  // observe，重挂响应不降速。兜底能力不丢：轮询巡检（PORTAL_POLL_INTERVAL_MS）
+  // 持续运行，宿主被移除先经轮询检出并置 portalActive=false，本 effect 随即
+  // 恢复监听（observe 同目标重注册幂等，不会重复回调）。
+  useLayoutEffect(() => {
+    const mutationObserver = observerRef.current
+    if (mutationObserver === null || document.body === null) return
+    if (portalActive) mutationObserver.disconnect()
+    else mutationObserver.observe(document.body, { childList: true, subtree: true })
+  }, [portalActive])
+
   // 锚点图标尺寸随 ui-sidebar 实际请求（宽列 16 / 收起轨 18）；缺省口径与
   // 宽态判定共用 resolveIconSize（收起轨 18，同源窄态降级假设）。
   const anchorIconSize = resolveIconSize(size)

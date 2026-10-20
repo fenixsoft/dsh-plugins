@@ -93,9 +93,10 @@ export function rowState(
  * - 默认对 slug 与既有 providers（或同批已规划 id）冲突的候选加 `-2`/`-3` 后缀；
    已存在行被显式勾选「将更新」时同键覆盖（spec「重复导入为覆盖更新」）。
  * - slug 为空的候选跳过（`unnameable`）。
- * - 同名候选只保留首个、后续同名跳过（`duplicate`）：勾选集/行 key/revealToken
- *   全程以 name 寻址，而 cc-switch 的 providers.name 未见唯一约束，重名行会让
- *   勾选与计划互相串扰。
+ * - 同名候选一律跳过（`duplicate`）：对 scan 全集判定重名（而非勾选过滤后），
+ *   无论勾选组合——勾选集/行 key/revealToken 全程以 name 寻址，而 cc-switch 的
+ *   providers.name 未见唯一约束，仅勾选后到的重名者时若只对勾选集去重，守卫
+ *   不触发，会把先到者的 token 配给后到者的 profile（静默凭据错配）。
  * - keyRef 派生把 `-` 折叠成 `_`，不同 route id 可派生同一凭据引用：与既有
  *   providers 已占用引用或批次内先到者碰撞时，对后到者加 `_2`/`_3` 递增后缀
  *   （`resolveApiKeyEnvConflict`）；覆盖更新例外，沿用既有条目当前引用原位替换。
@@ -119,17 +120,25 @@ export function planImports(
       .map((summary) => summary.apiKeyEnv)
       .filter((value): value is string => typeof value === 'string' && value.length > 0),
   )
-  const seenNames = new Set<string>()
+  // 重名判定对 scan 全集生效：凡同名候选存在（providers.name 未见唯一约束），
+  // 无论勾选组合一律按 duplicate 跳过。revealToken 按 name 寻址，若只在勾选
+  // 过滤后的子集内去重，同名两条候选仅后者被勾选时计划里只剩一条、守卫不触发，
+  // 执行层会把先到者的 token 配给后到者的 profile。
+  const seenAll = new Set<string>()
+  const duplicateNames = new Set<string>()
+  for (const candidate of candidates) {
+    if (seenAll.has(candidate.name)) duplicateNames.add(candidate.name)
+    else seenAll.add(candidate.name)
+  }
   const ops: SettingsPathOp[] = []
   const planned: PlannedImport[] = []
   const skipped: SkippedImport[] = []
   for (const candidate of candidates) {
     if (!selection.names.has(candidate.name)) continue
-    if (seenNames.has(candidate.name)) {
+    if (duplicateNames.has(candidate.name)) {
       skipped.push({ name: candidate.name, reason: 'duplicate' })
       continue
     }
-    seenNames.add(candidate.name)
     if (!candidate.importable) {
       skipped.push({ name: candidate.name, reason: 'not_importable' })
       continue

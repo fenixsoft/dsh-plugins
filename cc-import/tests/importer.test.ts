@@ -90,15 +90,27 @@ describe('已存在判定与冲突解析', () => {
     expect(plan.ops[0]?.path).toEqual(['providers', 'bigmodel-cn-2'])
   })
 
-  it('仍冲突继续 -3；同批重名候选只保留首个，后续同名标 duplicate 跳过', () => {
-    const existing: ExistingProviders = { 'x': {}, 'x-2': {} }
+  it('scan 存在同名的候选一律 duplicate 跳过（revealToken 按 name 寻址，无论勾选组合，防凭据错配）', () => {
     const plan = planImports(
       [candidate('x'), candidate('x')],
       { names: new Set(['x']), updateNames: new Set() },
+      {},
+    )
+    expect(plan.ops).toEqual([])
+    expect(plan.skipped).toEqual([
+      { name: 'x', reason: 'duplicate' },
+      { name: 'x', reason: 'duplicate' },
+    ])
+  })
+
+  it('slug 冲突继续 -3：不同名但 slug 同为 a-b 的候选依次写 a-b-2/a-b-3', () => {
+    const existing: ExistingProviders = { 'a-b': {} }
+    const plan = planImports(
+      [candidate('a.b'), candidate('a-b')],
+      { names: new Set(['a.b', 'a-b']), updateNames: new Set() },
       existing,
     )
-    expect(plan.ops.map((op) => op.path)).toEqual([['providers', 'x-3']])
-    expect(plan.skipped).toEqual([{ name: 'x', reason: 'duplicate' }])
+    expect(plan.ops.map((op) => op.path)).toEqual([['providers', 'a-b-2'], ['providers', 'a-b-3']])
   })
 })
 

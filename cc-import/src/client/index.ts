@@ -13,7 +13,7 @@
 import type { Context, SettingsPathOp } from '@deepseek-ai/cordis'
 import { inject, TYPERT_REMOTE } from './contract.js'
 import { ImportFooterEntry, snapshotFromScan } from './dialog.js'
-import type { DialogSnapshot, ImportOutcome } from './dialog.js'
+import type { DialogSnapshot, ImportFailure, ImportOutcome } from './dialog.js'
 import type { ExistingProviderSummary, ExistingProviders, ImportPlan } from './importer.js'
 import { LOCALE_NS, localeBundles } from './locales.js'
 
@@ -71,23 +71,37 @@ async function readExistingProviders(
  */
 async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutcome> {
   let snapshot: ExistingRead | { ok: false; message: string } = await readExistingProviders(ctx)
-  const failures: { name: string; reason: string }[] = []
+  const failures: ImportFailure[] = []
   let succeeded = 0
   if (!snapshot.ok) {
     // 无快照即无 expectedRevision：继续写会以 last-write-wins 静默覆盖其他端
-    // 的并发改动。失败降级偏保守——整批中止，逐候选记入失败明细。
-    const reason = `settings 快照读取失败，已中止导入：${snapshot.message}`
+    // 的并发改动。失败降级偏保守——整批中止，逐候选记入失败明细。固定文案走
+    // locale 键（随界面语言切换），底层原始错误以 {message} 插值保留原文。
+    const message = snapshot.message
     return {
       succeeded: 0,
-      failures: plan.planned.map((item) => ({ name: item.candidate.name, reason })),
+      failures: plan.planned.map(
+        (item): ImportFailure => ({
+          name: item.candidate.name,
+          reason: 'import.fail.snapshot',
+          params: { message },
+        }),
+      ),
     }
   }
   // ops 与 planned 由 planImports 锁步构造（单一构造源），此处按序配对消费。
   for (let index = 0; index < plan.planned.length; index += 1) {
     const item = plan.planned[index]
     const op = plan.ops[index]
-    // 错位只可能是计划结构被破坏：终止批次而不是写向未知路径。
-    if (item === undefined || op === undefined) break
+    // 错位只可能是计划结构被破坏：终止批次而不是写向未知路径。终止前把剩余
+    // 候选举（含当前项）逐项记入失败明细——既不计成功也不留明细会让它们从
+    // 结果中凭空消失，对话框无法向用户解释「少导入了哪些」。
+    if (item === undefined || op === undefined) {
+      for (const rest of plan.planned.slice(index)) {
+        failures.push({ name: rest.candidate.name, reason: 'import.fail.plan_broken' })
+      }
+      break
+    }
     // 先拆 RemoteResult 信封：信封层失败=调用/传输级；业务联合的 ok=false=
     // host 半的结构化拒绝（candidate_missing / missing_token 等）。
     const envelope = await ctx.remote.ccimport.revealToken(item.candidate.name)
@@ -116,7 +130,8 @@ async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutc
       if (reread.existing[item.routeId] !== undefined && !(item.existed && item.update)) {
         failures.push({
           name: item.candidate.name,
-          reason: `route "${item.routeId}" 在导入期间被其他端创建，为避免覆盖已跳过（请刷新后重试）`,
+          reason: 'import.fail.route_taken',
+          params: { route: item.routeId },
         })
         continue
       }
@@ -134,7 +149,8 @@ async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutc
       if (refOccupied) {
         failures.push({
           name: item.candidate.name,
-          reason: `凭据引用 "${item.keyRef}" 在导入期间被其他端创建的条目占用，为避免覆盖其 token 已跳过（请刷新后重试）`,
+          reason: 'import.fail.keyref_taken',
+          params: { ref: item.keyRef },
         })
         continue
       }
@@ -150,19 +166,28 @@ async function executeImport(ctx: Context, plan: ImportPlan): Promise<ImportOutc
     if (!stored.ok) {
       // 凭据落库失败：本轮刚写入的 provider 条目成了指向空凭据的半配置。
       // 对「本轮自建」的条目（非既有条目的覆盖更新）补一次 unset 回滚，回滚
-      // 成败一并并入失败明细，提示用户可重试导入。
-      let reason = stored.error.message
+      // 成败一并并入失败明细，提示用户可重试导入。固定提示走 locale 键，
+      // stored/reverted 的原始错误以插值参数保留原文；不回滚时保留原始消息。
+      let failure: ImportFailure = { name: item.candidate.name, reason: stored.error.message }
       if (!(item.existed && item.update)) {
         const rollback: SettingsPathOp = { op: 'unset', path: ['providers', item.routeId] }
         const reverted = await ctx.remote.settings.mutate(PI_AI_NS, [rollback], snapshot.revision)
         if (reverted.ok) {
           snapshot = { ...snapshot, revision: reverted.value.revision }
-          reason = `${reason}（已回滚本轮写入的 provider 条目）`
+          failure = {
+            name: item.candidate.name,
+            reason: 'import.fail.credential_rolled_back',
+            params: { message: stored.error.message },
+          }
         } else {
-          reason = `${reason}（provider 条目回滚失败，Models 页可能留下无凭据条目，请重试导入：${reverted.error.message}）`
+          failure = {
+            name: item.candidate.name,
+            reason: 'import.fail.rollback_failed',
+            params: { message: stored.error.message, error: reverted.error.message },
+          }
         }
       }
-      failures.push({ name: item.candidate.name, reason })
+      failures.push(failure)
       continue
     }
     succeeded += 1

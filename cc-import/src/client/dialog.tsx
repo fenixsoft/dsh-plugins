@@ -19,10 +19,27 @@ export type DialogSnapshot =
   | { readonly ok: true; readonly candidates: readonly ScanCandidate[]; readonly existing: ExistingProviders }
   | { readonly ok: false; readonly message: string }
 
+/**
+ * 一条失败明细。reason 两态：`import.fail.` 前缀 = 固定类失败的 locale 键
+ * （渲染侧按当前语言取词，插值 params；remote/envelope 的原始错误消息作为
+ * 插值参数嵌入，原文不丢失）；其余 = 动态类失败的原始错误消息，原样展示。
+ */
+export interface ImportFailure {
+  readonly name: string
+  readonly reason: string
+  /** locale 键的插值参数（{name} 形态占位符）。 */
+  readonly params?: Readonly<Record<string, string | number>>
+}
+
 /** 一次批次导入的结果反馈。 */
 export interface ImportOutcome {
   readonly succeeded: number
-  readonly failures: readonly { readonly name: string; readonly reason: string }[]
+  readonly failures: readonly ImportFailure[]
+}
+
+/** 失败说明取词：locale 键按界面当前语言翻译并插值，原始消息原样透传。 */
+function failureReasonText(t: Translate, failure: ImportFailure): string {
+  return failure.reason.startsWith('import.fail.') ? t(failure.reason, failure.params) : failure.reason
 }
 
 export interface ImportDialogProps {
@@ -310,7 +327,7 @@ export function ImportDialog({ t, open, onClose, loadSnapshot, runImport }: Impo
               <ul>
                 {outcome.failures.map((failure) => (
                   <li key={failure.name}>
-                    {failure.name}: {failure.reason}
+                    {failure.name}: {failureReasonText(t, failure)}
                   </li>
                 ))}
               </ul>

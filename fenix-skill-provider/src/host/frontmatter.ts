@@ -32,13 +32,15 @@ export interface ParsedFrontmatter {
 
 /**
  * 解析 SKILL.md 顶部 `---` 围栏 frontmatter。
- * - 首行必须为 `---`（容忍 `\r`），且存在收尾 `---` 行，否则返回 null；
+ * - 首行必须为 `---`（容忍行首 UTF-8 BOM 与 `\r`），且存在收尾 `---` 行，否则返回 null；
  * - 逐行 `key: value`，value 去首尾空白与成对引号；布尔键取
  *   true/false（大小写不敏感）与 1/0，其余值形态视为解析失败返回 null；
  * - `metadata:` 之后比首键更深缩进的 `key: value` 行归入 metadata 扁平键值；
  * - 出现无法理解的行（无冒号的非空行）整体视为解析失败返回 null。
  */
 export function parseFrontmatter(raw: string): ParsedFrontmatter | null {
+  // 行首 UTF-8 BOM（U+FEFF，Windows 编辑器等场景写出）会让首行成为 '\uFEFF---' 而整体判 null，解析前统一剥除
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1)
   const firstLineEnd = raw.indexOf('\n')
   if (firstLineEnd < 0) return null
   if (raw.slice(0, firstLineEnd).replace(/\r$/, '') !== '---') return null
@@ -178,10 +180,12 @@ function parseScalar(text: string): string | boolean | null {
     const inner = text.slice(1, -1)
     return inner.includes(quote) ? null : inner
   }
-  // 多行 / 流集合（[ {）起始形态不支持，整体拒绝；# 的拒绝收窄为「注释起始」：
+  // 多行 / 集合起始形态不支持，整体拒绝：流集合（[ {）与块序列（- 后随空白或行尾，含裸 -）
+  // 同口径拒绝；# 的拒绝收窄为「注释起始」：
   // 仅值首（YAML `key: # …` 取到的是注释而非值）或空白后的 # 拒绝；
-  // 值中部的 # / [ / { 是合法字面量（如「支持 C# 项目」「支持 [实验] 标签」），放行。
+  // 值中部的 # / [ / { 是合法字面量（如「支持 C# 项目」「支持 [实验] 标签」），放行；
+  // - 后跟非空白（如负数 -1、-0.5、普通标量 -foo）不匹配，正常放行。
   // [fenix-ignore:5ae61ac429c4] 成对引号值已在上方引号分支提前返回，引号内 # 不经过本检查，所述「引号值含空格+# 被拒」不成立
-  if (/(?:^|\s)#|^[{[]/.test(text)) return null
+  if (/(?:^|\s)#|^[{[]|^-(?:\s|$)/.test(text)) return null
   return text
 }
