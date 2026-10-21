@@ -115,6 +115,11 @@ export function resolveApiKeyEnvConflict(keyRef: string, usedRefs: ReadonlySet<s
  * `[1M]` 后缀拆分：`glm-5.3-flash[1M]` → `{ id: "glm-5.3-flash", contextWindow: 1000000 }`。
  * 无后缀只给 id、不设 contextWindow；拆分适用于任何来源键的模型值。
  * 空白与空 id 原样返回（由调用方按缺模型处理）。
+ *
+ * 隐含契约：本函数只产 1M 档（1_000_000）；client 侧 `model.contextWindow`
+ * 文案硬编码「1M 上下文 / 1M context」（src/client/locales.ts）与之耦合——
+ * 未来扩展其他窗口档位（如 [200K]）时，须同步把该文案改为占位符形态
+ * （如「{count} 上下文」）并由渲染侧传入具体数值。
  */
 export function splitModelAlias(model: string): ModelRow {
   const trimmed = model.trim()
