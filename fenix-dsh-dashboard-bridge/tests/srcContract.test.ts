@@ -434,6 +434,16 @@ describe('「项目」分组块（降级浮层路径：纯渲染 + 交互契约�
     expect(selected).toBe(0)
   })
 
+  it('头部拦截层宽度：headerWidth 缺省回退 rowWidth；提供时用原始量测（不受 360 钳制）', () => {
+    const fallback = renderProjectGroup(groupView(), { toggleHeader: () => {}, selectProject: () => {} })
+    const fallbackHeader = collectByTestId(fallback, 'fenix-projects-header')[0]
+    expect((fallbackHeader?.props?.['style'] as Record<string, unknown>)?.['width']).toBe(260)
+
+    const wide = renderProjectGroup(groupView({ headerWidth: 420 }), { toggleHeader: () => {}, selectProject: () => {} })
+    const wideHeader = collectByTestId(wide, 'fenix-projects-header')[0]
+    expect((wideHeader?.props?.['style'] as Record<string, unknown>)?.['width']).toBe(420)
+  })
+
   it('projectGroupHandlers：stopPropagation 后分别落 store 切换与 deps.selectProject', () => {
     const selected: string[] = []
     const handlers = projectGroupHandlers(projectGroupStore, { selectProject: (name) => selected.push(name) })

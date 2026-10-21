@@ -270,6 +270,13 @@ export interface ProjectGroupView {
   readonly wide: boolean
   /** 量测得到的行宽基准（px；侧栏列可拖拽调宽，随 ResizeObserver 更新）。 */
   readonly rowWidth: number
+  /**
+   * 头部拦截层宽度（px；量测的原始 nav 宽度，不钳 360）：与列表宽度的
+   * clampSectionRowWidth 钳制解耦——侧栏列拖宽超过 360px 时拦截层仍须盖住
+   * 整行，否则行尾点击穿透为行按钮的 selectPanel。缺省回退 rowWidth
+   * （node 测试树直构视图保持原语义；生产路径由 ProjectGroupInner 始终提供）。
+   */
+  readonly headerWidth?: number
   /** 挂到分组根 span 的 ref（内部量测 nav 宽度用）。 */
   readonly glyphRef: RefObject<HTMLSpanElement>
   /** 量测得到的头部拦截层几何（相对定位原点偏移 + 宿主行高）；缺省/失真回退常量。 */
@@ -440,6 +447,42 @@ const projectNameStyle: CSSProperties = {
 }
 
 /**
+ * 项目行渲染工厂（浮层行与分区宽/窄态行共用）：统一 role=button + tabIndex 0 +
+ * Enter/Space 触发 + stopPropagation（经 handlers.selectProject）的键盘可达与
+ * 事件阻断契约，仅行样式与内容形态（徽标+名称 / 仅徽标）由调用方参数化——
+ * 三处各自内联实现会在契约演进时漂移（漏改一处即行为分叉）。
+ */
+function projectRow(
+  name: string,
+  active: boolean,
+  handlers: ProjectGroupHandlers,
+  rowStyle: (active: boolean) => CSSProperties,
+  withName: boolean,
+): ReactElement {
+  // 键盘可达：div[role=button] 非原生按钮，tabIndex 0 + Enter/Space 触发选中。
+  return (
+    <div
+      key={name}
+      role="button"
+      tabIndex={0}
+      data-testid={`fenix-project-row-${name}`}
+      data-active={active || undefined}
+      title={name}
+      onClick={(event) => handlers.selectProject(name, event)}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        handlers.selectProject(name, event)
+      }}
+      style={rowStyle(active)}
+    >
+      {projectBadgeComponent(name)({ size: 18 })}
+      {withName ? <span style={projectNameStyle}>{name}</span> : null}
+    </div>
+  )
+}
+
+/**
  * 「项目」分组纯渲染面（无 hook，测试可直接求值元素树）：
  * - 宽态：行内 chevron 指示 + 头部行拦截层（仅切换展开/折叠，阻断行按钮的
  *   selectPanel）+ 展开时的限高滚动项目行列表（首字母徽标 + 项目名，当前项
@@ -481,6 +524,9 @@ export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGrou
   }
   // 拦截层几何：量测值优先（抗宿主样式漂移），缺省/失真回退常量。
   const headerGeometry = view.headerGeometry ?? DEFAULT_HEADER_GEOMETRY
+  // 拦截层宽度：原始 nav 量测优先（不钳 360——宽侧栏下行尾点击不得穿透为
+  // selectPanel），缺省回退行宽基准。
+  const headerWidth = view.headerWidth ?? view.rowWidth
   // 浮层列表：展开时构建；提供 portal 锚定即渲染到行按钮之外（fixed 按行矩形
   // 锚定），否则回退内联绝对定位（原语义）。点击阻断冒泡两条路径同义保留
   //（portal 后 DOM 祖先已非行按钮，保留以防锚定缺失的回退路径冒泡触发 selectPanel）。
@@ -505,30 +551,9 @@ export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGrou
           暂无项目
         </span>
       ) : (
-        view.projects.map((name) => {
-          const badge = projectBadgeComponent(name)({ size: 18 })
-          // 键盘可达：div[role=button] 非原生按钮，tabIndex 0 + Enter/Space 触发选中。
-          return (
-            <div
-              key={name}
-              role="button"
-              tabIndex={0}
-              data-testid={`fenix-project-row-${name}`}
-              data-active={view.activeProject === name || undefined}
-              title={name}
-              onClick={(event) => handlers.selectProject(name, event)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') return
-                event.preventDefault()
-                handlers.selectProject(name, event)
-              }}
-              style={groupRowStyle(view.activeProject === name)}
-            >
-              {badge}
-              <span style={projectNameStyle}>{name}</span>
-            </div>
-          )
-        })
+        view.projects.map((name) =>
+          projectRow(name, view.activeProject === name, handlers, groupRowStyle, true),
+        )
       )}
     </span>
   ) : null
@@ -566,7 +591,7 @@ export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGrou
           position: 'absolute',
           top: headerGeometry.top,
           left: headerGeometry.left,
-          width: view.rowWidth,
+          width: headerWidth,
           height: headerGeometry.height,
           cursor: 'pointer',
         }}
@@ -602,6 +627,8 @@ function ProjectGroupInner({
   const snapshot = useSyncExternalStore(projectGroupStore.subscribe, projectGroupStore.getSnapshot)
   const glyphRef = useRef<HTMLSpanElement>(null)
   const [rowWidth, setRowWidth] = useState(DEFAULT_ROW_WIDTH)
+  // 拦截层宽度用原始 nav 宽度（不钳 360）：360 钳制口径仅约束浮层/分区列表宽度。
+  const [navWidth, setNavWidth] = useState(DEFAULT_ROW_WIDTH)
   // 头部拦截层几何：量测失败保持 null（渲染面回退缺省常量，不拦错位）。
   const [headerGeometry, setHeaderGeometry] = useState<HeaderGeometry | null>(null)
   // 浮层列表 portal 锚定：行按钮之外宿主（document.body）+ 行矩形视口坐标。
@@ -616,6 +643,7 @@ function ProjectGroupInner({
     const nav = glyphRef.current?.closest('nav')
     if (!(nav instanceof HTMLElement)) return
     const update = (): void => {
+      setNavWidth(nav.clientWidth)
       setRowWidth(clampSectionRowWidth(nav.clientWidth))
       setHeaderGeometry(measureHeaderGeometry(glyphRef.current))
     }
@@ -667,6 +695,7 @@ function ProjectGroupInner({
       activeProject: snapshot.activeProject,
       wide,
       rowWidth,
+      headerWidth: navWidth,
       glyphRef,
       headerGeometry,
       float,
@@ -883,61 +912,14 @@ const sectionRailRowStyle = (active: boolean): CSSProperties => ({
   background: active ? 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.18))' : 'transparent',
 })
 
-/** 宽态分区行（首字母徽标 + 项目名，当前项高亮）。 */
-function sectionRow(
-  name: string,
-  active: boolean,
-  handlers: ProjectGroupHandlers,
-): ReactElement {
-  // 键盘可达：div[role=button] 非原生按钮，tabIndex 0 + Enter/Space 触发选中。
-  return (
-    <div
-      key={name}
-      role="button"
-      tabIndex={0}
-      data-testid={`fenix-project-row-${name}`}
-      data-active={active || undefined}
-      title={name}
-      onClick={(event) => handlers.selectProject(name, event)}
-      onKeyDown={(event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return
-        event.preventDefault()
-        handlers.selectProject(name, event)
-      }}
-      style={groupRowStyle(active)}
-    >
-      {projectBadgeComponent(name)({ size: 18 })}
-      <span style={projectNameStyle}>{name}</span>
-    </div>
-  )
+/** 宽态分区行（首字母徽标 + 项目名，当前项高亮）：复用项目行渲染工厂。 */
+function sectionRow(name: string, active: boolean, handlers: ProjectGroupHandlers): ReactElement {
+  return projectRow(name, active, handlers, groupRowStyle, true)
 }
 
-/** 窄态分区行（徽标栈：仅首字母徽标，无项目名文本，无横向溢出）。 */
-function sectionRailRow(
-  name: string,
-  active: boolean,
-  handlers: ProjectGroupHandlers,
-): ReactElement {
-  // 键盘可达：div[role=button] 非原生按钮，tabIndex 0 + Enter/Space 触发选中。
-  return (
-    <div
-      key={name}
-      role="button"
-      tabIndex={0}
-      data-testid={`fenix-project-row-${name}`}
-      data-active={active || undefined}
-      title={name}
-      onClick={(event) => handlers.selectProject(name, event)}
-      onKeyDown={(event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return
-        event.preventDefault()
-        handlers.selectProject(name, event)
-      }}
-      style={sectionRailRowStyle(active)}
-    >
-      {projectBadgeComponent(name)({ size: 18 })}
-    </div>
-  )
+/** 窄态分区行（徽标栈：仅首字母徽标，无项目名文本，无横向溢出）：复用项目行渲染工厂。 */
+function sectionRailRow(name: string, active: boolean, handlers: ProjectGroupHandlers): ReactElement {
+  return projectRow(name, active, handlers, sectionRailRowStyle, false)
 }
 
 /**
