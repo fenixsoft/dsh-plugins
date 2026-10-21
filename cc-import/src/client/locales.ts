@@ -29,6 +29,8 @@ export const localeBundles: LocaleBundles = {
     'skip.missing_base_url': '缺少 ANTHROPIC_BASE_URL',
     'skip.missing_token': '缺少 ANTHROPIC_AUTH_TOKEN',
     'skip.missing_model': '未配置模型（先在 cc-switch 补模型再导）',
+    // 「1M」与 splitModelAlias 只产 1_000_000 的隐含契约耦合（src/shared/mapping.ts）；
+    // 扩展其他窗口档位时改占位符形态并由渲染侧传值。
     'model.contextWindow': '1M 上下文',
     'scan.empty': 'cc-switch 没有可导入的 claude provider',
     'scan.failed': '扫描失败：{message}',
@@ -64,6 +66,8 @@ export const localeBundles: LocaleBundles = {
     'skip.missing_base_url': 'Missing ANTHROPIC_BASE_URL',
     'skip.missing_token': 'Missing ANTHROPIC_AUTH_TOKEN',
     'skip.missing_model': 'No model configured (add one in cc-switch first)',
+    // "1M" is coupled to splitModelAlias producing only 1_000_000 (src/shared/mapping.ts);
+    // switch to a placeholder + caller-supplied value when more window tiers are added.
     'model.contextWindow': '1M context',
     'scan.empty': 'No importable claude provider in cc-switch',
     'scan.failed': 'Scan failed: {message}',
