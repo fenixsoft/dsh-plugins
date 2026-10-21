@@ -251,4 +251,13 @@ describe('parseFrontmatter', () => {
     expect(parseFrontmatter('---\nname: a\ndescription: # 注释即空值\n---\n正文')).toBeNull()
     expect(parseFrontmatter('---\nname: a\ndescription: 值 # 尾部注释\n---\n正文')).toBeNull()
   })
+
+  it('块标量指示符（| 与 > 及量化/折叠后缀）起始的值整体拒绝；值中部 | > 是合法字面量', () => {
+    expect(parseFrontmatter('---\nname: a\ndescription: |\n---\n正文')).toBeNull()
+    expect(parseFrontmatter('---\nname: a\ndescription: >\n---\n正文')).toBeNull()
+    expect(parseFrontmatter('---\nname: a\ndescription: >-\n---\n正文')).toBeNull()
+    expect(parseFrontmatter('---\nname: a\ndescription: |2\n---\n正文')).toBeNull()
+    const parsed = parseFrontmatter('---\nname: a\ndescription: 竖线|与大于>号\n---\n正文')
+    expect(parsed?.description).toBe('竖线|与大于>号')
+  })
 })
