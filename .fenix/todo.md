@@ -271,3 +271,38 @@
   - 证据：本窗起点 gitStatus 快照与我会话内 git status --porcelain 输出均确认 ?? .claude/ 仍在；我以 git check-ignore 核实 .claude/ 未被 .gitignore 覆盖；.fenix/stray_untracked_registry.json 该集合 escalated_signal_at 仍为空（升级信号从未发出），首现提示 maintree_untracked_stray_first_sight（untracked 散件首现一次性提示，info 级只提示不处置）2026-10-14T02:33:49Z 自带的 gitignore 草案至今未执行。
   - 调查评估：问题源是主树散件盘点链（maintree-stray-wip-sweep）。已核实：滞留进入第 8 天，10-19/10-20/10-21 既有条目点名的机制缺口（低于阈值集合仅首现提示一次、无龄期展示与超时跟进）无任何变化，短期收口动作（按草案追加 ignore 或显式入库）零成本可做而未做。根因归属：机制缺口（提示无消费闭环），非新增失误。与存量工作关系：既有条已给两个修法，本窗纯延续留痕、无新增事实。结论：收口动作一行配置即可，机制补强沿既有条推进即可。
   - 建议：同既有条：短期核对 .claude/ 归属后按首现提示草案追加进 .gitignore，或显式入库；机制上把低于阈值的 untracked 散件纳入带龄期的待办清单并超时重复提醒。
+
+## 2026-10-23
+
+### 浪费
+- **评审 run 单轮 API 停滞 513.6 秒创日志新高，占墙钟 86%（第 6 窗延续）**
+  - 影响：周期评审 run code-review-1792688525（每日凌晨对上窗变更产出台账的评审件）被单轮 API 停滞（stall，单轮 API 往返超 120 秒阈值的纯等待）拖住 513.6 秒，占其 595.4 秒墙钟的 86.3%，创日志史上单轮往返新高（前纪录 484.3 秒）；评审件停滞白等占比连续 6 窗记录在案：57%→79.8%→90.7%→78.9%→90.6%→86.3%，复发敞口为每窗评审白等 6-12 分钟。
+  - 证据：fenixd.log 6431 行（2026-10-22T17:10:53Z）「API round-trip stall: 513.6s (round #5 > 120s)」grade=warning-escalated（停滞分级中的需升级关注档）；6432 行汇总「10 rounds, median 4.2s, p90 57.9s, max 513.6s, stalls>60s=1」——单轮约为中位往返的 122 倍；6434 行显示 provider 为 bigmodel.cn；数据摘要第 6 节 api-stall 记录（total=513.6s）与日志一致。
+  - 调查评估：问题源是每日凌晨周期评审→修复链（code-review→code-fix）。已核实：日志与数据摘要数字一致；run 终态 success 且产出真实（6436 行 inserted=5，5 条台账条目经修复提交 8732450/7f3d5e4/5564f76 随 merge 94e57f6 于 10-23 01:21 合入主树），损失纯为墙钟空等、无 token 报废；run 归档内无 in-place retry（原地重试）与 provider switched（换供应商）记录，纯静等。根因维持形态层结论：单轮数百秒长尾的上游网关排队、长上下文推理变慢、本地网络三假说并存——停滞轮的上下文规模仍无留痕，证据不足以裁决（与前 5 窗同形态，不单独归因）。与存量工作关系：10-17 立项方向（停滞进 admin 信号面+受控重试）至本窗第 6 次复现仍未落地——warning-escalated 已触发而数据摘要第 3 节 admin 信号 0 条；本窗新增事实仅「单轮 513.6 秒破纪录」，无新根因信息。结论：延续留痕维持可见性，沿既有条推进即可，无需另立方向。
+  - 建议：同既有条：api_round_stall（单轮 API 往返超 120 秒的停滞事件）的 warning-escalated 写入 admin 信号面并触发一次受控重试（该轮重发或收窄上下文）；停滞事件补记当轮上下文规模与 provider 信息，积累归因证据。
+
+### 失误
+- **自省收尾 push 无远程必败第 8 次，remote 预检仍未加（延续）**
+  - 影响：每日自省收尾的 git push 在仓库无远程配置的前提下必然失败，本窗起点（10-22 02:08:15 自省收尾）落第 8 条必败 WARNING；commit 均已产生、无数据损失，仅每日空跑一次必败步骤并持续污染日志告警面。
+  - 证据：fenixd.log 5953 行 WARNING self_review「git push 失败（降级 WARNING，commit 已产生）: fatal: No configured push destination」，时间 2026-10-21T18:08:15Z（本地 10-22 02:08:15，恰为本窗起点收尾时点）；我以 git remote -v 核实 /root/dsh-plugins 仍无任何远程配置（输出为空）。
+  - 调查评估：问题源是每日自省链路（self_review）的收尾脚本。已核实：10-19 既有条建议（push 前查 remote，为空即跳过并记 INFO）至本窗仍未落地，失败被「降级 WARNING」设计静默容忍；我全量聚合窗口内 WARNING 仅 3 族共 7 条（push 必败 1、陈旧代码自愈重启 5、API 停滞 1），本条是其中唯一的执行面必败路径。根因归属：系统性配置缺口（收尾步骤按「有远程」假设写死），非单次执行失误。与存量工作关系：10-19/10-20/10-21/10-22 四条既有条目已完整覆盖根因与修法，本窗仅新增第 8 条实例，无新信息。结论：改动成本极低（收尾前一次 remote 检查），连续第 5 窗点名应尽快落地。
+  - 建议：self_review 收尾先查 git remote：为空即跳过 push 并记 INFO「无远程，仅本地提交」；确有异地备份需求则补配远程，二选一消除每日必败路径。
+
+### 可改进
+- **停滞升级未接处置面、终态停滞指标清零，双缺口第 3 窗延续**
+  - 影响：复发敞口：warning 级停滞升级（warning-escalated）发生后仍无任何处置入口——本窗 513.6 秒破纪录停滞已升级而数据摘要第 3 节 admin 信号仍 0 条；叠加终态 run metrics 停滞字段清零 bug，下游（预算统计、重派判定、离群初筛）在终态行完全看不到停滞，每窗复发即白等 500-750 秒无干预。
+  - 证据：终态清零新证据：fenixd.log 6432 行过程指标（code-review-1792688525：10 轮/1 停滞/max 513.6 秒）与 6434 行终态 run metrics（latency_rounds=0、latency_stalls=0、latency_max=null）同 run 自相矛盾；code-fix-1792689120（台账自动修复批处理 run）同形态（6443 行 51 轮/1 停滞/61.7 秒 对 6444 行全 0/null）；升级断链证据：6431 行 grade=warning-escalated 与数据摘要第 3 节「信号 0 条」并存。
+  - 调查评估：问题源是评审→修复链的停滞观测处置闭环。已核实：两 run 的过程/终态指标行矛盾形态与 10-20/10-21/10-22 三窗点名时完全一致，处置断链形态也与前三窗一致。根因归属：均为系统性缺口（升级事件断在「日志→信号面」环节；终态指标行未透传过程指标），非执行失误。与存量工作关系：10-21 既有改进条已给出完整改法（warning 停滞写 admin 信号面、触发受控重试、终态 metrics 如实透传），10-22 为第 2 窗延续，本窗第 3 窗，无新缺口信息。结论：两处均为小改，够格直接起草进化提案；本条与 waste 条目互为表里（同一事件的记录面与处置面）。
+  - 建议：同 10-21 既有条：api_round_stall 的 warning-escalated 写入 admin 信号面并触发一次受控重试；run 收尾落盘的终态 metrics 如实透传 latency_rounds/latency_stalls/latency_max，消除终态清零。
+
+- **.claude/ 散件第 9 天滞留主树，ignore 草案仍未执行（延续）**
+  - 影响：复发敞口：主树 untracked（未跟踪）散件目录 .claude/（含 harness agent 定义与运行时 worktree 目录）自 10-14 滞留第 9 天，仍低于散件告警阈值（缺省 5 条目）、无任何跟进动作；持续污染每次 git status 与 worktree diff 的状态面。
+  - 证据：本窗起点 gitStatus 快照仍记「?? .claude/」；我以 git status --porcelain 与 git check-ignore 核实：该目录仍在且未被 .gitignore 覆盖；.fenix/stray_untracked_registry.json 中该集合的升级信号时间戳仍为空（首现提示 maintree_untracked_stray_first_sight，untracked 散件首现一次性提示，2026-10-14 自带的 gitignore 草案至今未执行）。
+  - 调查评估：问题源是主树散件盘点链（maintree-stray-wip-sweep）。已核实：10-19/10-20/10-21/10-22 四条既有条目点名的机制缺口（低于阈值集合仅首现提示一次、无龄期展示与超时跟进）无变化，短期收口动作零成本可做而未做。根因归属：机制缺口（提示无消费闭环），非新增失误。与存量工作关系：既有条已给两个修法，本窗纯延续、无新增事实。结论：一行配置即可收口，机制补强沿既有条推进。
+  - 建议：同既有条：核对 .claude/ 归属后按首现提示草案追加进 .gitignore，或显式入库；机制上把低于阈值的 untracked 散件纳入带龄期待办清单并超时重复提醒。
+
+- **全部 6 个 SPEC 终态仍滞留活跃区 8-9 天，归档区从未启用（新）**
+  - 影响：活跃区对「在飞工作」的辨识价值归零：STATE 每日快照连续多日输出同一份「blocked: 1, done: 5」静态噪声（本窗数据摘要第 1 节即此），最新 done SPEC 已滞留约 8 天；无直接经济损失，属状态面卫生与信号稀释问题。
+  - 证据：STATE.md 5 个 done SPEC（add-cc-import-plugin、add-dsh-dashboard-bridge、add-fenix-skill-provider-plugin、polish-dsh-plugins-ui、bridge-projects-inline-section）的 updated 停在 2026-10-14 04:38 ~ 10-15 12:53；spec/changes/ 现存 6 个目录全部对应终态 SPEC（上述 5 done + verify-dsh-plugins-live 冻结 blocked，后者已由 10-17 既有条目点名）；我 ls 核实 spec/archive/ 为空——项目 10-14 启动以来从未归档过任何 SPEC。
+  - 调查评估：问题源是 SPEC 生命周期的收尾环节（归档）。已核实：done 件交付后 6.5-9 天无任何归档动作，.fenix/todo.md 历史也从未出现过 done 归档类条目。与存量关系：10-17 既有条目只覆盖 blocked 件清算，done 件归档滞留未被点名过，互补不重复。根因归属：机制缺口（归档依赖人工调用 fenix-archive skill，日终对账只盯 blocked 不看终态超龄），非执行失误。结论：低危卫生项——一次批量归档即可清零存量；鉴于本工程近期无人工介入节奏，机制上值得并入日终对账。
+  - 建议：用 fenix-archive 批量归档 5 个 done SPEC；daemon 日终对账增加「终态超 48 小时未归档」提示面（可与 10-17 既有条的 blocked 对账建议合并为同一对账点）。
