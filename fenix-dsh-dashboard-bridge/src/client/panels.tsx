@@ -316,7 +316,8 @@ export function DashboardPanel({ src }: { readonly src: string }): ReactElement 
           minHeight: 0,
           border: 'none',
           display: 'block',
-          backgroundColor: '#fff',
+          // 底色随宿主主题走变量口径（浮层列表同源 sidebar-fill 变量），缺省回退纯白。
+          backgroundColor: 'var(--dsw-specific-sidebar-fill, #fff)',
         }}
       />
     </div>
@@ -498,6 +499,9 @@ function projectRow(
  */
 export function renderProjectGroup(view: ProjectGroupView, handlers: ProjectGroupHandlers): ReactElement {
   if (!view.wide) {
+    // 计数徽标刻意常显（含 0）：徽标是收起轨上「项目」入口的唯一视觉标识，
+    // 空项目回 null 会留空图标槽；「0」即分组空态的收起轨形态（宽态对应
+    // 「暂无项目」提示），与分区窄态「空项目不渲染空壳容器」的分叉属有意设计。
     return (
       <span
         data-testid="fenix-projects-rail-count"
