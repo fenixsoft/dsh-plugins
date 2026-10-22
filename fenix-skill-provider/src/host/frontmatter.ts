@@ -139,7 +139,8 @@ function parseKeyValueBlock(block: string): Map<string, string | boolean | Recor
 
     if (isNested && metadataIndent !== undefined) {
       if (indent <= metadataIndent) return null // 嵌套块已结束却仍有深缩进行
-      if (key in metadata) return null
+      if (key === '__proto__') return null // 原型链危险键显式拒绝：自有属性判重不再顺带拦截，保持 fail-closed
+      if (Object.hasOwn(metadata, key)) return null // 自有属性判重：`in` 沿原型链命中 toString 等继承属性会误拒合法键
       const value = parseScalar(valueText)
       if (value === null) return null
       metadata[key] = value
@@ -187,7 +188,10 @@ function parseScalar(text: string): string | boolean | null {
   // 仅值首（YAML `key: # …` 取到的是注释而非值）或空白后的 # 拒绝；
   // 值中部的 # / [ / { / | / > 是合法字面量（如「支持 C# 项目」「a|b」），放行；
   // - 后跟非空白（如负数 -1、-0.5、普通标量 -foo）不匹配，正常放行。
+  // 冒号+空白（如 `description: 注意: 事项`）在严格 YAML 中是非法 plain scalar，
+  // 同口径整体拒绝，避免「本解析放行、完整 YAML 消费端报错」的分歧（成对引号值
+  // 已在上方引号分支提前返回、不受此限）；`:` 后非空白（如 http://example.com）仍放行。
   // [fenix-ignore:5ae61ac429c4] 成对引号值已在上方引号分支提前返回，引号内 # 不经过本检查，所述「引号值含空格+# 被拒」不成立
-  if (/(?:^|\s)#|^[{[]|^-(?:\s|$)|^[|>](?:$|\s|[+-]|\d)/.test(text)) return null
+  if (/(?:^|\s)#|:\s|^[{[]|^-(?:\s|$)|^[|>](?:$|\s|[+-]|\d)/.test(text)) return null
   return text
 }
