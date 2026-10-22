@@ -114,7 +114,8 @@ export function resolveApiKeyEnvConflict(keyRef: string, usedRefs: ReadonlySet<s
 /**
  * `[1M]` 后缀拆分：`glm-5.3-flash[1M]` → `{ id: "glm-5.3-flash", contextWindow: 1000000 }`。
  * 无后缀只给 id、不设 contextWindow；拆分适用于任何来源键的模型值。
- * 空白与空 id 原样返回（由调用方按缺模型处理）。
+ * 空白、空 id 与仅后缀值（如 `[1M]`，缺基础模型 id）都原样返回空 id（由调用方
+ * 按缺模型处理）。
  *
  * 隐含契约：本函数只产 1M 档（1_000_000）；client 侧 `model.contextWindow`
  * 文案硬编码「1M 上下文 / 1M context」（src/client/locales.ts）与之耦合——
@@ -123,9 +124,12 @@ export function resolveApiKeyEnvConflict(keyRef: string, usedRefs: ReadonlySet<s
  */
 export function splitModelAlias(model: string): ModelRow {
   const trimmed = model.trim()
-  const match = /^(.*\S)\s*\[1M\]$/.exec(trimmed)
+  const match = /^(.*?)\s*\[1M\]$/.exec(trimmed)
   if (match === null) return { id: trimmed }
-  return { id: (match[1] ?? '').trim(), contextWindow: 1_000_000 }
+  const id = (match[1] ?? '').trim()
+  // 值仅为后缀（缺基础模型 id）：无有效 id，按空 id 返回由调用方按缺模型处理。
+  if (id.length === 0) return { id: '' }
+  return { id, contextWindow: 1_000_000 }
 }
 
 /** env 值判空：非字符串 / null / undefined / 纯空白都算缺失。 */
@@ -138,12 +142,17 @@ export function envValue(env: Readonly<Record<string, unknown>>, key: string): s
 
 /**
  * 候选模型解析链：`ANTHROPIC_MODEL` → `ANTHROPIC_DEFAULT_OPUS_MODEL` → null。
- * 两键均缺失或为空才返回 null（调用方标 `missing_model`）。
+ * 两键均缺失、为空或仅为 `[1M]` 后缀（缺基础模型 id）才返回 null（调用方标
+ * `missing_model`）。
  */
 export function resolveCandidateModel(env: Readonly<Record<string, unknown>>): string | null {
   for (const key of MODEL_ENV_KEYS) {
     const value = envValue(env, key)
-    if (value !== null) return value
+    if (value === null) continue
+    // 仅为 `[1M]` 后缀等价于没配可用模型：继续回退下一键，均无效才按缺模型
+    // 处理，避免导入出 id 为后缀原文的空壳模型行。
+    if (splitModelAlias(value).id.length === 0) continue
+    return value
   }
   return null
 }
