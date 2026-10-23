@@ -311,3 +311,40 @@
   - 证据：STATE.md 5 个 done SPEC（add-cc-import-plugin、add-dsh-dashboard-bridge、add-fenix-skill-provider-plugin、polish-dsh-plugins-ui、bridge-projects-inline-section）的 updated 停在 2026-10-14 04:38 ~ 10-15 12:53；spec/changes/ 现存 6 个目录全部对应终态 SPEC（上述 5 done + verify-dsh-plugins-live 冻结 blocked，后者已由 10-17 既有条目点名）；我 ls 核实 spec/archive/ 为空——项目 10-14 启动以来从未归档过任何 SPEC。
   - 调查评估：问题源是 SPEC 生命周期的收尾环节（归档）。已核实：done 件交付后 6.5-9 天无任何归档动作，.fenix/todo.md 历史也从未出现过 done 归档类条目。与存量关系：10-17 既有条目只覆盖 blocked 件清算，done 件归档滞留未被点名过，互补不重复。根因归属：机制缺口（归档依赖人工调用 fenix-archive skill，日终对账只盯 blocked 不看终态超龄），非执行失误。结论：低危卫生项——一次批量归档即可清零存量；鉴于本工程近期无人工介入节奏，机制上值得并入日终对账。
   - 建议：用 fenix-archive 批量归档 5 个 done SPEC；daemon 日终对账增加「终态超 48 小时未归档」提示面（可与 10-17 既有条的 blocked 对账建议合并为同一对账点）。
+
+## 2026-10-24
+
+### 浪费
+- **周期评审整轮报废：审查完成但产物零行被硬门拦截，$2.31 零产出**
+  - 影响：本窗唯一 agent run——10-24 01:01 的每日凌晨周期评审（code-review，对上窗变更文件产出台账的评审件）整轮报废：审查工作实际完成（3/3 文件）但产物文件无法创建，硬门判零有效行，inserted/updated/resolved 全为 0；直接损失 $2.31 与 951 秒墙钟，且 10-23 01:02 以来 3 个变更文件的评审静默丢失——无重派，也没有「评审缺失」层面的告警。
+  - 证据：run code-review-1792774902（manifest 3 文件：cc-import/src/shared/mapping.ts、fenix-skill-provider/src/host/frontmatter.ts、fenix-dsh-dashboard-bridge/src/client/panels.tsx，redispatch_of=null）；fenixd.log 6894 行 ERROR「产物硬门拦截……零有效行（repo-code-review-gate，审查产物硬门：主产物+分片合计零有效行即判失败）」、6895 行终态 terminal=error（cost_usd=2.308、951.2 秒、输入 224,230 + 缓存读 251,840 + 输出 42,447 tokens）；归档 transcript（.fenix/runs/archive/code-review-1792774902.jsonl）尾段证实 agent 完成五维度审查但无写盘工具，3 条结论行只存在于终局文本消息里，out-code-review-1792774902.jsonl 至今不存在。
+  - 调查评估：问题源是每日凌晨周期评审→修复链（code-review→code-fix）的评审件。已核实事实：会话中仅有 Read、ToolSearch（延迟工具检索）与 15 个延迟加载工具（任务/定时/网络族，deferred tools），无任何 Bash/Write/Edit——agent 用 6 次 ToolSearch 穷举检索写工具全部落空，又 Read 探测产物路径确认不存在，最终以如实失败报告收尾（stop_reason=end_turn）。根因（为何本 session 缺写工具）未定、多假说并存：两 run 之间已核实的环境变更有两处——框架代码合并+daemon 重启（10-23 03:22/03:45/03:56）与 claude CLI 升级 2.1.308（符号链接 10-23 14:48 切换）——前者可排除（同新代码的自省 session 工具集正常），后者为首要假说但同版本自省 session 仍有 Bash，单因不成立，详见 improvements 对应条。 admin 告警 f9d0a5bd0839 的「async 子代理等待收工」假设与 transcript 直接矛盾（全程 0 次子代理派发），不采信。与存量工作关系：spec/changes/ 六件均为 10-15 前终态旧 SPEC，无在飞工作覆盖本缺口。结论：报废确凿且当日审查成果仅存于归档文本，评审链当窗静默失效。
+  - 建议：从归档 transcript 终局消息提取 3 条 JSONL 结论行回填台账（本轮审查成果可完全抢救）；手动或自动重派该窗评审（带 redispatch_of 链），修复前每晚 01:01 大概率重演报废。
+
+- **评审 run 单轮 API 停滞 726.3 秒创日志新高，占墙钟 89.3%（第 7 窗延续）**
+  - 影响：报废评审 run 的 951.2 秒墙钟里 849.4 秒（89.3%）是 API 长尾停滞（stall，单轮 API 往返超 120 秒阈值的纯等待），其中 round #4 单轮 726.3 秒创日志史上新高（前纪录 513.6 秒）；评审件停滞白等占比连续 7 窗记录在案：57%→79.8%→90.7%→78.9%→90.6%→86.3%→89.3%，复发敞口为每窗评审白等 10-14 分钟。
+  - 证据：fenixd.log 6889 行（17:14:04Z）「API round-trip stall: 726.3s (round #4 > 120s)」grade=warning-escalated（停滞分级中需升级关注的档位）；6891 行 round #9 再停滞 123.1 秒；6892 行汇总「10 rounds, median 7.4s, p90 183.4s, max 726.3s, stalls>60s=2」——单轮约为中位往返的 98 倍；我 grep 该 run 归档 in-place retry（原地重试）/provider switched（换供应商）均 0 命中，纯静等；数据摘要第 6 节 api-stall（total=849.4s）与日志一致。
+  - 调查评估：问题源是每日凌晨周期评审→修复链。已核实：停滞数字日志、摘要、run 归档三方一致，且本窗停滞发生在报废 run 上——约 12 分钟的 provider 侧（bigmodel.cn）长尾往返叠加落盘失败，放大了整轮损失。根因维持形态层结论：单轮数百秒长尾的上游网关排队、长上下文推理变慢、本地网络三类假说并存，停滞轮的上下文规模仍无留痕，证据不足以裁决（与前 6 窗同形态，不单独归因）。与存量工作关系：10-17 起的「停滞进 admin 信号面+受控重试」立项方向至本窗第 7 次复现仍未落地——6889 行 warning-escalated 已触发而数据摘要第 3 节 admin 信号 0 条。结论：延续留痕维持可见性，沿既有条推进即可，无新根因信息。
+  - 建议：落地既有建议：warning 级停滞写入 admin 信号面并触发一次受控重试；api_round_stall 事件补记当轮上下文规模与 provider，积累归因证据。
+
+### 失误
+- （当日无）
+
+### 可改进
+- **评审车道无写工具预检与零产物自动重派，CLI 升级首跑即报废**
+  - 影响：复发敞口：评审车道按每日 01:01 定时触发，写工具缺失不修复则 10-25 起每晚报废一轮（参照本窗实测 $2.31/16 分钟/零入账），且评审缺口静默累积——唯一的升级告警归因错误且无处置闭环，评审缺失本身没有任何告警面。
+  - 证据：归档 transcript（code-review-1792774902.jsonl）尾段：agent 6 次 ToolSearch 穷举（"bash|shell|write|edit"、"file|json|append|create|save"、"." 等，total_deferred_tools=15 全为任务/定时/网络族）确认无写工具；对照前一日归档 code-review-1792688525.jsonl：同车道 Bash 经 ToolSearch 浮现并使用 5 次（python3 heredoc 逐文件落盘）；/root/.local/bin/claude 符号链接 10-23 14:48 切至 2.1.308（versions/ 仅存 2.1.304/306/308），为两 run 之间唯一无法排除的环境变更；升级告警 f9d0a5bd0839（code_review_stall，评审零进度探测）至窗末仍未处置。
+  - 调查评估：问题源是每日凌晨周期评审→修复链的评审件 spawn 与收尾环节。已核实事实：两日模型同为 glm-5.3-flash、权限模式同为 bypassPermissions（runner.py:6038 统一注入）、框架代码相同（daemon 10-23 03:56 重启后两 run 同代码），差异只在 CLI 2.1.306→2.1.308 与 session 工具集（前日 deferred 含 Bash、当日 15 个 deferred 全为任务/定时/网络族）——但与报废 run 同版本、同 runner、同配置目录的本自省 session 仍有 Bash，「2.1.308 全局移除」单因假说不成立，根因（CLI 对特定 spawn 形态的工具面 gating 变化 vs 车道级配置差异被新版激活）未定、多假说并存，需取证裁决。此处显式更正既有归因：告警 f9d0a5bd0839 文案写「疑似 async 子代理等待收工模式」，transcript 证明全程 0 次子代理派发、终局为如实失败报告，该假设不成立（不回改告警原文，以本条为准）。与存量工作关系：agents/code-review.md 已有分片直写纪律（add-code-review-sharded-out）但其前提是写工具存在，未覆盖「写工具缺失」场景；硬门（repo-code-review-gate）正确拦下了零行产物，但拦截后无自动重派。结论：系统性缺口（环境单点变更无预检、硬门拒绝无重派、发现无抢救机制），证据足以支撑立项；告警文案也应避免在证据不足时写入单因假设。
+  - 建议：四步止损（不依赖未定根因）：① spawn 后先做写工具存在性探测，缺失即 fail-fast，省掉 16 分钟白做的审查；② 硬门零行拒绝后自动重派一次（带 redispatch_of 链）并升级信号；③ 从归档 transcript 终局消息提取结论行回填台账；④ 取证：对比两日 session 的 spawn argv/env 与 CLI 2.1.308 工具装配变更，定位缺席机制后再决定显式开启或锁版本。
+
+- **runs 统计按退出口径把报废评审计为成功，硬门 error 终态不可见**
+  - 影响：数据摘要 runs 统计把本窗唯一 run 计为「成功: 1、失败: 0」，而该 run 实际终态为 error（硬门拒绝）——本窗唯一的失败在统计面完全不可见，直接污染每日自省的证据基座（本次若非深查日志即被误报误导），同类失败今后每窗都会被统计误报。
+  - 证据：数据摘要第 2 节「总 run 数: 1、成功: 1、失败: 0、其他终态: 0」对 fenixd.log 6895 行终态 run_metrics（run 收尾落盘的指标行）terminal="error"、消息「run metrics: code-review error 'code-review'」；6896 行 admin 记录同样记 error=审查产物为零有效行。
+  - 调查评估：问题源是 runs 统计聚合（数据摘要生成器的终态分类）。已核实：聚合口径与进程退出码（0）一致而与终态 run_metrics 的 terminal 字段脱节——硬门把「退出码 0 但产物无效」改判 error 后，统计面没有跟随。根因归属：系统性缺口（统计口径未采信 gate 裁决），非本窗执行失误。与存量工作关系：近三日条目无同类点名（我只读核查 .fenix/todo.md 10-21~10-23 各节确认），互补不重复。结论：一行口径修正即可，且它是评审链失效（见浪费/改进条）被静默化的放大器，够格小改立项。
+  - 建议：runs 统计聚合改以终态 run_metrics 的 terminal 字段为准（error 归失败桶），退出码仅作过程参考；数据摘要生成后可与 admin 告警面交叉校验一次。
+
+- **停滞升级仍未接信号面、终态停滞指标清零（第 4 窗延续）**
+  - 影响：复发敞口：warning 级停滞升级（warning-escalated）发生后仍无任何处置入口——本窗 726.3 秒破纪录停滞已升级而数据摘要第 3 节 admin 信号面（管理员处置信号清单）仍 0 条；叠加终态停滞字段清零 bug，只读终态行的下游（预算统计、重派判定、离群初筛）完全看不到停滞，每窗复发即白等 10-14 分钟无干预。
+  - 证据：升级断链证据：fenixd.log 6889 行 grade=warning-escalated 与数据摘要第 3 节「信号: 0 条」并存；终态清零新证据：6893 行过程指标（10 轮/2 停滞/max 726.3 秒）与 6895 行终态 run_metrics（latency_rounds=0、latency_stalls=0、latency_max=null）同 run 自相矛盾，形态与 10-20 至 10-23 三窗点名时完全一致。
+  - 调查评估：问题源是评审→修复链的停滞观测处置闭环。已核实：升级断链与终态清零两处缺口原样复现，10-21/10-22/10-23 三条既有条目已给出完整改法（warning 停滞写 admin 信号面并触发一次受控重试；终态 metrics 如实透传 latency_rounds/stalls/max），本窗无任何落地迹象。根因归属：均为系统性缺口（升级事件断在「日志→信号面」环节、终态指标行未透传过程指标），非执行失误。与存量工作关系：与 10-21 既有改进条同一缺口第 4 窗延续，互补不重复。结论：两处小改即可把「记录到的浪费」变成「可处置的浪费」，沿既有条推进、够格直接起草进化提案；本条与 waste 停滞条互为表里。
+  - 建议：同 10-21 既有条：api_round_stall 的 warning-escalated 写入 admin 信号面并触发一次受控重试；run 收尾落盘的终态 metrics 如实透传 latency_rounds/latency_stalls/latency_max，消除终态清零。
