@@ -353,3 +353,7 @@
   - 证据：升级断链证据：fenixd.log 6889 行 grade=warning-escalated 与数据摘要第 3 节「信号: 0 条」并存；终态清零新证据：6893 行过程指标（10 轮/2 停滞/max 726.3 秒）与 6895 行终态 run_metrics（latency_rounds=0、latency_stalls=0、latency_max=null）同 run 自相矛盾，形态与 10-20 至 10-23 三窗点名时完全一致。
   - 调查评估：问题源是评审→修复链的停滞观测处置闭环。已核实：升级断链与终态清零两处缺口原样复现，10-21/10-22/10-23 三条既有条目已给出完整改法（warning 停滞写 admin 信号面并触发一次受控重试；终态 metrics 如实透传 latency_rounds/stalls/max），本窗无任何落地迹象。根因归属：均为系统性缺口（升级事件断在「日志→信号面」环节、终态指标行未透传过程指标），非执行失误。与存量工作关系：与 10-21 既有改进条同一缺口第 4 窗延续，互补不重复。结论：两处小改即可把「记录到的浪费」变成「可处置的浪费」，沿既有条推进、够格直接起草进化提案；本条与 waste 停滞条互为表里。
   - 建议：同 10-21 既有条：api_round_stall 的 warning-escalated 写入 admin 信号面并触发一次受控重试；run 收尾落盘的终态 metrics 如实透传 latency_rounds/latency_stalls/latency_max，消除终态清零。
+
+## 2026-10-25
+
+- 自上次自省以来无 SPEC 活动，跳过自省。
