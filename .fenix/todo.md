@@ -14,14 +14,14 @@
   - 建议：对验证型 spec 按场景分批出题或单独调高 turn/墙钟预算（立项方向见 improvements）；近期同类 spec 派发前先人工评估任务数与预算的匹配度作止损。
 
 - **上游限流与瞬断风暴连烧 9 个 run，全局熔断两轮共 20 分钟**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：是
   - 影响：窗口内 10 个失败 run 中 9 个死于上游：6 个 TRANSPORT 流断（Stream ended without finish_reason，planner-plan 与 impl 的 -r3 重楼盘各 3 件）、3 个 bigmodel.cn 429 限流；瞬断触发全局派发熔断两轮各 600 秒，叠加 18 次 in-place retry（run 内退避重试，单次 30-120 秒）等待。
   - 证据：失败样本：planner-plan/impl-add-cc-import-plugin-*-r3 六件「TRANSPORT: Stream ended without finish_reason」；code-fix-1791999259、impl-polish-dsh-plugins-ui-1792050701-a1、admin-polish-dsh-plugins-ui-1792055791 三件 RATE_LIMIT 429；fenixd 日志「Global transient break TRIGGERED…freezing all new run dispatch for 600s」与「Probe FAILED…re-freezing…unseal count +1」；救回痕迹 in-place retry=18、provider switched=1（bigmodel.cn→inferaiapi.com，模型 glm-5.3-flash→deepseek-v4-flash）。
   - 调查评估：问题源横跨 add-cc-import-plugin、polish-dsh-plugins-ui、code-fix 批次与 admin 处置链，属上游网关容量问题（外因），非本工程代码缺陷。已核实：10:59 前后的瞬断触发全局冻结且探针复败续冻；429 甚至击杀处置 run 本身（admin-polish-1792055791），使 orphaned_state（无活动 run 驱动的停滞态探测）处置停在 pending 约 1 小时，才由后续真实状态核查收口（处置 7d48dc0945f2 已 resolved）；polish 链 16:42 吃 429、16:56 秒挂 3 连进冷却，最终 17:57 merge 收尾，救回机制有效。根因归属：外因主导，框架救回闭环。与存量关系：瞬断退避（fix-provider-transient-backoff）早已在位，add-cc-import 六连秒挂（12:13 起 20 秒内 3→6 连发）暴露的「秒挂冷却未盖全派发 lane」缺口已由 evo-add-instant-fail-cooldown-full-lane-gate 进化修复（10-15 凌晨落地，polish 16:56 的冷却日志已带该标签）。结论：损失已被救回机制托底，仅处置链自身被限流打断一处值得补强。
   - 建议：对 admin 处置 run 与自省 run 这类关键小 run 同样套用 provider 瞬断退避与失败自动重派，避免处置链被限流打断后只能靠升级告警兜底。
 
 - **code-fix 批次三连空烧，20 条修复项两次注入两次落空**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：是
   - 影响：3 个 code-fix run（台账自动修复批处理）连续报废：两次产物硬门拦截加一次 429，20 条 code-review 修复项两次注入零产出，从首次失败到救回间隔约 1.4 小时（10-15 01:19 → 02:43），期间台账修复完全停滞。
   - 证据：硬门日志两次「注入清单 20 条但 out 文件不存在（fix-out-code-fix-1791997942 / 1792001059.jsonl）」；run 档案 code-fix-1791997942.jsonl 末条 result 自述「现等待 5 个组子代理返回，逐组落盘并 commit」且会话以 final 正常终态结束、turns=22；第二 run 失败时刻 18:05:47.361025Z 与 daemon shutdown 中断事件 18:05:47.175844Z 同秒；救回提交 981253f-57cce61 五件与 merge 33f3b69（02:43-02:53，重启后 38 分钟内）。
   - 调查评估：问题源是 code-review 台账修复链。已核实第一 run 形态：主代理在 5 个后台子代理未返回时结束回合（final 正常），out 产物从未落盘——headless 会话（claude -p）主代理结束回合即判 run 终态，等待中的子代理产物随之丢失，此为档案直接可见的形态而非臆测；第二 run 与 daemon shutdown 同秒，「被重启打断」为强时间耦合假说（restart_history 不覆盖该时点，未定）。根因评估：第一 run 暴露「主代理可在产物落盘前结束回合」的执行契约缺口（系统性）；第二 run 属停机次生损失。与存量关系：spec/changes 活跃区与归档区无相关条目，fenixd 侧窗口内大量 code-fix 提交均为台账内容修复、非机制修复。结论：产物先落盘的硬约束值得立项，同时说明重启窗口会误伤在飞批处理。
@@ -43,7 +43,7 @@
   - 建议：框架侧无需新立项（已修复）；dsh 侧可加 spec 命名守卫（拒绝 verify-、impl- 等框架保留前缀开头的 spec 名）作纵深防御。
 
 - **daemon 重启打断自省 run，零产物后终态仍误记 success**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：是
   - 影响：上一次每日自省（review-2026-10-15）运行 81 秒、5 turns 后被 daemon shutdown 打断，产出为零，10-15 自省整体缺失，本次回顾窗口被迫拉长到约 40 小时；浪费一个自省 run（约 1.85 万输入 token 加 2860 输出 token）。
   - 证据：run 档案 review-2026-10-15.jsonl 的 interrupted 事件（reason「daemon shutdown」，2026-10-14T18:05:47.175844Z，即本地 10-15 02:05:47）；同 run_metrics 记录 duration 81.1s、turns=5、bash×2+glob×1；紧随的 result 记录却为 subtype=success、is_error=False、num_turns=0；告警 33854db7f534（self_review_failed 升级：自省零产物 fail-closed，即无产物宁判失败不放过）；self_review_state.json 的 last_run_at 停在 10-14 02:32Z（我读核实）。
   - 调查评估：问题源是每日自省链路自身。已核实：中断由 daemon shutdown 引起；重启动机未定但时间耦合强——fenixd 框架修复 acb0a75a8 落地于 2 分钟前（02:03:35 本地），疑为加载修复而重启（未核实，无重启原因留痕）。更实质的缺陷在记账层：被中断的 run 终态记为 success（num_turns=0 与 metrics 的 5 turns 自相矛盾），零产物只能靠 fail-closed 门事后拦截升级。根因归属：停机时序为外因，终态记账缺陷为系统性——任何依赖 result 终态的下游（预算统计、重派判定）都会被误导。与存量关系：spec/changes 无相关条目；evo-api-stall-signal-grading 管停滞信号分级，不覆盖终态记账。结论：记账修正为小改，停机保护可顺势设计。
@@ -51,7 +51,7 @@
 
 ### 可改进
 - **验证型 spec 单 run 任务量超 turn 预算，宜按场景分批出题**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：是
   - 影响：复发敞口：验证型 spec 任务数达到 17 项时，单 run 大概率烧满 600 turns 加 2 次延期后整件报废，参照本次实测单件约 4025 秒加全额 token 的代价。
   - 证据：impl-verify-dsh-plugins-live-1791992263-a1 终态「Max turns (600) reached — turn extension budget exhausted (2/2) | remaining_tasks=17」；该 spec tasks.md 17 项已勾任务每项均要求隔离 profile 启动 dsh web 并以 playwright-cli 实操留证（我读 tasks.md 1.1 核实）。
   - 调查评估：已核实任务密度：验证型任务平均含「起服务+浏览器实操+留证」多步，600 turns 装不下 17 项属结构性约束而非执行低效——孪生件同批任务能完成恰说明单件容量是瓶颈。与存量关系：活跃区其余 5 个 spec 均为功能型，无同类验证型 spec 在飞；fenixd 侧窗口内落地的进化（秒挂全 lane 冷却门、stall 分级）均不涉 turn 预算。结论：出题侧分批是低成本改法，够格直接起草进化提案。
@@ -65,7 +65,7 @@
   - 建议：处置组生成时按信号作用域过滤 choices（global 信号只呈现全局动作）；无法匹配时显式降级为「转人工」而非静默跳过，并在处置详情中突出显示未生效的 choice 及原因。
 
 - **升级人工条目缺龄期提醒，最长 pending 逾 32 小时无人跟进**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：是
   - 影响：复发敞口：升级人工的处置与告警若无跟进通道即无限期滞留——本窗口两条：admin-global-1791951472 孤儿处置组自 10-14 18:05Z 升级人工至今未处理，告警 517524d58046（verify spec 熔断冻结）handled:False 逾 32 小时。
   - 证据：处置 e2ecbb39f234（status=escalated，AdminMonitor 孤儿处置收敛核查结论「生效核查未通过，维持滞留并升级人工，终结收敛尝试」，对账窗口内无解冻族 Transition 留痕）；告警 517524d58046 handled:False、handled_at:None（我读 admin_alerts.json 核实）。
   - 调查评估：已核实：AdminMonitor（守护内管理员监控器）把核查不通的处置升级人工后「终结收敛尝试」，此后无任何龄期展示或重复提醒通道，只能等每日自省被动重列（本条目即补位）。根因归属：系统性缺口——人工待办缺少专区、龄期排行与超时重复通知。与存量关系：fenixd 侧已有「audit 疑点升级待人工（聚合）：10 条待人工仲裁」的聚合提交（7dbe81ded），知识库面有雏形、admin 告警面尚无对应机制，互补不重复。结论：值得立项，可直接复用聚合思路。
