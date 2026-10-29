@@ -90,7 +90,7 @@
 
 ### 浪费
 - **两个 code-fix run 零产出空转，管线滞留待重试**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：是
   - 影响：一个已被上一 run 处置过的 code-review 台账条目仍按 open 条目重修，连烧 2 个零产出 run：合计约 268 秒 run 时长、$0.89，另遗留 2 个未清理的 worktree 与同名分支；修复管线被置为 blocked，下轮还将对同一已处置条目再烧一次。
   - 证据：fenixd.log 17:23:14Z 与 17:47:55Z（本地 01:23/01:47）两条「code-fix 零有效修复（fixed=0, commits=0, ignored=0），拒合回」，分别对应 run code-fix-1792171264（修 code-review 发现的修复 run，123 秒、$0.39）与 code-fix-1792172724（144 秒、$0.50）；fix-progress.json 记 total=1、done=0、chain_skipped（修复链内跳过）=["5ae61ac429c4"]、reason=failed_batch_retained（零有效修复批次留存待重试）；git worktree list 仍列出 impl-code-review-fix-1792171264/-1792172724 两个残留目录及分支。
   - 调查评估：问题源：处置第 2 轮周期代码评审 code-review-1792170044（01:11 本地产出 12 条台账）的修复链。已核实事实：批 1 run code-fix-1792170715（01:11-01:21）resolved 11/12 并合回（7c1415f），其中 01cbd8f 已给剩余条目对应的 fenix-skill-provider/src/host/frontmatter.ts 落了 [fenix-ignore:5ae61ac429c4] 豁免注释（fenix-ignore，代码注释形式的评审条目豁免标记，判定原发现「引号值含空格+# 被拒」不成立——成对引号值在引号分支提前返回，已核对现码）；其后两个 run 均因无可修内容产出为零被拒合回。根因（形态层）：台账 items.jsonl 该条目仍 status=open，fenix-ignore 注释未被任何环节折算成台账 resolved/ignored，调度器遂反复重派——系统性闭环缺口而非单次失误，至于是 fixer 未上报处置动作还是 runner 未解析注释，本次证据不足以裁决（详见改进条）。与存量工作关系：spec/changes/ 活跃区无覆盖 code-review 闭环机制的 SPEC。结论：本次直接损失小（$0.89、约 4.5 分钟、2 个 worktree 残留），但「下轮自动重试」使其成为每轮评审遇无效/已处置条目必复发的空转循环；另注意 6 个 run 终态全部 success，终态统计对这类零产出空转完全失明。
