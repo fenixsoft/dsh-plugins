@@ -379,3 +379,7 @@
 - 自上次自省以来无 SPEC 活动，跳过自省。
 ### 知识真相源
 - [ ] knowledge-distill 重试：归档 2026-10-30-add-dsh-dashboard-bridge — 校验违规经 3 轮 run 仍未通过
+
+## 2026-10-31
+
+- 自上次自省以来无 SPEC 活动，跳过自省。
