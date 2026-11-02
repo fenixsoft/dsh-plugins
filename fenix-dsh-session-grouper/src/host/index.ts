@@ -35,6 +35,9 @@ export const PEER_PIN = '0.2.0-rc.2'
 /** 版本校验探测的包（peerDependencies 被消费面）。 */
 const PINNED_PACKAGES = ['@deepseek-ai/dsh-session-persistence', '@deepseek-ai/dsh-workspace'] as const
 
+/** Node setTimeout 延迟安全上限（2^31-1ms；超出被运行时钳为 1ms，调度前须自行钳制）。 */
+const MAX_SCHEDULE_DELAY_MS = 2147483647
+
 /** 服务缝校验结果（显式失败时携带可定位的原因）。 */
 export interface SeamCheckResult {
   readonly ok: boolean
@@ -83,7 +86,7 @@ export default class FenixSessionGrouper extends Service {
     this.settings = resolveSettings(config)
     this.dshHome = config?.dshHome ?? resolveDshHome()
     this.peerVersionProbe = config?.peerVersionProbe
-    this.deactivateReason = this.checkDeactivation(config)
+    this.deactivateReason = this.checkDeactivation()
     if (this.deactivateReason !== undefined) {
       if (this.deactivateReason.level === 'error') this.logError(this.deactivateReason.reason)
       else this.logInfo(this.deactivateReason.reason)
@@ -97,7 +100,7 @@ export default class FenixSessionGrouper extends Service {
   }
 
   /** 停用判定：开关关闭 / projects 空（合法零动作，info 级）；服务缝漂移（error 级显式失败）。 */
-  private checkDeactivation(config?: SessionGrouperOptions | null): { reason: string; level: 'info' | 'error' } | undefined {
+  private checkDeactivation(): { reason: string; level: 'info' | 'error' } | undefined {
     if (!this.settings.enabled) {
       return { reason: 'fenix-dsh-session-grouper: enabled=false，停用（零注册、零迁移）', level: 'info' }
     }
@@ -165,11 +168,17 @@ export default class FenixSessionGrouper extends Service {
   /** 周期扫描循环：setTimeout 链（intervalMs 间隔；stop 可打断）。 */
   private scheduleNextRound(delayMs: number): void {
     if (this.stopped) return
+    // intervalMinutes 可配置出超 2^31-1ms 的 intervalMs，而 Node 会把超上限延迟
+    // 钳为 1ms（扫描循环退化为热循环）：调度前钳制到安全上限并 warn。
+    const delay = Math.min(delayMs, MAX_SCHEDULE_DELAY_MS)
+    if (delay !== delayMs) {
+      this.logWarn(`fenix-dsh-session-grouper: intervalMs=${delayMs} 超过 setTimeout 安全上限 ${MAX_SCHEDULE_DELAY_MS}ms，已钳制扫描间隔`)
+    }
     this.timer = setTimeout(() => {
       void this.runRound().finally(() => {
         if (!this.stopped) this.scheduleNextRound(this.settings.intervalMs)
       })
-    }, delayMs)
+    }, delay)
     // unref：不阻止宿主进程退出。
     this.timer?.unref?.()
   }
@@ -212,14 +221,6 @@ export default class FenixSessionGrouper extends Service {
       // 整轮级失败（如 list 抛错）：告警，循环继续（下一轮重试）。
       this.logError(`fenix-dsh-session-grouper: 扫描轮失败（下一轮重试）：${errorMessage(error)}`)
     }
-  }
-
-  /**
-   * 目标占用集：现存产物的会话目录键（`<projectKey>/<sessionSeg>`），
-   * 由扫描行聚合；计划层以「目标键被占且非自身现位」判冲突。
-   */
-  private occupiedTargetDirs(entries: readonly SessionScanEntry[]): Set<string> {
-    return occupiedSessionDirKeys(entries)
   }
 
   /** MigrateLogger 门面（ctx.logger 缺席时退 console，测试假 ctx 友好）。 */
