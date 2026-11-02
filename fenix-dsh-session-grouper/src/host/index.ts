@@ -55,6 +55,20 @@ export interface SessionGrouperOptions extends GrouperConfigInput {
  * Host 插件：装载即校验服务缝与配置，随后周期扫描迁移。
  */
 export default class FenixSessionGrouper extends Service {
+  /**
+   * cordis 依赖注入声明（对齐 bridge host 先例 `static inject = ['webServer']`）：
+   * 真实 dsh loader 须等 `workspaceRegistry` / `sessionPersistence` 服务就绪后再
+   * apply 本插件，构造期 `ctx.<service>` 属性访问才可解析。缺声明的实锾示证
+   * （0.2.0-rc.2 真机装载即崩）：插件 fiber 的 store 链上服务尚未在位，cordis
+   * 代理抛 `cannot get property "workspaceRegistry" without inject` → loader
+   * 「1 entry did not activate」→ 零注册零迁移。服务名真源：dsh-workspace
+   * `super(ctx, 'workspaceRegistry')`；dsh-workspace 自身
+   * `static inject = ['storageDomain', 'sessionPersistence']`（两名字均为
+   * cordis 服务名）。单测形状桩自供 ctx 不经 loader 装载缝，hostContract
+   * 以 inject 声明契约测试守卫（漏声明即单测红灯）。
+   */
+  static readonly inject = ['workspaceRegistry', 'sessionPersistence']
+
   /** 扫描循环句柄（stop() / 卸载 effect 复用）。 */
   private timer: ReturnType<typeof setTimeout> | undefined
   private stopped = false

@@ -132,6 +132,21 @@ function scanEntry(id: string, cwd: string, artifactPath: string | undefined, mt
 }
 
 describe('FenixSessionGrouper 装载契约', () => {
+  it('loader 装载缝：static inject 声明 workspaceRegistry + sessionPersistence（真机装载契约守卫）', () => {
+    // 真机实锤（0.2.0-rc.2）：缺 static inject 时 loader 构造期即抛
+    // cannot get property "workspaceRegistry" without inject → 「1 entry did not
+    // activate」→ 零注册零迁移。形状桩自供 ctx 不经 loader 装载缝、拦不住该
+    // 回归，故对声明本体做契约断言。服务名真源：dsh-workspace 注册名
+    // workspaceRegistry（super(ctx, 'workspaceRegistry')）；dsh-workspace 自身
+    // static inject = ['storageDomain', 'sessionPersistence'] 证明
+    // sessionPersistence 亦为 cordis 服务名；bridge host 同机制先例
+    // static inject = ['webServer']。
+    const inject = FenixSessionGrouper.inject as unknown
+    expect(Array.isArray(inject)).toBe(true)
+    expect(inject).toContain('workspaceRegistry')
+    expect(inject).toContain('sessionPersistence')
+  })
+
   it('装载即校验：缝齐备时注册项目工作区并执行扫描轮（初始轮自动触发）', async () => {
     const home = tempDir()
     const proj = join(home, 'proj-a')
