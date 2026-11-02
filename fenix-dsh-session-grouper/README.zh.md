@@ -32,7 +32,11 @@ dsh web 宿主侧会话归组插件：把散落在 worktree / 子目录里的存
 
 ## 回滚
 
-台账驱动的幂等回滚，可在宿主直接执行（`lib/host.js` 为独立 CLI 产物）：
+台账驱动的幂等回滚，可在宿主直接执行（`lib/host.js` 为独立 CLI 产物）。CLI 以独立
+node 进程运行，peer 包不在插件自身依赖树内：经宿主 dsh 全局安装布局自定位
+（`/usr/lib/node_modules/@deepseek-ai/dsh/node_modules`，`DSH_PKG_ROOT` 环境变量
+可覆盖安装根）；持久化 root 缺省 `<DSH_HOME>/sessions`（DSH_HOME 序：
+`--dsh-home` → 环境变量 → `~/.dsh`），显式 `--root` 覆盖：
 
 ```bash
 # 回滚单个会话
