@@ -75,9 +75,9 @@
 
 ## 6. bridge client 两项
 
-- [ ] 6.1 `fenix-dsh-dashboard-bridge/src/client/panels.tsx`：`sectionStyle` 去除 `border`（背景与圆角保留；降级浮层分组列表 `groupListStyle` 的边框保留不动），宽/窄态空态壳同步无边框
-- [ ] 6.2 `fenix-dsh-dashboard-bridge/src/client/index.ts`：`FIXED_ENTRIES` 增 `{id:'fenix-command-center', label:'指挥中心', route:'#/command-center', order:11}`，其余条目 order 顺延为 12–15；`FIXED_GLYPHS` 增同风格线性图标（24×24 viewBox stroke，指挥屏意象），`FixedEntryId` 类型同步扩展
-- [ ] 6.3 `fenix-dsh-dashboard-bridge/tests/srcContract.test.ts`：更新为 6 条目契约（id/label/order/深链一一对应、指挥中心位于概览与项目之间、分区容器无边框断言）；bridge `tsdown` 构建通过（`lib/client.js` 更新）
+- [x] 6.1 `fenix-dsh-dashboard-bridge/src/client/panels.tsx`：`sectionStyle` 去除 `border`（背景与圆角保留；降级浮层分组列表 `groupListStyle` 的边框保留不动），宽/窄态空态壳同步无边框
+- [x] 6.2 `fenix-dsh-dashboard-bridge/src/client/index.ts`：`FIXED_ENTRIES` 增 `{id:'fenix-command-center', label:'指挥中心', route:'#/command-center', order:11}`，其余条目 order 顺延为 12–15；`FIXED_GLYPHS` 增同风格线性图标（24×24 viewBox stroke，指挥屏意象），`FixedEntryId` 类型同步扩展
+- [x] 6.3 `fenix-dsh-dashboard-bridge/tests/srcContract.test.ts`：更新为 6 条目契约（id/label/order/深链一一对应、指挥中心位于概览与项目之间、分区容器无边框断言）；bridge `tsdown` 构建通过（`lib/client.js` 更新）
 
 ## 7. 文档与收尾
 

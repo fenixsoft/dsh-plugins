@@ -26,7 +26,7 @@ import type { ProjectEntrySink, ProjectListFetcher, SyncTimer } from './projectS
 /** 本插件消费的 client 服务键（无 RPC 需求，不引 api-remotes）。 */
 export const inject = ['slots', 'layout']
 
-/** 5 个固定条目：id 与深链一一对应，order 10–14（位于 dsh web 既有条目之后）。 */
+/** 6 个固定条目：id 与深链一一对应，order 10–15（位于 dsh web 既有条目之后）。 */
 export interface FixedEntry {
   readonly id: FixedEntryId
   readonly label: string
@@ -36,10 +36,11 @@ export interface FixedEntry {
 
 export const FIXED_ENTRIES: readonly FixedEntry[] = [
   { id: 'fenix-overview', label: '概览', route: '#/overview', order: 10 },
-  { id: 'fenix-projects', label: '项目', route: '#/projects', order: 11 },
-  { id: 'fenix-settings', label: '设置', route: '#/settings', order: 12 },
-  { id: 'fenix-activities', label: '运维', route: '#/activities', order: 13 },
-  { id: 'fenix-help', label: '帮助', route: '#/help', order: 14 },
+  { id: 'fenix-command-center', label: '指挥中心', route: '#/command-center', order: 11 },
+  { id: 'fenix-projects', label: '项目', route: '#/projects', order: 12 },
+  { id: 'fenix-settings', label: '设置', route: '#/settings', order: 13 },
+  { id: 'fenix-activities', label: '运维', route: '#/activities', order: 14 },
+  { id: 'fenix-help', label: '帮助', route: '#/help', order: 15 },
 ]
 
 /** 项目 main 面板键：`fenix-project-<name>`（与旧顶层条目 id 一致，深链契约不变）。 */
