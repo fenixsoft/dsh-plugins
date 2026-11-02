@@ -81,5 +81,5 @@
 
 ## 7. 文档与收尾
 
-- [ ] 7.1 `fenix-dsh-session-grouper/README.zh.md`（机制/配置/回滚/版本钉扎/已知限制）+ `docs/help/dsh-session-grouper-install.md`（人工安装步骤：主树 `pnpm install` + 两插件构建、web profile 增 `link:` 依赖、`systemctl restart dsh-web`、真机验收清单：存量会话归入两工程分组且「未分组」仅剩作用域外会话、在飞 run 会话静默期不迁移、配置 `enabled=false` 零动作、回滚演练一例；标注 bridge 两项合并后浏览器强刷即生效、无需重启）
-- [ ] 7.2 收尾验证：`pnpm -r test` 全绿、两插件各自 `tsdown` 构建成功、`fenix-dsh-session-grouper` 在临时 DSH_HOME 冒烟一轮（注册工作区 + 迁移夹具会话 + 台账落位）
+- [x] 7.1 `fenix-dsh-session-grouper/README.zh.md`（机制/配置/回滚/版本钉扎/已知限制）+ `docs/help/dsh-session-grouper-install.md`（人工安装步骤：主树 `pnpm install` + 两插件构建、web profile 增 `link:` 依赖、`systemctl restart dsh-web`、真机验收清单：存量会话归入两工程分组且「未分组」仅剩作用域外会话、在飞 run 会话静默期不迁移、配置 `enabled=false` 零动作、回滚演练一例；标注 bridge 两项合并后浏览器强刷即生效、无需重启）
+- [x] 7.2 收尾验证：`pnpm -r test` 全绿、两插件各自 `tsdown` 构建成功、`fenix-dsh-session-grouper` 在临时 DSH_HOME 冒烟一轮（注册工作区 + 迁移夹具会话 + 台账落位）
