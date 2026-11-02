@@ -42,7 +42,7 @@ node /root/dsh-plugins/fenix-dsh-session-grouper/lib/host.js --session <sessionI
 node /root/dsh-plugins/fenix-dsh-session-grouper/lib/host.js --all [--dsh-home <dir>]
 ```
 
-台账位置：`~/.dsh/session-grouper/migrations.jsonl`；备份位置：`~/.dsh/session-grouper-backups/<sessionId>/`。
+CLI 以独立 node 进程运行：peer 包（cordis / JSONL 后端）经宿主 dsh 全局安装布局自定位（缺省 `/usr/lib/node_modules/@deepseek-ai/dsh/node_modules`，`DSH_PKG_ROOT` 环境变量可覆盖安装根）；持久化 root 缺省 `<DSH_HOME>/sessions`（`--dsh-home` → `DSH_HOME` → `~/.dsh`），显式 `--root` 覆盖。台账位置：`~/.dsh/session-grouper/migrations.jsonl`；备份位置：`~/.dsh/session-grouper-backups/<sessionId>/`。
 
 ## 实现笔记
 
@@ -50,4 +50,5 @@ node /root/dsh-plugins/fenix-dsh-session-grouper/lib/host.js --all [--dsh-home <
 - **迁移顺序纪律**：写句柄 → 读事件 → revision 复核 → 备份 → 物化新产物 → 校验新产物 → 关写锁 → 删旧目录（顺序不可颠倒：同 id 双目录共存会被持久化层 duplicate 守卫拒绝）→ 注册表实例索引校正 → 官方 `attachSession` → 台账追加。任一步失败即回滚（备份还原 + 目标清理），不留半迁移状态。
 - **产物目录命名复刻**：目标 mangled 目录名由纯规则层（`src/shared/rules.ts`）从项目根推导，与持久化后端 `generationLogPath` 的推导逐字对齐；测试含漂移守卫（rules 推导键 === 真实后端实际落位路径）。
 - **peer 钉版**：`0.2.0-rc.2` 精确匹配；运行时版本不符显式拒绝装载（缝漂移纪律）。
+- **回滚 CLI 的 peer 包自定位**：`lib/host.js` 独立于 dsh 进程运行，不依赖 ESM parent-walk 命中宿主依赖树——按候选根（`DSH_PKG_ROOT` → 缺省全局安装布局）显式探测 `<root>/<pkg>/lib/index.js` 后动态 import；全部失守再退标准解析（插件目录恰在宿主 node_modules 树内的安装形态）。
 - **scope 纪律**：插件只经官方服务缝（`ctx.workspaceRegistry` / `ctx.sessionPersistence`）与文件系统 stat/备份消费，不手写会话产物内容解析。
