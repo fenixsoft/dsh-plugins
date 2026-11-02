@@ -4,9 +4,9 @@
  * - `DashboardPanel`：主面板内嵌 iframe——src 经 buildPanelSrc 拼装（hash 深链
  *   直达），铺满面板、无边框，并按 layout 契约预留顶部 clearance
  *   （`--dsh-frame-leading-clearance`，macOS 窗口控件带占位，缺省 0）；
- * - `fixedIconComponent`：5 个固定条目的线性图标组件（svg stroke 线性风格），
+ * - `fixedIconComponent`：6 个固定条目的线性图标组件（svg stroke 线性风格），
  *   props 对齐 ui-sidebar 的 SidebarPanelIconOwnerProps（size/active）；
- * - `projectSectionComponent`：「项目」条目（order 11）的 Portal 内嵌分区组件
+ * - `projectSectionComponent`：「项目」条目（order 12）的 Portal 内嵌分区组件
  *   （spec 2026-11 Portal 化）——从条目组件 `closest('nav')` 取条目列表元素，
  *   在其后插入宿主 div 并 createPortal 渲染常驻分区（位于条目列表与工作区
  *   regionArea 之间，官方工作区同款视觉）；锚点不可达/宿主被移除时按
