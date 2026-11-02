@@ -155,19 +155,27 @@ export class Migrator {
           // 写竞争中止：拒绝本轮，产物保持原状；先释放写声明再返回。
           await this.closeHandle(handle, sessionId)
           closed = true
-          return { status: 'refused', sessionId, reason: 'revision-changed', detail: '迁移准备期间产物被改写（revision 变化），拒绝本轮，产物保持原状' }
+          const detail = '迁移准备期间产物被改写（revision 变化），拒绝本轮，产物保持原状'
+          // 拒绝不静默：调用方（runRound）不消费 refused 返回值，此处必须留痕。
+          this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移被拒绝（revision-changed）：${detail}`)
+          return { status: 'refused', sessionId, reason: 'revision-changed', detail }
         }
         // 根直属会话（header cwd 已等于项目根，canonical 同位）：零重写、零归位，
         // 直接注册表校正 + attach（产物归位幂等）。
+        // 台账不写 backupDir：本次迁移无备份，历史周期遗留的备份目录不代表
+        // 「本次迁移前状态」，写入台账会误导回滚用陈旧备份覆盖当前产物。
         if (await this.sameCanonicalPath(fromCwd, toCwdCanonical)) {
           await this.closeHandle(handle, sessionId)
           closed = true
-          return await this.attachAndLedger(sessionId, before.header, toCwdCanonical, fromCwd, toCwd, backupDirFor(this.dshHome, sessionId))
+          return await this.attachAndLedger(sessionId, before.header, toCwdCanonical, fromCwd, toCwd)
         }
 
-        // (4) 备份先行（原会话目录全量复制）。
+        // (4) 备份先行（原会话目录全量复制）。备份目录先清空重建：cpSync 对既存
+        // 目录是合并语义（逐项覆盖、不删除多出文件），直接并入会让陈旧 generation
+        // 跨周期残留，回滚还原时又被带回会话目录。
         const srcLog = await this.requireCurrentLog(sessionId)
         const backupDir = backupDirFor(this.dshHome, sessionId)
+        rmSync(backupDir, { recursive: true, force: true })
         mkdirSync(backupDir, { recursive: true })
         cpSync(dirname(srcLog), backupDir, { recursive: true })
 
@@ -274,14 +282,18 @@ export class Migrator {
     }
   }
 
-  /** 注册表实例状态校正 + attach + 台账。 */
+  /**
+   * 注册表实例状态校正 + attach + 台账。
+   * backupDir 缺省 = attach-only 路径（零重写零备份）：台账不写该字段，
+   * 保证「台账带 backupDir ⇒ 备份确属本次迁移前状态」的回滚前提。
+   */
   private async attachAndLedger(
     sessionId: SessionId,
     newHeader: DshSessionHeader,
     toCwdCanonical: string,
     fromCwd: string,
     toCwd: string,
-    backupDir: string,
+    backupDir?: string,
   ): Promise<MigrateOutcome> {
     const headers = this.registry.headers
     const sessionPaths = this.registry.sessionPaths
@@ -301,11 +313,11 @@ export class Migrator {
     } catch (error) {
       // attach 级失败：数据已一致，按 Decision 5(b) 记 pending-attach（不回滚数据）。
       const detail = `${pendingDetail === undefined ? 'attachSession 失败' : pendingDetail}：${errorMessage(error)}`
-      appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'pending-attach', detail, backupDir })
+      appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'pending-attach', detail, ...(backupDir === undefined ? {} : { backupDir }) })
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 数据已迁移但归组未即时生效（pending-attach，下次启动/重启重试）：${detail}`)
       return { status: 'pending-attach', sessionId, fromCwd, toCwd, detail }
     }
-    appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'migrated', backupDir })
+    appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'migrated', ...(backupDir === undefined ? {} : { backupDir }) })
     this.log.info?.(`fenix-dsh-session-grouper: 会话 ${sessionId} 已迁移归组：${fromCwd} → ${toCwd}`)
     return { status: 'migrated', sessionId, fromCwd, toCwd }
   }
@@ -321,6 +333,10 @@ export class Migrator {
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 失败发生于备份前（root=${String(root)}，backup=${existsSync(backupDir)}），数据未改动，无需回滚`)
       return
     }
+    // 备份真实位置随回滚推进变化：backupDir → stagingDir（第一段 rename 后）→
+    // originalDir（还原完成）。失败日志必须报告当下真实位置，排障者按提示才能
+    // 找到备份；rename 原子完成即无 staging 残留（数据整体就位，无副本散落）。
+    let backupLocation = backupDir
     try {
       const originalDir = join(root, targetSessionDirKey(fromCwd, sessionId))
       const stagingDir = `${originalDir}.rollback-${Date.now().toString(36)}`
@@ -328,7 +344,9 @@ export class Migrator {
       // 先挪走半迁移残迹（若在），再把备份整目录就位（rename 原子）。
       rmSync(originalDir, { recursive: true, force: true })
       renameSync(backupDir, stagingDir)
+      backupLocation = stagingDir
       renameSync(stagingDir, originalDir)
+      backupLocation = originalDir
       const targetDir = join(root, targetSessionDirKey(toCwd, sessionId))
       if (targetDir !== originalDir && existsSync(targetDir)) {
         rmSync(targetDir, { recursive: true, force: true })
@@ -342,7 +360,7 @@ export class Migrator {
       }
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚到迁移前状态（备份已还原至 ${originalDir}）`)
     } catch (error) {
-      this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚自检失败（备份保留于 ${backupDir}）：${errorMessage(error)}`)
+      this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚自检失败（备份保留于 ${backupLocation}）：${errorMessage(error)}`)
     }
   }
 }

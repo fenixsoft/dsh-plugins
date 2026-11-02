@@ -1,9 +1,9 @@
 /**
  * fenix-dsh-dashboard-bridge Client 半（dsh.client, platform web）：
- * 向 `sidebar.panellist` 列表插槽注册 5 个固定菜单条目（概览/项目/设置/运维/
- * 帮助，order 10–14）并在 layout `main` keyed 插槽以相同 id 挂对应 iframe
+ * 向 `sidebar.panellist` 列表插槽注册 6 个固定菜单条目（概览/指挥中心/项目/
+ * 设置/运维/帮助，order 10–15）并在 layout `main` keyed 插槽以相同 id 挂对应 iframe
  * 面板（hash 深链直达）；启动时拉取 `<prefix>/api/projects`，项目不再逐个
- * 注册顶层侧栏条目，而是驱动「项目」条目（order 11）的 Portal 内嵌分区
+ * 注册顶层侧栏条目，而是驱动「项目」条目（order 12）的 Portal 内嵌分区
  * （条目列表 nav 与工作区之间的常驻分区；锚点漂移自动降级浮层分组）数据源
  * 与每项目 main keyed 面板（深链 `#/projects/<name>` 契约不变），60s 周期 +
  * window focus 重拉并幂等同步（见 projectSync.ts）。
@@ -144,7 +144,7 @@ export function projectEntrySink(ctx: Context, prefix: string): ProjectEntrySink
 }
 
 /**
- * Client 插件体：注册 5 固定条目与 main 面板，启动项目列表同步。
+ * Client 插件体：注册 6 固定条目与 main 面板，启动项目列表同步。
  * slot 形状漂移（dsh 升级改名）时注册不生效、页面不崩（design Risks）。
  *
  * @returns 停止函数：停同步循环并 dispose 全部项目 main 面板（固定条目由
@@ -154,7 +154,7 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   const resolved = resolveBridgeConfig(options)
   const prefix = resolved.prefix
 
-  // 5 固定侧栏条目（order 10–14）；「项目」条目组件为 Portal 内嵌分区（锚点
+  // 6 固定侧栏条目（order 10–15）；「项目」条目组件为 Portal 内嵌分区（锚点
   // 漂移自动降级浮层分组，见 panels.tsx projectSectionComponent），其余为线性图标。
   ctx.slots.inject('sidebar.panellist', () => {
     const selectProject = projectPanelSelector(ctx)
