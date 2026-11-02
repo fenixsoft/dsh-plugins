@@ -44,6 +44,11 @@ export interface SeamCheckResult {
 export interface SessionGrouperOptions extends GrouperConfigInput {
   /** DSH_HOME 覆盖（测试注入临时目录；缺省 resolveDshHome()）。 */
   readonly dshHome?: string
+  /**
+   * peer 版本探针注入（缺省经 createRequire 读安装包 package.json；
+   * 测试注入钉版漂移形态覆盖显式拒绝分支）。
+   */
+  readonly peerVersionProbe?: (pkg: string) => string | undefined
 }
 
 /**
@@ -54,20 +59,22 @@ export default class FenixSessionGrouper extends Service {
   private timer: ReturnType<typeof setTimeout> | undefined
   private stopped = false
   /** 停用原因（校验失败/开关关闭时置位；空 = 正常运行）。 */
-  private readonly deactivateReason: string | undefined
+  private readonly deactivateReason: { reason: string; level: 'info' | 'error' } | undefined
   private readonly settings: GrouperSettings
   private readonly dshHome: string
+  private readonly peerVersionProbe: ((pkg: string) => string | undefined) | undefined
 
   constructor(ctx: Context, config?: SessionGrouperOptions | null) {
     super(ctx, SERVICE_NAME)
     this.settings = resolveSettings(config)
     this.dshHome = config?.dshHome ?? resolveDshHome()
+    this.peerVersionProbe = config?.peerVersionProbe
     this.deactivateReason = this.checkDeactivation(config)
     if (this.deactivateReason !== undefined) {
-      this.logError(this.deactivateReason)
-      // 卸载自身 fiber：loader 卸载本插件，零扫描零注册（显式失败停用形态）。
-      // Service 基类提供 ctx.scope?.dispose?.() 形态不可依赖（缝面收缩）——
-      // 以「不启动循环」实现停用，服务本体保持装载供诊断日志回查。
+      if (this.deactivateReason.level === 'error') this.logError(this.deactivateReason.reason)
+      else this.logInfo(this.deactivateReason.reason)
+      // 显式停用（服务缝漂移）或合法零动作（开关关闭/空项目根）：不启动循环，
+      // 服务本体保持装载供诊断日志回查；零注册、零迁移。
       return
     }
     // 插件卸载（loader 条目移除 / fiber 卸载）时停止扫描循环。
@@ -75,16 +82,16 @@ export default class FenixSessionGrouper extends Service {
     this.scheduleNextRound(0)
   }
 
-  /** 停用判定：开关关闭 / projects 空（合法零动作）不属失败，其余显式失败。 */
-  private checkDeactivation(config?: SessionGrouperOptions | null): string | undefined {
+  /** 停用判定：开关关闭 / projects 空（合法零动作，info 级）；服务缝漂移（error 级显式失败）。 */
+  private checkDeactivation(config?: SessionGrouperOptions | null): { reason: string; level: 'info' | 'error' } | undefined {
     if (!this.settings.enabled) {
-      return 'fenix-dsh-session-grouper: enabled=false，停用（零注册、零迁移）'
+      return { reason: 'fenix-dsh-session-grouper: enabled=false，停用（零注册、零迁移）', level: 'info' }
     }
     if (this.settings.projects.length === 0) {
-      return 'fenix-dsh-session-grouper: projects=[]，零注册、零迁移（停用扫描循环）'
+      return { reason: 'fenix-dsh-session-grouper: projects=[]，零注册、零迁移（停用扫描循环）', level: 'info' }
     }
     const seam = this.checkServiceSeam()
-    if (!seam.ok) return `fenix-dsh-session-grouper: 服务缝校验失败，显式停用扫描：${seam.reason}`
+    if (!seam.ok) return { reason: `fenix-dsh-session-grouper: 服务缝校验失败，显式停用扫描：${seam.reason}`, level: 'error' }
     return undefined
   }
 
@@ -116,6 +123,15 @@ export default class FenixSessionGrouper extends Service {
 
   /** peer 钉版校验：可解析到安装包 package.json 时比对版本，否则告警放行。 */
   private checkPeerVersions(): SeamCheckResult {
+    if (this.peerVersionProbe !== undefined) {
+      for (const pkg of PINNED_PACKAGES) {
+        const version = this.peerVersionProbe(pkg)
+        if (version !== undefined && version !== PEER_PIN) {
+          return { ok: false, reason: `${pkg} 运行时版本 ${version} 与 peer 钉版 ${PEER_PIN} 不符（缝漂移纪律：显式拒绝装载）` }
+        }
+      }
+      return { ok: true }
+    }
     try {
       const require = createRequire(import.meta.url)
       for (const pkg of PINNED_PACKAGES) {

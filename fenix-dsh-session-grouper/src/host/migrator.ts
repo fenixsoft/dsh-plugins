@@ -318,7 +318,7 @@ export class Migrator {
     const root = this.lastKnownRoot
     const backupDir = backupDirFor(this.dshHome, sessionId)
     if (root === undefined || !existsSync(backupDir)) {
-      this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 失败发生于备份前，数据未改动，无需回滚`)
+      this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 失败发生于备份前（root=${String(root)}，backup=${existsSync(backupDir)}），数据未改动，无需回滚`)
       return
     }
     try {
@@ -330,7 +330,16 @@ export class Migrator {
       renameSync(backupDir, stagingDir)
       renameSync(stagingDir, originalDir)
       const targetDir = join(root, targetSessionDirKey(toCwd, sessionId))
-      if (targetDir !== originalDir && existsSync(targetDir)) rmSync(targetDir, { recursive: true, force: true })
+      if (targetDir !== originalDir && existsSync(targetDir)) {
+        rmSync(targetDir, { recursive: true, force: true })
+        // 目标 project 目录清空则一并移除（避免 mangled 目录残留噪音）。
+        try {
+          const targetProjectDir = dirname(targetDir)
+          if (existsSync(targetProjectDir) && readdirSync(targetProjectDir).length === 0) rmSync(targetProjectDir, { recursive: true, force: true })
+        } catch {
+          // 目录已不存在/不可枚举：忽略。
+        }
+      }
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚到迁移前状态（备份已还原至 ${originalDir}）`)
     } catch (error) {
       this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚自检失败（备份保留于 ${backupDir}）：${errorMessage(error)}`)

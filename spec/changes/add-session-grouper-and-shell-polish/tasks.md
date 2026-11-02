@@ -51,27 +51,27 @@
 
 ## 1. 安装包契约探针与工程骨架
 
-- [ ] 1.1 以安装包 `/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/` 下 `dsh-session-persistence-jsonl`、`dsh-session`、`dsh-workspace` 的 `lib/` 与 `.d.ts` 为唯一真相源，确认四件事：会话 header 的读写句柄（native session handles，含 `.jsonl.zstd` 形态）、产物目录命名（mangled cwd）与归位语义、写安全/修订校验可用面、`ctx.workspaceRegistry` 的 `create`/`attachSession` 服务签名；结论以注释形式落位 `src/types/dsh-runtime.d.ts`（类型缝注释），不确定点（如 `sessionPersistence.list()` 实例缓存语义）记录到 `docs/help/dsh-session-grouper-install.md` 的「实现笔记」段
-- [ ] 1.2 搭建 `fenix-dsh-session-grouper` 工程骨架：镜像 `fenix-dsh-dashboard-bridge` 的 pnpm 工作区形态（package.json 的 peerDependencies 精确钉 `0.2.0-rc.2`、tsconfig.json、tsdown.config.ts、vitest.config.ts、pnpm-workspace.yaml），`pnpm install` 通过、空插件可被 tsdown 构建出 `lib/host.js`
+- [x] 1.1 以安装包 `/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/` 下 `dsh-session-persistence-jsonl`、`dsh-session`、`dsh-workspace` 的 `lib/` 与 `.d.ts` 为唯一真相源，确认四件事：会话 header 的读写句柄（native session handles，含 `.jsonl.zstd` 形态）、产物目录命名（mangled cwd）与归位语义、写安全/修订校验可用面、`ctx.workspaceRegistry` 的 `create`/`attachSession` 服务签名；结论以注释形式落位 `src/types/dsh-runtime.d.ts`（类型缝注释），不确定点（如 `sessionPersistence.list()` 实例缓存语义）记录到 `docs/help/dsh-session-grouper-install.md` 的「实现笔记」段
+- [x] 1.2 搭建 `fenix-dsh-session-grouper` 工程骨架：镜像 `fenix-dsh-dashboard-bridge` 的 pnpm 工作区形态（package.json 的 peerDependencies 精确钉 `0.2.0-rc.2`、tsconfig.json、tsdown.config.ts、vitest.config.ts、pnpm-workspace.yaml），`pnpm install` 通过、空插件可被 tsdown 构建出 `lib/host.js`
 
 ## 2. 纯规则层
 
-- [ ] 2.1 `src/shared/rules.ts` 纯函数：路径包含归属判定（`cwd === 项目根` 或 `cwd` 以 `<项目根>/` 开头；命中多个项目根取最长前缀）、mangled 会话目录名推导、迁移计划构造（输入会话快照 + 配置 → 逐会话的备份/重写/归位/attach 计划项；作用域外 / 静默期不足 / 已归组 / 目标产物冲突 → skip 项带机器可读 reason）+ `tests/rules.test.ts` 全分支覆盖（对应 spec 六个迁移 Scenario 的纯函数分支）
+- [x] 2.1 `src/shared/rules.ts` 纯函数：路径包含归属判定（`cwd === 项目根` 或 `cwd` 以 `<项目根>/` 开头；命中多个项目根取最长前缀）、mangled 会话目录名推导、迁移计划构造（输入会话快照 + 配置 → 逐会话的备份/重写/归位/attach 计划项；作用域外 / 静默期不足 / 已归组 / 目标产物冲突 → skip 项带机器可读 reason）+ `tests/rules.test.ts` 全分支覆盖（对应 spec 六个迁移 Scenario 的纯函数分支）
 
 ## 3. 配置与插件装载
 
-- [ ] 3.1 `src/host/settings.ts`：loader config 解析归一（`projects` 缺省 `['/root/fenixd','/root/dsh-plugins']`、`quietMinutes` 缺省 30、`intervalMinutes` 缺省 10、`enabled` 缺省 true；非法输入装载期显式抛错，不静默取缺省）+ `tests/settings.test.ts`
-- [ ] 3.2 `src/host/index.ts` 插件体：启动期服务缝存在性校验（`ctx.workspaceRegistry` / `ctx.sessionPersistence` 缺失或运行时版本与 peer 钉版不符 → 显式错误停用扫描，日志说明）；`enabled=false` 零动作零注册；周期扫描循环（`intervalMinutes`，返回可停止函数）；单会话失败不中断整轮（错误隔离）；+ `tests/hostContract.test.ts`（以形状桩覆盖装载/停用/服务缝漂移三分支）
+- [x] 3.1 `src/host/settings.ts`：loader config 解析归一（`projects` 缺省 `['/root/fenixd','/root/dsh-plugins']`、`quietMinutes` 缺省 30、`intervalMinutes` 缺省 10、`enabled` 缺省 true；非法输入装载期显式抛错，不静默取缺省）+ `tests/settings.test.ts`
+- [x] 3.2 `src/host/index.ts` 插件体：启动期服务缝存在性校验（`ctx.workspaceRegistry` / `ctx.sessionPersistence` 缺失或运行时版本与 peer 钉版不符 → 显式错误停用扫描，日志说明）；`enabled=false` 零动作零注册；周期扫描循环（`intervalMinutes`，返回可停止函数）；单会话失败不中断整轮（错误隔离）；+ `tests/hostContract.test.ts`（以形状桩覆盖装载/停用/服务缝漂移三分支）
 
 ## 4. 扫描与迁移
 
-- [ ] 4.1 `src/host/sessionScan.ts`：项目工作区幂等注册（经 `workspaceRegistry.create`，单根失败告警跳过不中断）、未归组会话集合扫描（经 `ctx.sessionPersistence`）、mtime 静默期过滤（`quietMinutes`）
-- [ ] 4.2 `src/host/migrator.ts`：按计划执行——备份全量产物到 `<DSH_HOME>/session-grouper-backups/<sessionId>/` → 经持久化句柄重写 header cwd → 产物归位到目标 mangled 目录（目标冲突跳过告警不覆盖）→ 注册表实例状态校正（`headers`/`sessionPaths` 映射表按新 header 更新，字段缺失/形态不符显式失败转兜底台账）→ 官方 `attachSession` 归组 → `<DSH_HOME>/session-grouper/migrations.jsonl` 追加台账（sessionId/原 cwd/目标 cwd/时间戳）；写前修订校验失败拒绝本轮；任一步失败回滚到原状态并告警，不留半迁移状态
-- [ ] 4.3 `tests/migrator.test.ts`：以临时 DSH_HOME（隔离目录）优先用真实持久化包装配（不可装配处以形状替身补充并在用例注明），覆盖 spec `session-grouper` 全部 Scenario：worktree 会话归入工程、根直属会话归入、原目录已删除的陈旧会话、静默期内在飞跳过、目标产物冲突跳过、作用域外会话不动、备份与台账落位、写竞争中止；MUST NOT 对真实 `~/.dsh/sessions` 读写
+- [x] 4.1 `src/host/sessionScan.ts`：项目工作区幂等注册（经 `workspaceRegistry.create`，单根失败告警跳过不中断）、未归组会话集合扫描（经 `ctx.sessionPersistence`）、mtime 静默期过滤（`quietMinutes`）
+- [x] 4.2 `src/host/migrator.ts`：按计划执行——备份全量产物到 `<DSH_HOME>/session-grouper-backups/<sessionId>/` → 经持久化句柄重写 header cwd → 产物归位到目标 mangled 目录（目标冲突跳过告警不覆盖）→ 注册表实例状态校正（`headers`/`sessionPaths` 映射表按新 header 更新，字段缺失/形态不符显式失败转兜底台账）→ 官方 `attachSession` 归组 → `<DSH_HOME>/session-grouper/migrations.jsonl` 追加台账（sessionId/原 cwd/目标 cwd/时间戳）；写前修订校验失败拒绝本轮；任一步失败回滚到原状态并告警，不留半迁移状态
+- [x] 4.3 `tests/migrator.test.ts`：以临时 DSH_HOME（隔离目录）优先用真实持久化包装配（不可装配处以形状替身补充并在用例注明），覆盖 spec `session-grouper` 全部 Scenario：worktree 会话归入工程、根直属会话归入、原目录已删除的陈旧会话、静默期内在飞跳过、目标产物冲突跳过、作用域外会话不动、备份与台账落位、写竞争中止；MUST NOT 对真实 `~/.dsh/sessions` 读写
 
 ## 5. 回滚
 
-- [ ] 5.1 `src/host/rollback.ts`：按台账回滚单个/全部（恢复备份产物 + 还原 header cwd + 归位目录清理 + 台账标记回滚），提供可在宿主直接 `node` 执行的 CLI 入口；`tests/migrator.test.ts` 补回滚 Scenario（回滚后归属状态复现）
+- [x] 5.1 `src/host/rollback.ts`：按台账回滚单个/全部（恢复备份产物 + 还原 header cwd + 归位目录清理 + 台账标记回滚），提供可在宿主直接 `node` 执行的 CLI 入口；`tests/migrator.test.ts` 补回滚 Scenario（回滚后归属状态复现）
 
 ## 6. bridge client 两项
 

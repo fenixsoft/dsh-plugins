@@ -12,8 +12,8 @@
  *
  * 回滚只做文件层恢复与索引撤销，不解释会话产物内容（备份即原物，无需重写）。
  */
-import { cpSync, existsSync, mkdirSync, rmSync, statSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { targetSessionDirKey } from '../shared/rules.js'
 import type { DshSessionPersistence, DshWorkspaceRegistry, SessionId } from '../types/seam.js'
 import { backupDirFor, parseLedger, appendLedger, type MigrationLedgerEntry, type MigrateLogger } from './migrator.js'
@@ -71,10 +71,18 @@ export async function rollbackSession(
     return { status: 'failed', sessionId, detail: `备份目录缺失：${backupDir}` }
   }
   try {
-    // 1) 目标目录清理（迁移落位的半/全产物）。
+    // 1) 目标目录清理（迁移落位的半/全产物）；目标 project 目录清空则一并移除。
     const targetDir = join(root, targetSessionDirKey(latest.toCwd, sessionId))
     const originalDir = join(root, targetSessionDirKey(latest.fromCwd, sessionId))
-    if (targetDir !== originalDir) rmSync(targetDir, { recursive: true, force: true })
+    if (targetDir !== originalDir) {
+      rmSync(targetDir, { recursive: true, force: true })
+      try {
+        const targetProjectDir = dirname(targetDir)
+        if (existsSync(targetProjectDir) && readdirSync(targetProjectDir).length === 0) rmSync(targetProjectDir, { recursive: true, force: true })
+      } catch {
+        // 目录已不存在/不可枚举：忽略。
+      }
+    }
     // 2) 备份还原到原目录（备份即原物，含原 header cwd）。
     rmSync(originalDir, { recursive: true, force: true })
     mkdirSync(originalDir, { recursive: true })
@@ -124,7 +132,7 @@ export interface RollbackCliArgs {
   readonly dshHome?: string
 }
 
-/** 解析 CLI argv（宿主直接 `node lib/host.js ...`）。 */
+/** 解析 CLI argv（宿主直接 `node lib/host.js ...`；`--root` 由装配层消费，此处识别跳过）。 */
 export function parseRollbackArgs(argv: readonly string[]): RollbackCliArgs {
   let mode: 'single' | 'all' | undefined
   let sessionId: string | undefined
@@ -136,7 +144,8 @@ export function parseRollbackArgs(argv: readonly string[]): RollbackCliArgs {
       sessionId = argv[++i]
       mode = 'single'
     } else if (arg === '--dsh-home') dshHome = argv[++i]
-    else throw new Error(`未知参数 '${arg}'；用法：node lib/host.js --session <sessionId> | --all [--dsh-home <dir>]`)
+    else if (arg === '--root') i++
+    else throw new Error(`未知参数 '${arg}'；${CLI_USAGE}`)
   }
   if (mode === undefined) throw new Error('缺少 --session <sessionId> 或 --all；用法：node lib/host.js --session <sessionId> | --all [--dsh-home <dir>]')
   if (mode === 'single' && (sessionId === undefined || sessionId.length === 0)) throw new Error('--session 需要非空会话 id')
