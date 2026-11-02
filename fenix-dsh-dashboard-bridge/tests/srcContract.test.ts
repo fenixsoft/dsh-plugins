@@ -1,6 +1,6 @@
 /**
  * Client 半单测：iframe src 契约逐字符断言（默认/非默认前缀两组）+ 条目注册
- * 断言（桩 slots 上 5 固定条目 id/label/order、项目不再平铺注册、main keyed
+ * 断言（桩 slots 上 6 固定条目 id/label/order、项目不再平铺注册、main keyed
  * 注册一一对应、面板组件渲染出的 iframe 属性）+ 「项目」条目 Portal 化退化
  * 断言（条目组件 = Portal 分区组件）+ 降级浮层分组与 Portal 分区两条路径的
  * 纯渲染/交互契约 + 锚点/宿主/挂载状态机纯判定（node 桩替身，不依赖真实 DOM）。
@@ -155,9 +155,12 @@ function iframeOf(component: unknown, props: Record<string, unknown> = {}): Elem
 }
 
 describe('iframe src 契约（逐字符断言）', () => {
-  it('默认前缀：5 固定条目深链 → src 形态与 specs Scenario 逐字符一致', () => {
+  it('默认前缀：6 固定条目深链 → src 形态与 specs Scenario 逐字符一致', () => {
     expect(buildPanelSrc('/fenix-dashboard/', '#/overview')).toBe(
       '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/overview',
+    )
+    expect(buildPanelSrc('/fenix-dashboard/', '#/command-center')).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/command-center',
     )
     expect(buildPanelSrc('/fenix-dashboard/', '#/projects')).toBe(
       '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/projects',
@@ -230,7 +233,7 @@ describe('iframe src 契约（逐字符断言）', () => {
 })
 
 describe('条目注册（桩 slots）', () => {
-  it('5 固定条目 id/label/order 与 specs 一致；main keyed 注册 id 一一对应', async () => {
+  it('6 固定条目 id/label/order 与 specs 一致；main keyed 注册 id 一一对应', async () => {
     const stub = await applied({ fetchProjects: noopFetch })
 
     expect(stub.injectCalls).toContain('sidebar.panellist')
@@ -239,17 +242,19 @@ describe('条目注册（桩 slots）', () => {
     const fixed = sidebarEntries(stub, (options) => !String(options.id).startsWith('fenix-project-'))
     expect(fixed.map((entry) => entry.options.id)).toEqual([
       'fenix-overview',
+      'fenix-command-center',
       'fenix-projects',
       'fenix-settings',
       'fenix-activities',
       'fenix-help',
     ])
-    expect(fixed.map((entry) => entry.options.label)).toEqual(['概览', '项目', '设置', '运维', '帮助'])
-    expect(fixed.map((entry) => entry.options.order)).toEqual([10, 11, 12, 13, 14])
+    expect(fixed.map((entry) => entry.options.label)).toEqual(['概览', '指挥中心', '项目', '设置', '运维', '帮助'])
+    expect(fixed.map((entry) => entry.options.order)).toEqual([10, 11, 12, 13, 14, 15])
 
     const panels = mainEntries(stub)
     expect(panels.map((entry) => entry.options.key)).toEqual([
       'fenix-overview',
+      'fenix-command-center',
       'fenix-projects',
       'fenix-settings',
       'fenix-activities',
@@ -276,14 +281,19 @@ describe('条目注册（桩 slots）', () => {
     stub.stop()
   })
 
-  it('FIXED_ENTRIES 常量与 stub 注册一致（深链一一对应）', () => {
+  it('FIXED_ENTRIES 常量与 stub 注册一致（深链一一对应，指挥中心居概览与项目之间）', () => {
     expect(FIXED_ENTRIES.map((entry) => `${entry.id}${entry.route}${entry.order}`)).toEqual([
       'fenix-overview#/overview10',
-      'fenix-projects#/projects11',
-      'fenix-settings#/settings12',
-      'fenix-activities#/activities13',
-      'fenix-help#/help14',
+      'fenix-command-center#/command-center11',
+      'fenix-projects#/projects12',
+      'fenix-settings#/settings13',
+      'fenix-activities#/activities14',
+      'fenix-help#/help15',
     ])
+    // 指挥中心次序契约：紧随概览、先于项目（深链 #/command-center）。
+    const ids = FIXED_ENTRIES.map((entry) => entry.id)
+    expect(ids.indexOf('fenix-command-center')).toBe(ids.indexOf('fenix-overview') + 1)
+    expect(ids.indexOf('fenix-command-center')).toBe(ids.indexOf('fenix-projects') - 1)
   })
 
   it('项目分组化：不平铺顶层条目；main 面板深链直达；数据源驱动分组', async () => {
@@ -293,7 +303,7 @@ describe('条目注册（桩 slots）', () => {
     // spec「项目收纳进分组」：侧栏不出现平铺的项目顶层条目。
     const projects = sidebarEntries(stub, (options) => String(options.id).startsWith('fenix-project-'))
     expect(projects).toHaveLength(0)
-    expect(sidebarEntries(stub)).toHaveLength(5)
+    expect(sidebarEntries(stub)).toHaveLength(6)
 
     // main keyed 注册契约不变：每项目 iframe 深链直达。
     const projectPanel = mainEntries(stub).find((entry) => entry.options.key === 'fenix-project-fenixd')
@@ -517,6 +527,11 @@ describe('「项目」Portal 分区（纯渲染 + 交互契约）', () => {
     const section = collectByTestId(tree, 'fenix-projects-section')
     expect(section).toHaveLength(1)
     expect(section[0]?.props?.['aria-label']).toBe('项目')
+    // 分区容器无边框契约：sectionStyle 仅底色 + 圆角（无 border 键）。
+    const sectionStyle = section[0]?.props?.['style'] as Record<string, unknown>
+    expect(sectionStyle?.['border']).toBeUndefined()
+    expect(sectionStyle?.['borderRadius']).toBeDefined()
+    expect(sectionStyle?.['background']).toBeDefined()
     // 无自带标题/计数/折叠头：上方「项目」菜单行即唯一菜单。
     expect(collectByTestId(tree, 'fenix-projects-section-title')).toHaveLength(0)
     expect(collectByTestId(tree, 'fenix-projects-section-count')).toHaveLength(0)

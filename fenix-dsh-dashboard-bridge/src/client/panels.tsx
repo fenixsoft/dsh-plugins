@@ -35,9 +35,10 @@ export interface PanelIconProps {
   readonly active?: boolean
 }
 
-/** 5 个固定条目 id（与深链一一对应，见 client/index.ts FIXED_ENTRIES）。 */
+/** 6 个固定条目 id（与深链一一对应，见 client/index.ts FIXED_ENTRIES）。 */
 export type FixedEntryId =
   | 'fenix-overview'
+  | 'fenix-command-center'
   | 'fenix-projects'
   | 'fenix-settings'
   | 'fenix-activities'
@@ -46,6 +47,13 @@ export type FixedEntryId =
 /** 线性图标 path 数据（24×24 viewBox，stroke 线性风格）。 */
 const FIXED_GLYPHS: Record<FixedEntryId, readonly string[]> = {
   'fenix-overview': ['M3 3h7v7H3z', 'M14 3h7v7h-7z', 'M3 14h7v7H3z', 'M14 14h7v7h-7z'],
+  // 指挥中心：指挥屏意象——外框显示器 + 屏内折线态势 + 底座支架（线性风格）。
+  'fenix-command-center': [
+    'M3 4h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z',
+    'M6 12l3-3 2.5 2.5L15 8l3 3',
+    'M9 20h6',
+    'M12 16v4',
+  ],
   'fenix-projects': [
     'M3 8a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
   ],
@@ -865,7 +873,7 @@ export interface ProjectSectionView {
   readonly rowWidth: number
 }
 
-/** 分区容器样式（紧贴「项目」菜单行下方：无自带标题——上方菜单即「项目」）。 */
+/** 分区容器样式（紧贴「项目」菜单行下方：无自带标题——上方菜单即「项目」；无边框，仅底色+圆角）。 */
 const sectionStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -876,7 +884,6 @@ const sectionStyle: CSSProperties = {
   padding: 6,
   minHeight: 0,
   borderRadius: 'var(--dsw-radius-md, 8px)',
-  border: '1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.25))',
   background: 'var(--dsw-specific-sidebar-fill, transparent)',
 }
 
