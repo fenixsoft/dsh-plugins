@@ -12,8 +12,12 @@
 #   prepare 与 serve 之间持久存续）。验证永远打隔离新鲜实例（BASE_URL 铁律）。
 # - prepare：官方 web 模板初始化隔离 profile → dsh plugin add 链接本仓库插件包
 #   → cordis.patch.yml 写 loader insert 条目 → dump-config 装配自检。全程幂等。
-# - serve：exec dsh web 于 {port}/FENIX_VERIFY_PORT 注入端口——exec 取代 shell，
-#   进程组归验证框架（start_new_session），终局按进程组回收。
+# - serve：dsh web 起内部空闲端口（launch token per-process randomBytes 每
+#   boot 轮换，无法钉死），解析 boot 行提取真实 token 后 exec
+#   verify-web-bridge-proxy.py 于 {port}/FENIX_VERIFY_PORT 注入端口——任意
+#   stale ?token= 在途换真实值（web 场景静态 token 从此 boot 无关）；exec 取代
+#   shell，进程组归验证框架（start_new_session），内部 dsh web 同组，终局按
+#   进程组回收。详见 serve 分支内注释与 verify-web-bridge-proxy.py 模块文档。
 # - 上游 dashboard（桥接默认 upstream=127.0.0.1:8787）须在场：tmux 常驻
 #   （fenix-dashboard 会话），由 Administrator 运维手册守护。
 # =============================================================================
@@ -67,7 +71,42 @@ PATCH
       echo "[verify-web-bridge] 隔离 profile 未装配（先执行 $0 prepare）" >&2
       exit 1
     fi
-    exec env DSH_HOME="$VHOME" dsh --profile web --no-open --port "$port"
+    # ---------------------------------------------------------------------------
+    # token 交换代理（admin 2026-11-02，spec=add-session-grouper-and-shell-polish
+    # 验证环境阻塞修复）：dsh web launch token 为 per-process randomBytes（每次
+    # boot 轮换、无 CLI/env 可钉死），web 场景 navigate 静态 ?token= 在 serve
+    # 重启后必然过期 → 401 壳层空白 → web 断言级联零命中（4 场景整轮 env）。
+    # 故 dsh web 改起内部端口，本脚本解析 boot 行提取真实 token 后 exec
+    # verify-web-bridge-proxy.py 于 {port}：任意 stale ?token= 在途换真实值，
+    # 上游照常铸签名 cookie；场景/引擎/契约三零改动。进程组语义不变——脚本
+    # exec 代理保持 pgid，内部 dsh web 为同组子进程，终局 killpg 一并回收。
+    # ---------------------------------------------------------------------------
+    UP_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+    WEB_LOG="$VHOME/web-boot.log"
+    : > "$WEB_LOG"
+    env DSH_HOME="$VHOME" dsh --profile web --no-open --port "$UP_PORT" >"$WEB_LOG" 2>&1 &
+    WEB_PID=$!
+    TOKEN=""
+    for _ in $(seq 1 120); do
+      TOKEN="$(grep -oE 'token=[A-Za-z0-9_-]+' "$WEB_LOG" 2>/dev/null | tail -1 | cut -d= -f2 || true)"
+      [ -n "$TOKEN" ] && break
+      if ! kill -0 "$WEB_PID" 2>/dev/null; then
+        echo "[verify-web-bridge] dsh web 启动即死（内部端口 $UP_PORT），boot 日志尾部：" >&2
+        tail -20 "$WEB_LOG" >&2 || true
+        exit 1
+      fi
+      sleep 0.5
+    done
+    if [ -z "$TOKEN" ]; then
+      echo "[verify-web-bridge] 60s 内未捕获 dsh web boot 行（token 提取失败），boot 日志尾部：" >&2
+      tail -20 "$WEB_LOG" >&2 || true
+      kill "$WEB_PID" 2>/dev/null || true
+      exit 1
+    fi
+    echo "[verify-web-bridge] upstream dsh web: http://127.0.0.1:$UP_PORT/?token=$TOKEN"
+    echo "[verify-web-bridge] token-exchange proxy on :$port（任意 stale ?token= 在途换真实值）"
+    exec python3 "$ROOT/.fenix/verify-web-bridge-proxy.py" \
+      --listen-port "$port" --upstream-port "$UP_PORT" --token "$TOKEN"
     ;;
   *)
     echo "usage: $0 {prepare|serve [port]}" >&2
