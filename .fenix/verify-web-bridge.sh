@@ -76,11 +76,41 @@ PATCH
     # 验证环境阻塞修复）：dsh web launch token 为 per-process randomBytes（每次
     # boot 轮换、无 CLI/env 可钉死），web 场景 navigate 静态 ?token= 在 serve
     # 重启后必然过期 → 401 壳层空白 → web 断言级联零命中（4 场景整轮 env）。
-    # 故 dsh web 改起内部端口，本脚本解析 boot 行提取真实 token 后 exec
-    # verify-web-bridge-proxy.py 于 {port}：任意 stale ?token= 在途换真实值，
-    # 上游照常铸签名 cookie；场景/引擎/契约三零改动。进程组语义不变——脚本
-    # exec 代理保持 pgid，内部 dsh web 为同组子进程，终局 killpg 一并回收。
+    # 故 dsh web 改起内部端口，本脚本解析 boot 行提取真实 token 后经握手文件
+    # 注入 verify-web-bridge-proxy.py（绑定 {port}/FENIX_VERIFY_PORT 注入端口）
+    # ——任意 stale ?token= 在途换真实值，上游照常铸签名 cookie；场景/引擎/
+    # 契约三零改动。进程组语义不变——代理/上游 dsh web/本脚本同进程组，终局
+    # killpg 一并回收（脚本 wait 代理保持存活句柄）。
     # ---------------------------------------------------------------------------
+    # 代理先行（admin 2026-11-03 端口发现竞态根治）：引擎 CommandVerifyServer
+    # 端口发现三段式（注入端口探 → ss 进程归属 → 邻近扫描），同进程组内先绑
+    # 者胜——旧排序（上游 dsh web 先起 ~2s 绑内部随机端口，代理 token 提取后
+    # 才绑注入端口）使 ss 进程归属段在窗口内把内部端口当被测实例钉死 → origin
+    # 全量改写直连内部端口 → 占位 token 401 壳层未渲染（2026-11-02 第 1 轮
+    # 4 web 场景整轮 env，judge 裁决实证）。现改为：代理以 --handshake 模式
+    # 先行启动并【确认绑定注入端口】后，才起上游 dsh web——注入端口探恒先于
+    # ss 进程归属命中，排序上根除竞态；握手文件在 token 提取后原子交接。
+    # ---------------------------------------------------------------------------
+    HS_FILE="$VHOME/proxy-handshake.json"
+    rm -f "$HS_FILE" "$HS_FILE.tmp"
+    python3 "$ROOT/.fenix/verify-web-bridge-proxy.py" \
+      --listen-port "$port" --handshake "$HS_FILE" &
+    PROXY_PID=$!
+    # 确认代理已绑定注入端口（任一完整 HTTP 响应即绑定；握手期答 503）——
+    # 未确认前不起上游，杜绝 ss 进程归属段抢先命中内部端口
+    proxy_bound=0
+    for _ in $(seq 1 40); do
+      code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 1 "http://127.0.0.1:$port/" 2>/dev/null || true)"
+      if [ -n "$code" ] && [ "$code" != "000" ]; then proxy_bound=1; break; fi
+      if ! kill -0 "$PROXY_PID" 2>/dev/null; then break; fi
+      sleep 0.25
+    done
+    if [ "$proxy_bound" != 1 ]; then
+      echo "[verify-web-bridge] 代理未在 10s 内绑定注入端口 $port（启动即死？），终止 serve" >&2
+      kill "$PROXY_PID" 2>/dev/null || true
+      exit 1
+    fi
+    echo "[verify-web-bridge] token-exchange proxy bound :$port (handshake mode, 503 until upstream ready)"
     UP_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
     WEB_LOG="$VHOME/web-boot.log"
     : > "$WEB_LOG"
@@ -93,6 +123,7 @@ PATCH
       if ! kill -0 "$WEB_PID" 2>/dev/null; then
         echo "[verify-web-bridge] dsh web 启动即死（内部端口 $UP_PORT），boot 日志尾部：" >&2
         tail -20 "$WEB_LOG" >&2 || true
+        kill "$PROXY_PID" 2>/dev/null || true
         exit 1
       fi
       sleep 0.5
@@ -100,13 +131,17 @@ PATCH
     if [ -z "$TOKEN" ]; then
       echo "[verify-web-bridge] 60s 内未捕获 dsh web boot 行（token 提取失败），boot 日志尾部：" >&2
       tail -20 "$WEB_LOG" >&2 || true
+      kill "$PROXY_PID" 2>/dev/null || true
       kill "$WEB_PID" 2>/dev/null || true
       exit 1
     fi
     echo "[verify-web-bridge] upstream dsh web: http://127.0.0.1:$UP_PORT/?token=$TOKEN"
-    echo "[verify-web-bridge] token-exchange proxy on :$port（任意 stale ?token= 在途换真实值）"
-    exec python3 "$ROOT/.fenix/verify-web-bridge-proxy.py" \
-      --listen-port "$port" --upstream-port "$UP_PORT" --token "$TOKEN"
+    # 原子握手交接（temp+mv：代理读侧无半写窗口），随后脚本 wait 代理常伴
+    # ——本进程存活句柄与旧 exec 形态等价，终局 killpg 全组回收
+    printf '{"upstream_port": %s, "token": "%s"}\n' "$UP_PORT" "$TOKEN" > "$HS_FILE.tmp"
+    mv "$HS_FILE.tmp" "$HS_FILE"
+    echo "[verify-web-bridge] handshake written: proxy :$port -> upstream :$UP_PORT"
+    wait "$PROXY_PID"
     ;;
   *)
     echo "usage: $0 {prepare|serve [port]}" >&2

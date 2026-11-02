@@ -23,7 +23,22 @@ CLI/env 可钉死；而 web 场景 navigate 静态硬编码 ?token=（每 boot �
   双向 splice：请求行按需 token 改写后原样转发，101 握手字节原样回传，
   此后两端 socket 裸对接直至任一侧关闭。
 
-生命周期：由 serve 脚本 exec 落地，进程组归验证框架（start_new_session），
+握手模式（--handshake <file>，admin 2026-11-03 端口发现竞态根治）：
+- 引擎 CommandVerifyServer 端口发现为三段式（注入端口探 → ss 进程归属
+  → 邻近扫描），而同进程组内「先绑者胜」：旧 serve 排序（上游 dsh web
+  先起 ~2s 绑内部端口，代理在 token 提取后才 exec 绑注入端口）使 ss 进
+  程归属段在窗口内把内部端口当被测实例钉死 → origin 全量改写直连 401
+  壳层未渲染（add-session-grouper-and-shell-polish 第 1 轮 4 web 场景
+  整轮 env，judge 2026-11-02T16:30Z 裁决实证）。
+- 握手模式令代理成为第一个绑定者：启动即绑注入端口，握手文件未就绪期
+  间对一切请求答 503（引擎 _probe 以「有完整 HTTP 响应」判监听在场，
+  503 即命中注入端口探；probe_ready 按时限轮询，上游起来后自然转绿）；
+  轮询握手文件（serve 脚本 token 提取后原子写 {"upstream_port","token"}）
+  就绪后切换正常中继——注入端口探从此恒先于 ss 进程归属段命中，排序上
+  根除竞态。serve 脚本同轮改动（代理先行、确认绑定后才起上游）。
+
+生命周期：由 serve 脚本落地（握手模式下为后台子进程 + 脚本 wait 常伴；
+旧直连模式为 exec 取代 shell），进程组归验证框架（start_new_session），
 终局 killpg 连同内部 dsh web 一并回收；本代理无守护化、无常驻监听外的
 副作用。
 """
@@ -78,6 +93,10 @@ class RelayHandler(BaseHTTPRequestHandler):
     server_version = "fenix-verify-token-proxy/1.0"
 
     # ---- 注入字段（server 实例属性，ThreadingHTTPServer 单例共享） ----
+    # 握手模式：upstream_port 由等待线程在握手文件就绪后置值；置值前的请求
+    # 一律 503（监听在场证据，引擎 _probe 口径）。注意 _handshake_wait 线程
+    # 先置 real_token 后置 upstream_port——本 503 门以 upstream_port 为准，
+    # 该顺序保证门一开 real_token 必已就位（两属性间无半就绪窗口）。
     @property
     def upstream_port(self) -> int:
         return self.server.upstream_port  # type: ignore[attr-defined]
@@ -91,6 +110,15 @@ class RelayHandler(BaseHTTPRequestHandler):
 
     # ---- 主分发 ----
     def _relay(self):
+        if getattr(self.server, "upstream_port", None) is None:
+            # 握手未就绪（上游 dsh web 还在 boot）：503 = 监听在场、未就绪。
+            # 引擎端口发现 _probe 把任何完整 HTTP 响应（含 5xx）判为监听，
+            # probe_ready 按时限轮询期望码——上游起来后此处自然转绿。
+            try:
+                self.send_error(503, "verify upstream booting (handshake pending)")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         target = rewrite_token(self.path, self.real_token)
         if target != self.path:
             print(f"[proxy] token exchanged: {self.path.split('?')[0]}?token=… -> pinned", flush=True)
@@ -213,22 +241,76 @@ class RelayHandler(BaseHTTPRequestHandler):
     do_OPTIONS = _relay
 
 
+def _handshake_waiter(httpd: ThreadingHTTPServer, path: str) -> None:
+    """轮询握手文件直至可解析，装配上游端口与真实 token（握手模式专用）。
+
+    文件由 serve 脚本以 temp+mv 原子落位（{"upstream_port": int,
+    "token": str}）；此处仍按「不存在/半写/坏 JSON 一律继续轮询」防御。
+    顺序纪律：先置 real_token 再置 upstream_port（见 RelayHandler 503 门
+    注释——门开后两属性必同时就位）。
+    """
+    import json
+    import os
+    import time
+
+    deadline = time.monotonic() + 180  # 与 serve 脚本 token 提取预算同量级
+    while time.monotonic() < deadline:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            up = int(data["upstream_port"])
+            token = str(data["token"])
+            if up > 0 and token:
+                httpd.real_token = token
+                httpd.upstream_port = up
+                print(
+                    f"[proxy] handshake ready: upstream 127.0.0.1:{up}, "
+                    "launch token pinned (stale ?token= on / exchanges in-flight)",
+                    flush=True,
+                )
+                return
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        time.sleep(0.2)
+    print(f"[proxy] handshake timeout ({path} 未就绪)，维持 503（由进程组收尾回收）", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="fenix verify web-bridge token-exchange proxy")
     ap.add_argument("--listen-port", type=int, required=True, help="引擎注入的被测端口 {port}")
-    ap.add_argument("--upstream-port", type=int, required=True, help="内部 dsh web 真实端口")
-    ap.add_argument("--token", required=True, help="本轮 dsh web 真实 launch token")
+    ap.add_argument("--upstream-port", type=int, default=None, help="内部 dsh web 真实端口（直连模式必填）")
+    ap.add_argument("--token", default=None, help="本轮 dsh web 真实 launch token（直连模式必填）")
+    ap.add_argument(
+        "--handshake", default=None,
+        help="握手文件路径（代理先行模式）：启动即绑 listen-port，文件就绪前答 503，"
+             "就绪后按文件内容（upstream_port/token）切换中继",
+    )
     args = ap.parse_args()
 
-    ThreadingHTTPServer.upstream_port = args.upstream_port
-    ThreadingHTTPServer.real_token = args.token
-    httpd = ThreadingHTTPServer(("127.0.0.1", args.listen_port), RelayHandler)
-    httpd.daemon_threads = True
-    print(
-        f"[proxy] listening 127.0.0.1:{args.listen_port} -> 127.0.0.1:{args.upstream_port} "
-        f"(launch token pinned: any stale ?token= on / will be exchanged in-flight)",
-        flush=True,
-    )
+    if args.handshake:
+        # 代理先行模式：绑定先于一切（serve 脚本在本进程绑定确认后才起上游）
+        ThreadingHTTPServer.upstream_port = None
+        ThreadingHTTPServer.real_token = None
+        httpd = ThreadingHTTPServer(("127.0.0.1", args.listen_port), RelayHandler)
+        httpd.daemon_threads = True
+        threading.Thread(target=_handshake_waiter, args=(httpd, args.handshake), daemon=True).start()
+        print(
+            f"[proxy] listening 127.0.0.1:{args.listen_port} (handshake mode, "
+            f"503 until {args.handshake} arrives)",
+            flush=True,
+        )
+    else:
+        if not args.upstream_port or not args.token:
+            ap.error("直连模式需要 --upstream-port 与 --token（或改用 --handshake 代理先行模式）")
+        ThreadingHTTPServer.upstream_port = args.upstream_port
+        ThreadingHTTPServer.real_token = args.token
+        httpd = ThreadingHTTPServer(("127.0.0.1", args.listen_port), RelayHandler)
+        httpd.daemon_threads = True
+        print(
+            f"[proxy] listening 127.0.0.1:{args.listen_port} -> 127.0.0.1:{args.upstream_port} "
+            f"(launch token pinned: any stale ?token= on / will be exchanged in-flight)",
+            flush=True,
+        )
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
