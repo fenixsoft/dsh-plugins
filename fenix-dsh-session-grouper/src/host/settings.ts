@@ -45,7 +45,7 @@ export function resolveSettings(raw: GrouperConfigInput | null | undefined): Gro
   }
 }
 
-/** projects：字符串数组；每项非空且以 `/` 起始（绝对路径）；`[]` 合法（零动作）。 */
+/** projects：字符串数组；每项非空且以 `/` 起始（绝对路径，但不允许根路径 `/` 本身）；`[]` 合法（零动作）。 */
 function parseProjects(value: unknown): readonly string[] {
   if (!Array.isArray(value)) {
     throw new TypeError(`fenix-dsh-session-grouper: config.projects 必须为字符串数组，实得 ${describe(value)}`)
@@ -56,6 +56,12 @@ function parseProjects(value: unknown): readonly string[] {
     }
     if (!item.startsWith('/')) {
       throw new TypeError(`fenix-dsh-session-grouper: config.projects 项必须为绝对路径，实得 '${item}'`)
+    }
+    // 根路径 `/`（剥尾斜杠后为空）不被 rules 层归属判定支持——stripTrailingSlash
+    // 的前提即调用方不传根分隔符，`/` 作根会使所有子路径会话静默 out-of-scope，
+    // 故配置面在此显式拒绝（出现即校验，不留合法却零迁移的静默失效）。
+    if (/^\/+$/.test(item)) {
+      throw new TypeError(`fenix-dsh-session-grouper: config.projects 项不允许根路径 '/'（无子路径可归属），实得 '${item}'`)
     }
   }
   // 重复根去重保序（幂等注册本可容忍重复，配置面收敛更干净）。
