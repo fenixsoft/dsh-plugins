@@ -83,3 +83,13 @@
 
 - [x] 7.1 `fenix-dsh-session-grouper/README.zh.md`（机制/配置/回滚/版本钉扎/已知限制）+ `docs/help/dsh-session-grouper-install.md`（人工安装步骤：主树 `pnpm install` + 两插件构建、web profile 增 `link:` 依赖、`systemctl restart dsh-web`、真机验收清单：存量会话归入两工程分组且「未分组」仅剩作用域外会话、在飞 run 会话静默期不迁移、配置 `enabled=false` 零动作、回滚演练一例；标注 bridge 两项合并后浏览器强刷即生效、无需重启）
 - [x] 7.2 收尾验证：`pnpm -r test` 全绿、两插件各自 `tsdown` 构建成功、`fenix-dsh-session-grouper` 在临时 DSH_HOME 冒烟一轮（注册工作区 + 迁移夹具会话 + 台账落位）
+
+## 验证修复（原地打回第 1 轮）
+
+### 上轮实现结论（自动携带，来自上一轮 implementer 收工结论）
+
+实现 spec 全部 14 任务：(1) session-grouper 插件——纯规则层（cwd→项目根最长前缀归属、静默期/作用域/已归组/目标冲突 skip 判定、mangled 目录名推导）、settings 配置归一（非法输入装载期显式抛错）、插件体（服务缝存在性 + peer 钉版 0.2.0-rc.2 校验、enabled=false 零动作、周期扫描、单会话错误隔离）、扫描层（workspaceRegistry.create 幂等注册、sessionPersistence.list 差集、mtime 静默期过滤）、迁移层（备份先行→写前 revision 校验→persistBatch/persistHeader 物化→旧目录清理→注册表索引校正→官方 attachSession→台账追加，任一步失败回滚不留半迁移）、回滚层（台账驱动幂等单/全回滚 + 独立 node CLI lib/host.js）；tests 68 用例全绿（真实 JSONL 后端装配隔离临时 DSH_HOME，覆盖 spec 全部 Scenario，含产物目录命名与真实后端落位逐字对齐的漂移守卫、写竞争中止、目标冲突执行层兜底）；README.zh.md 与 docs/help/dsh-session-grouper-install.md 落位。(2) bridge client 两项——项目分区容器去边框（背景/圆角保留，浮层分组列表边框与宽/窄空态壳口径同步）、FIXED_ENTRIES 增指挥中心条目（order 11 居概览与项目之间，其余顺延 12–15，FIXED_GLYPHS 指挥屏线性图标、FixedEntryId 扩展）；tests 65 用例全绿（6 条目深链契约 + 无边框断言），tsdown 构建产出 lib/client.js。(3) 收尾验证：两插件 pnp
+
+- [ ] 先复核失败有效性：逐条核对 `spec/changes/add-session-grouper-and-shell-polish/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码
+- [ ] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码
+- [ ] 修复后重跑验证确认通过
