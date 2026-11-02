@@ -1,0 +1,72 @@
+{
+  "name": "fenix-dsh-session-grouper",
+  "version": "0.1.0",
+  "description": "dsh web host-side 会话归组插件：按可配置项目根幂等注册项目工作区，周期扫描未归组的冷会话（mtime 静默期），重写持久化 header cwd 到项目根并经官方 attachSession 归组；备份先行、台账幂等、可回滚",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/host.js"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "NO_COLOR=1 vitest run"
+  },
+  "dsh": {
+    "config": {
+      "projects": {
+        "type": "string[]",
+        "default": ["/root/fenixd", "/root/dsh-plugins"],
+        "description": "项目根绝对路径列表：逐根幂等注册项目工作区；cwd 位于根树内的未归组冷会话被迁移归组"
+      },
+      "quietMinutes": {
+        "type": "number",
+        "default": 30,
+        "description": "静默期（分钟）：会话产物 mtime 距今不足该时长的视为在飞，本轮跳过"
+      },
+      "intervalMinutes": {
+        "type": "number",
+        "default": 10,
+        "description": "扫描周期（分钟）"
+      },
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "总开关：false 时零注册、零迁移"
+      }
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session-persistence": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-workspace": "0.2.0-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session-persistence": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-workspace": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "~24.0.0",
+    "tsdown": "^0.23.1",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
