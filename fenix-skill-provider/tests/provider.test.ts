@@ -69,6 +69,86 @@ function createHost(sourceDir: string, pattern?: string): {
   }
 }
 
+/**
+ * 重试路径专用桩：registerProvider 前 `failTimes` 次调用抛「without inject」形态
+ * 错误（Infinity = 恒失败），捕获 warns/infos/errors 与调用数，供退避重试契约断言。
+ */
+function createRetryHost(sourceDir: string, failTimes: number): {
+  ctx: Context
+  provider: () => SkillProvider
+  registered: () => boolean
+  warns: string[]
+  infos: string[]
+  errors: string[]
+  calls: number
+  dispose: () => void
+} {
+  const warns: string[] = []
+  const infos: string[] = []
+  const errors: string[] = []
+  const effects: Array<() => void> = []
+  const controller = new AbortController()
+  const control: SkillProviderControl = { signal: controller.signal, invalidate: vi.fn() }
+  let provider: SkillProvider | undefined
+  let calls = 0
+  // 生命周期留痕走 console.*（与 src 同口径），测试以 spy 捕获，dispose 时还原。
+  const spies = [
+    vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      warns.push(args.map(String).join(' '))
+    }),
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      infos.push(args.map(String).join(' '))
+    }),
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '))
+    }),
+  ]
+  const ctx = {
+    logger: {
+      warn: () => {},
+      info: () => {},
+      error: () => {},
+    },
+    skills: {
+      registerProvider: (create: (c: SkillProviderControl) => SkillProvider) => {
+        calls += 1
+        if (calls <= failTimes) {
+          throw new Error('cannot get property "skills" without inject')
+        }
+        provider = create(control)
+        return () => {
+          provider = undefined
+          controller.abort()
+        }
+      },
+    },
+    effect: (fn: () => unknown, _label?: string) => {
+      const result = fn()
+      const disposer = typeof result === 'function' ? (result as () => void) : undefined
+      if (disposer !== undefined) effects.push(disposer)
+      return () => disposer?.()
+    },
+  } as unknown as Context
+  return {
+    ctx,
+    provider: () => {
+      if (provider === undefined) throw new Error('provider 未注册')
+      return provider
+    },
+    registered: () => provider !== undefined,
+    warns,
+    infos,
+    errors,
+    get calls(): number {
+      return calls
+    },
+    dispose: () => {
+      for (const fn of effects) fn()
+      for (const spy of spies) spy.mockRestore()
+    },
+  }
+}
+
 const dirs: string[] = []
 async function makeSourceDir(skillCount = 1): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'fenix-skill-provider-host-'))
@@ -124,6 +204,40 @@ describe('FenixSkillProvider 装配', () => {
   // （本文件的 ctx 桩不做该校验，故此处对静态声明做契约断言）。
   it('声明 static inject 含 skills（cordis 装载契约）', () => {
     expect(FenixSkillProvider.inject).toContain('skills')
+  })
+
+  // 回归 2026-11-03：loader 装载瞬态（profile 刚被包管理器改写后的首启）下
+  // ctx.skills 访问抛「without inject」→ 条目拒绝激活且下一轮启动才自愈。
+  // 契约：首试失败按 0.5s 退避重试，重试恢复后注册成功并 info 留痕。
+  it('registerProvider 首次抛错（loader 瞬态）→ 退避重试后注册成功并留痕', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const dir = await makeSourceDir()
+    const harness = createRetryHost(dir, 1) // 首次抛错，其后成功
+    new FenixSkillProvider(harness.ctx, { sourceDir: dir })
+    expect(harness.registered()).toBe(false) // 首试失败未注册
+    expect(harness.warns.join(' ')).toMatch(/1\/5/)
+    expect(harness.warns.join(' ')).toMatch(/500ms/)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(harness.registered()).toBe(true) // 重试恢复
+    expect(harness.provider().name).toBe('fenix-skill-provider')
+    expect(harness.infos.join(' ')).toMatch(/重试第 1 次后恢复/)
+    // 卸载：注销 registration 且不再有重试副作用
+    harness.dispose()
+  })
+
+  it('registerProvider 始终失败 → 5 次有界退避后终败 error 留痕，不无限重试', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const dir = await makeSourceDir()
+    const harness = createRetryHost(dir, Number.POSITIVE_INFINITY) // 恒失败
+    new FenixSkillProvider(harness.ctx, { sourceDir: dir })
+    // 0.5+1+2+4=7.5s 全部退避窗走完（含终败尝试），再多推进不再新增尝试
+    await vi.advanceTimersByTimeAsync(7_500)
+    expect(harness.calls).toBe(5)
+    expect(harness.errors.join(' ')).toMatch(/已重试 5 次放弃/)
+    expect(harness.registered()).toBe(false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(harness.calls).toBe(5) // 有界：终败后不再重试
+    harness.dispose() // 还原 console spy
   })
 })
 
