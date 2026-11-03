@@ -21,6 +21,16 @@
    #   "fenix-dsh-dashboard-bridge": "link:/root/dsh-plugins/fenix-dsh-dashboard-bridge"
    ```
 
+   **⚠️ host 插件必须同时列入 profile 的 `cordis.patch.yml` insert 清单**（`~/.dsh/profiles/web/cordis.patch.yml`）：
+   `dsh plugin add` 对无 `dsh.bundle` 声明的包只装依赖不插清单，loader 不会实例化（症状：零日志、零动作、
+   「1 entry did not activate」不含它）。
+
+   ```yaml
+   - insert:
+       - id: fenix-dsh-session-grouper
+         name: fenix-dsh-session-grouper   # 与 cc-import/bridge/skill-provider 三行并列
+   ```
+
 3. **重启宿主**：
 
    ```bash
