@@ -63,6 +63,11 @@
 				 * 「中间一小块」（2026-11-05 用户实证）；width:100% 才是铺满，
 				 * 内层输入卡 80% 与会话中态同轴 */
 				'body:not(:has(.wSkVaW_embeddedBody)) .wSkVaW_composerHero{width:100%}',
+				/* hero 工作区/模式行与输入卡左缘对齐（2026-11-05 用户指令）：行原生
+				 * 贴 hero 左缘（padding 0 16 0 20），铺满后与 80% 居中的卡片脱轴——
+				 * 用卡片同款公式取 margin-left：卡片列 = root 24px 侧距内 80% 居中，
+				 * 行左缘 = 24 + (100%-48)*0.1（改卡片侧距/宽度百分比须同步本式） */
+				'body:not(:has(.wSkVaW_embeddedBody)) .wSkVaW_heroWorkspaceRow{margin-left:calc(24px + (100% - 48px)*0.1);padding:0}',
 				/* 固定留白后无拖拽空间：隐藏列宽把手（防拖拽写入 localStorage 宽度偏好） */
 				'body:not(:has(.wSkVaW_embeddedBody)) [data-width-handle][data-width-handle]{display:none}',
 				/* 「回到底部」浮钮右距对齐 24px */
