@@ -1,0 +1,29 @@
+{
+  "name": "fenix-dsh-brand-fenix",
+  "version": "0.1.0",
+  "description": "dsh web 品牌替换：sidebar.brand.mark/name 与 conversation.hero.brand.mark 三槽以 priority -10 遮蔽官方品牌，呈现 Fenix 环结图标 + fenix harness（Montserrat）文字",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.0 <0.3"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin"
+  ],
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}

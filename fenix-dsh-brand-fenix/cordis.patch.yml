@@ -1,0 +1,7 @@
+# fenix-dsh-brand-fenix
+# dsh web 品牌替换（Fenix Harness 环结图标 + fenix harness 文字）。
+# 全部逻辑位于 client.js；此处仅把本插件插入 web profile 的 loader 清单。
+
+- insert:
+    - id: fenix-dsh-brand-fenix
+      name: fenix-dsh-brand-fenix
