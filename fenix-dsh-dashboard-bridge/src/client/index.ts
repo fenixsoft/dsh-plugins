@@ -6,11 +6,13 @@
  * layout `main` keyed 插槽以相同 id 挂对应 iframe
  * 面板（hash 深链直达）；启动时拉取 `<prefix>/api/projects`，项目不再逐个
  * 注册顶层侧栏条目，而是驱动「项目」条目（order 12）的 Portal 内嵌分区
- * （条目列表 nav 与工作区之间的常驻分区；锚点漂移自动降级浮层分组）数据源
- * 与每项目 main keyed 面板（深链 `#/projects/<name>` 契约不变），60s 周期 +
- * window focus 重拉并幂等同步（见 projectSync.ts）。boot 后等工作区列表就绪
- * 调 startSession() 落新会话界面（bootToNewSession，进入/刷新不再落入上次
- * 会话视图，2026-11-05 二次定调覆盖同日「落概览」先行指令）。
+ * （条目列表 nav 与工作区之间的常驻分区；「项目」菜单行自带整行折叠开关
+ * 拦截层，点击仅切换分区展开/折叠、不切换主面板——2026-11-05 用户指令；
+ * 锚点漂移自动降级浮层分组）数据源与每项目 main keyed 面板（深链
+ * `#/projects/<name>` 契约不变），60s 周期 + window focus 重拉并幂等同步
+ * （见 projectSync.ts）。boot 后等工作区列表就绪调 startSession() 落新会话
+ * 界面（bootToNewSession，进入/刷新不再落入上次会话视图，2026-11-05 二次
+ * 定调覆盖同日「落概览」先行指令）。
  *
  * 注册形态对照发行包 @deepseek-ai/dsh-client-ui-plugin-manager/lib/client.js：
  * `ctx.slots.inject(slotName, factory)` + `ctx.slots.register(options, component)`，
@@ -381,7 +383,8 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   const resolved = resolveBridgeConfig(options)
   const prefix = resolved.prefix
 
-  // 6 固定侧栏条目（order 10–15）；「项目」条目组件为 Portal 内嵌分区（锚点
+  // 6 固定侧栏条目（order 10–15）；「项目」条目组件为 Portal 内嵌分区 + 菜单行
+  // 折叠开关（行点击仅切换展开/折叠，不切换主面板——2026-11-05 用户指令；锚点
   // 漂移自动降级浮层分组，见 panels.tsx projectSectionComponent），其余为线性图标。
   ctx.slots.inject('sidebar.panellist', () => {
     const selectProject = projectPanelSelector(ctx)
@@ -399,7 +402,9 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     }
   })
 
-  // main keyed 插槽：与侧栏条目同 id 的 iframe 面板（深链直达）。
+  // main keyed 插槽：与侧栏条目同 id 的 iframe 面板（深链直达）。「项目」面板
+  // 保留注册：菜单行点击已被拦截层改道为折叠开关，键盘 Enter（浏览器对行按钮
+  // 合成的 click 不经拦截层）仍深链 #/projects，面板缺席会抛未注册错误。
   ctx.slots.inject('main', () => {
     const disposers = FIXED_ENTRIES.map((entry) =>
       ctx.slots.register({ name: 'main', key: entry.id }, () =>

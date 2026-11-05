@@ -34,6 +34,7 @@ import {
   nextPortalMountState,
   projectGroupStore,
   projectGroupHandlers,
+  renderProjectAnchor,
   renderProjectGroup,
   renderProjectSection,
   sectionAnchorFrom,
@@ -781,10 +782,13 @@ describe('「项目」Portal 分区（纯渲染 + 交互契约）', () => {
     expect(activeRow?.props?.['className']).toBe('fenix-project-row')
   })
 
-  it('常驻展开：expanded 不再消费（任意值都渲染行）；窄态徽标栈无项目名文本', () => {
+  it('折叠门：expanded=false 分区整体不渲染（宽窄两态同门）；expanded=true 恢复渲染', () => {
+    // 2026-11-05 用户指令：「项目」菜单行点击 = 分区折叠开关（不再切换主面板），
+    // 折叠态分区整体消失（含空态壳），宽窄两态同门。
     const collapsed = renderProjectSection(sectionView({ expanded: false }), noopHandlers)
-    expect(collectByTestId(collapsed, 'fenix-projects-list')).toHaveLength(1)
-    expect(collectByTestId(collapsed, 'fenix-project-row-fenixd')).toHaveLength(1)
+    expect(collapsed, '宽态折叠返回 null').toBeNull()
+    const railCollapsed = renderProjectSection(sectionView({ expanded: false, wide: false }), noopHandlers)
+    expect(railCollapsed, '窄态折叠返回 null').toBeNull()
 
     const rail = renderProjectSection(sectionView({ wide: false }), noopHandlers)
     expect(collectByTestId(rail, 'fenix-projects-section-title')).toHaveLength(0)
@@ -800,10 +804,86 @@ describe('「项目」Portal 分区（纯渲染 + 交互契约）', () => {
     ).toBe(false)
   })
 
+  it('空列表折叠：宽态折叠连空态壳一起收起', () => {
+    const tree = renderProjectSection(sectionView({ projects: [], expanded: false }), noopHandlers)
+    expect(tree).toBeNull()
+  })
+
   it('空列表（宽态）：分区呈现空态提示，不渲染项目行', () => {
     const tree = renderProjectSection(sectionView({ projects: [] }), noopHandlers)
     expect(collectByTestId(tree, 'fenix-projects-empty')).toHaveLength(1)
     expect(collectByTestId(tree, 'fenix-projects-list')).toHaveLength(1)
+  })
+
+  describe('「项目」菜单行拦截层（行点击 = 折叠开关，2026-11-05 用户指令）', () => {
+    function anchorView(overrides: Partial<Parameters<typeof renderProjectAnchor>[0]> = {}) {
+      return {
+        portalActive: true,
+        iconSize: 16,
+        rowWidth: 260,
+        headerWidth: 280,
+        headerGeometry: { top: -10, left: -30, height: 36 } as const,
+        anchorRef: { current: null },
+        ...overrides,
+      }
+    }
+
+    it('portalActive：锚点 = 图标 + 整行拦截层；点击仅切换展开/折叠（阻断 selectPanel）', () => {
+      let selected = 0
+      const tree = renderProjectAnchor(
+        anchorView(),
+        projectGroupHandlers(projectGroupStore, {
+          startProjectSession: () => {},
+          selectProject: () => {
+            selected += 1
+          },
+        }),
+      )
+      // 定位原点：relative + 可见溢出（拦截层须越出 16×16 图标盒覆盖整行）。
+      const style = (tree?.props?.['style'] ?? {}) as Record<string, unknown>
+      expect(style['position']).toBe('relative')
+      expect(style['overflow']).toBe('visible')
+      expect(collectByType(tree, 'svg'), '文件夹图标在场').toHaveLength(1)
+      // 拦截层：几何/宽度按量测落 style（宽度用原始量测 headerWidth，不钳 360）。
+      const header = collectByTestId(tree, 'fenix-projects-header')[0]
+      expect(header).toBeDefined()
+      const headerStyle = header?.props?.['style'] as Record<string, unknown>
+      expect(headerStyle?.['position']).toBe('absolute')
+      expect(headerStyle?.['top']).toBe(-10)
+      expect(headerStyle?.['left']).toBe(-30)
+      expect(headerStyle?.['height']).toBe(36)
+      expect(headerStyle?.['width']).toBe(280)
+      // 点击：stopPropagation + 仅切换展开/折叠，不触发 selectProject。
+      let propagationStopped = false
+      const onClick = header?.props?.['onClick'] as (event: { stopPropagation(): void }) => void
+      onClick({
+        stopPropagation: () => {
+          propagationStopped = true
+        },
+      })
+      expect(projectGroupStore.getSnapshot().expanded).toBe(false)
+      expect(propagationStopped).toBe(true)
+      expect(selected).toBe(0)
+    })
+
+    it('拦截层几何缺省：headerGeometry/headerWidth 缺省回退 DEFAULT 几何与 rowWidth', () => {
+      const tree = renderProjectAnchor(anchorView({ headerGeometry: null, headerWidth: undefined }), noopHandlers)
+      const headerStyle = collectByTestId(tree, 'fenix-projects-header')[0]?.props?.['style'] as Record<string, unknown>
+      expect(headerStyle?.['top']).toBe(-10)
+      expect(headerStyle?.['left']).toBe(-10)
+      expect(headerStyle?.['height']).toBe(36)
+      expect(headerStyle?.['width']).toBe(260)
+    })
+
+    it('降级窗口：零尺寸占位，无图标无拦截层（让位浮层分组）', () => {
+      const tree = renderProjectAnchor(anchorView({ portalActive: false }), noopHandlers)
+      const style = (tree?.props?.['style'] ?? {}) as Record<string, unknown>
+      expect(style['width']).toBe(0)
+      expect(style['height']).toBe(0)
+      expect(style['overflow']).toBe('hidden')
+      expect(collectByType(tree, 'svg')).toHaveLength(0)
+      expect(collectByTestId(tree, 'fenix-projects-header')).toHaveLength(0)
+    })
   })
 })
 

@@ -9,8 +9,10 @@
  * - `projectSectionComponent`：「项目」条目（order 12）的 Portal 内嵌分区组件
  *   （spec 2026-11 Portal 化）——从条目组件 `closest('nav')` 取条目列表元素，
  *   在其后插入宿主 div 并 createPortal 渲染常驻分区（位于条目列表与工作区
- *   regionArea 之间，官方工作区同款视觉）；锚点不可达/宿主被移除时按
- *   MutationObserver + 轮询兜底重试，连续不可达置 `degraded` 回落浮层分组；
+ *   regionArea 之间，官方工作区同款视觉）；「项目」菜单行自带整行折叠开关
+ *   拦截层（点击仅切换分区展开/折叠，不切换主面板——2026-11-05 用户指令）；
+ *   锚点不可达/宿主被移除时按 MutationObserver + 轮询兜底重试，连续不可达置
+ *   `degraded` 回落浮层分组；
  * - `projectGroupComponent`：「项目」条目内的浮层分组组件——降级路径保留
  *   （上轮实现不删），与分区共享 `projectGroupStore` 与 selectPanel 回调；
  * - `projectBadgeComponent`：项目行首字母圆形徽标（中性灰底 + 次级灰字，
@@ -19,9 +21,10 @@
  * 组件 factory 返回的外层组件为无 hook 纯函数（服务端/测试可直接求值元素树）；
  * 分区/分组内部经 `useSyncExternalStore` 订阅 `projectGroupStore`（轻量模块级
  * store，跨渲染/跨 portal 持久），纯渲染面 `renderProjectSection` /
- * `renderProjectGroup`、纯 handler 工厂 `projectGroupHandlers` 与纯锚点/宿主/
- * 挂载状态机判定（`sidebarNavFrom` / `mountSectionHost` / `nextPortalMountState`）
- * 均可独立单测（node 环境以结构桩替身覆盖，不依赖真实 DOM）。
+ * `renderProjectAnchor` / `renderProjectGroup`、纯 handler 工厂
+ * `projectGroupHandlers` 与纯锚点/宿主/挂载状态机判定（`sidebarNavFrom` /
+ * `mountSectionHost` / `nextPortalMountState`）均可独立单测（node 环境以结构桩
+ * 替身覆盖，不依赖真实 DOM）。
  */
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
@@ -942,12 +945,12 @@ export const SECTION_MAX_HEIGHT = `min(${GROUP_MAX_HEIGHT}px, 46vh)`
 /** 渲染分区的全部输入（纯渲染面，测试可直接构造）。 */
 export interface ProjectSectionView {
   readonly projects: readonly string[]
-  /** 历史契约字段：分区已常驻展开（无折叠态），渲染不再消费。 */
+  /** 分区展开/折叠态：「项目」菜单行拦截层切换（false 时分区整体不渲染）。 */
   readonly expanded: boolean
   readonly activeProject: string | null
   /** 宽态（列宽 ≥ SECTION_WIDE_MIN_WIDTH）= true；窄态渲染徽标栈。 */
   readonly wide: boolean
-  /** 历史契约字段：渲染不再消费（宽态容器 width auto、行 width 100%）。 */
+  /** 锚点拦截层宽度的缺省基准（clampSectionRowWidth 钳制后的宿主宽）。 */
   readonly rowWidth: number
 }
 
@@ -1025,17 +1028,21 @@ function sectionRailRow(name: string, active: boolean, handlers: ProjectGroupHan
 /**
  * 「项目」分区纯渲染面（无 hook，测试可直接求值元素树）：
  * - 分区紧贴「项目」菜单行下方，**不带自带标题**（上方菜单即「项目」，避免
- *   双「项目」菜单）；常驻渲染项目行（无折叠态）。
+ *   双「项目」菜单）；展开态渲染项目行，折叠态（expanded=false）整体不渲染
+ *   ——折叠开关在「项目」菜单行拦截层（2026-11-05 用户指令：菜单行点击 =
+ *   展开/折叠切换，不切换主面板；恢复 spec delta「点击分区标题行仅切换展开/
+ *   折叠态」的原始语义）。
  * - 宽态：限高滚动项目行列表（首字母徽标 + 项目名，当前项高亮）或空态提示；
  * - 窄态（收起轨）：徽标栈（仅徽标、居中、无横向溢出）；空项目返回 null
  *   （不渲染带边框内边距的空分区壳；宽态空项目则渲染「暂无项目」空态壳，
  *   两态空态口径不同）。
  *
  * 事件契约与浮层分组共用 ProjectGroupHandlers：项目行 selectProject（内部
- * stopPropagation 阻断冒泡到行按钮）。`expanded` 字段保留于视图契约但不再
- * 生效（分区常驻展开，折叠语义由「项目」菜单行的主面板切换承担）。
+ * stopPropagation 阻断冒泡到行按钮）。
  */
 export function renderProjectSection(view: ProjectSectionView, handlers: ProjectGroupHandlers): ReactElement | null {
+  // 折叠门（2026-11-05 用户指令）：宽窄两态同门，折叠连空态壳一起收起。
+  if (!view.expanded) return null
   if (!view.wide) {
     // 窄态空项目：不渲染空壳容器（避免收起轨上出现无边框信息的空白边框块）。
     if (view.projects.length === 0) return null
@@ -1075,11 +1082,82 @@ export function renderProjectSection(view: ProjectSectionView, handlers: Project
   )
 }
 
+/* --------------------- 「项目」菜单行拦截层（折叠开关） --------------------- */
+
+/** 渲染「项目」条目锚点的全部输入（纯渲染面，测试可直接构造）。 */
+export interface ProjectAnchorView {
+  /** Portal 生效 = 图标 + 整行拦截层；降级窗口 = 零尺寸占位（让位浮层分组）。 */
+  readonly portalActive: boolean
+  /** 锚点图标尺寸（宿主 renderSlot 请求：宽列 16 / 收起轨 18）。 */
+  readonly iconSize: number
+  /** 行宽基准（clampSectionRowWidth 钳制后的宿主宽；拦截层宽度缺省回退值）。 */
+  readonly rowWidth: number
+  /**
+   * 拦截层宽度（px；原始量测宿主宽，不受 360 钳制）：侧栏列拖宽超过 360px 时
+   * 拦截层仍须盖住整行，否则行尾点击穿透为行按钮的 selectPanel。缺省回退
+   * rowWidth（同浮层分组口径；生产路径由 ProjectSectionEntry 始终提供）。
+   */
+  readonly headerWidth?: number
+  /** 量测得到的拦截层几何；缺省/失真回退 DEFAULT_HEADER_GEOMETRY。 */
+  readonly headerGeometry?: HeaderGeometry | null
+  /** 挂到锚点 span 的 ref（宿主重挂探测与几何量测的原点）。 */
+  readonly anchorRef: RefObject<HTMLSpanElement>
+}
+
+/**
+ * 「项目」条目锚点纯渲染面（无 hook，测试可直接求值元素树）：
+ * - portalActive：文件夹图标 + **整行头部拦截层**——点击仅切换分区展开/折叠
+ *   （handlers.toggleHeader 内部 stopPropagation 阻断冒泡到行按钮的
+ *   selectPanel；2026-11-05 用户指令：菜单行不再切换「项目」主面板）。拦截层
+ *   与浮层分组路径同机制（同 testid/几何缺省/宽度口径），该路径已在生产验证
+ *   React 合成事件 stopPropagation 可阻断宿主行按钮 onClick。
+ * - 降级窗口：零尺寸占位（overflow hidden 裁剪），树内位置保留供重挂探测，
+ *   浮层分组自动接管。
+ */
+export function renderProjectAnchor(view: ProjectAnchorView, handlers: ProjectGroupHandlers): ReactElement {
+  const geometry = view.headerGeometry ?? DEFAULT_HEADER_GEOMETRY
+  const headerWidth = view.headerWidth ?? view.rowWidth
+  return (
+    <span
+      ref={view.anchorRef}
+      data-testid="fenix-projects-anchor"
+      aria-hidden="true"
+      style={{
+        // 定位原点：拦截层几何（负偏移越出图标盒覆盖整行）以本元素为基准。
+        position: 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: view.portalActive ? view.iconSize : 0,
+        height: view.portalActive ? view.iconSize : 0,
+        overflow: view.portalActive ? 'visible' : 'hidden',
+      }}
+    >
+      {view.portalActive ? fixedIconComponent('fenix-projects')({ size: view.iconSize }) : null}
+      {view.portalActive ? (
+        <span
+          aria-hidden="true"
+          data-testid="fenix-projects-header"
+          onClick={handlers.toggleHeader}
+          style={{
+            position: 'absolute',
+            top: geometry.top,
+            left: geometry.left,
+            width: headerWidth,
+            height: geometry.height,
+            cursor: 'pointer',
+          }}
+        />
+      ) : null}
+    </span>
+  )
+}
+
 /* ------------------------- Portal 挂载与条目退化组件 ------------------------- */
 
 /**
  * 分区条目内部组件（hook 层）：锚点探测 + 宿主生命周期 + Portal 渲染 +
- * 降级浮层。挂载循环（useLayoutEffect 一次性建立）：
+ * 菜单行折叠开关 + 降级浮层。挂载循环（useLayoutEffect 一次性建立）：
  * - 首挂即尝试：从条目组件 `sectionAnchorFrom` 取锚点（优先「项目」行按钮，
  *   宿主紧贴菜单行下方成为下挂列表；行按钮漂移回落 nav）→ 锚点紧后位插宿主
  *   → createPortal 渲染分区；
@@ -1092,6 +1170,10 @@ export function renderProjectSection(view: ProjectSectionView, handlers: Project
  *   渲染，浮层分组自动接管；轮询兜底持续运行，锚点恢复可达即自动重挂并
  *   清除 degraded（可恢复而非永久停用）；
  * - 卸载：清计时器/观察器并移除宿主（portal 随宿主移除，无残留）。
+ *
+ * 「项目」菜单行交互（2026-11-05 用户指令）：portalActive 时锚点携带整行
+ * 拦截层，点击仅切换分区展开/折叠（renderProjectAnchor + projectGroupHandlers
+ * .toggleHeader），不再切换「项目」主面板；分区渲染面按 expanded 折叠。
  */
 function ProjectSectionEntry({
   size,
@@ -1105,6 +1187,8 @@ function ProjectSectionEntry({
   const [host, setHost] = useState<HTMLDivElement | null>(null)
   const [mountState, setMountState] = useState<PortalMountState>({ status: 'seeking', failures: 0 })
   const [hostWidth, setHostWidth] = useState(0)
+  // 菜单行拦截层几何（相对锚点原点偏移 + 宿主行高）：随宿主宽度同拍量测。
+  const [headerGeometry, setHeaderGeometry] = useState<HeaderGeometry | null>(null)
   // tick 闭包内读写宿主用 ref（setState 异步，避免重挂竞态下误判健康）。
   const hostRef = useRef<HTMLDivElement | null>(null)
   // 观察器跨 effect 共享 ref：挂载 effect 创建，占停 effect 按 portalActive
@@ -1183,11 +1267,13 @@ function ProjectSectionEntry({
     }
   }, [])
 
-  // 宿主宽度量测：宽窄态信号（Portal 拿不到 renderSlot 的 {wide}）。
+  // 宿主宽度量测：宽窄态信号 + 菜单行拦截层几何（Portal 拿不到 renderSlot 的
+  // {wide}；几何随宿主同拍量测，侧栏拖宽时拦截层随 ResizeObserver 重锚）。
   useLayoutEffect(() => {
     if (host === null) return
     const update = (): void => {
       setHostWidth(host.clientWidth)
+      setHeaderGeometry(measureHeaderGeometry(anchorRef.current))
     }
     update()
     if (typeof ResizeObserver === 'undefined') return
@@ -1219,23 +1305,21 @@ function ProjectSectionEntry({
   const handlers = projectGroupHandlers(projectGroupStore, deps)
   return (
     <>
-      {/* 条目锚点：常驻于侧栏树内（portalActive 时呈图标直选「项目」主面板形态；
-          降级窗口零尺寸让位给浮层分组，保留树内位置供重挂探测）。 */}
-      <span
-        ref={anchorRef}
-        data-testid="fenix-projects-anchor"
-        aria-hidden="true"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: portalActive ? anchorIconSize : 0,
-          height: portalActive ? anchorIconSize : 0,
-          overflow: 'hidden',
-        }}
-      >
-        {portalActive ? fixedIconComponent('fenix-projects')({ size: anchorIconSize }) : null}
-      </span>
+      {/* 条目锚点：常驻于侧栏树内（portalActive 时 = 图标 + 整行折叠开关拦截层，
+          菜单行点击仅切换分区展开/折叠——2026-11-05 用户指令；降级窗口零尺寸
+          让位给浮层分组，保留树内位置供重挂探测）。 */}
+      {renderProjectAnchor(
+        {
+          portalActive,
+          iconSize: anchorIconSize,
+          rowWidth: clampSectionRowWidth(hostWidth),
+          // 拦截层宽度用原始量测（不钳 360）：侧栏拖宽时仍须盖住整行。
+          headerWidth: hostWidth,
+          headerGeometry,
+          anchorRef,
+        },
+        handlers,
+      )}
       {portalActive && host !== null ? (
         createPortal(
           renderProjectSection(
@@ -1260,7 +1344,8 @@ function ProjectSectionEntry({
 
 /**
  * 「项目」条目 Portal 分区组件工厂（外层保持无 hook 纯函数形态）。
- * Portal 生效时条目退化为图标直选「项目」主面板；分区常驻内嵌于条目列表
+ * Portal 生效时条目 = 图标 + 整行折叠开关拦截层（行点击仅切换分区展开/折叠，
+ * 不切换「项目」主面板——2026-11-05 用户指令）；分区常驻内嵌于条目列表
  * 与工作区之间；锚点漂移自动降级回浮层分组（projectGroupComponent 路径）。
  */
 export function projectSectionComponent(deps: ProjectGroupDeps): (props: PanelIconProps) => ReactElement {
