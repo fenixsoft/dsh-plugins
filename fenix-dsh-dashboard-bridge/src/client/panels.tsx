@@ -1084,6 +1084,11 @@ export function renderProjectSection(view: ProjectSectionView, handlers: Project
 
 /* --------------------- 「项目」菜单行拦截层（折叠开关） --------------------- */
 
+/** 菜单行右侧状态箭头盒尺寸（px；与降级浮层路径 chevron 16px 同规格）。 */
+const CHEVRON_BOX_SIZE = 16
+/** 状态箭头距行右缘的内缩（px）：对齐行内容右缘（--dsh-sidebar-inline-padding 缺省口径）。 */
+const CHEVRON_ROW_INSET = 12
+
 /** 渲染「项目」条目锚点的全部输入（纯渲染面，测试可直接构造）。 */
 export interface ProjectAnchorView {
   /** Portal 生效 = 图标 + 整行拦截层；降级窗口 = 零尺寸占位（让位浮层分组）。 */
@@ -1100,6 +1105,10 @@ export interface ProjectAnchorView {
   readonly headerWidth?: number
   /** 量测得到的拦截层几何；缺省/失真回退 DEFAULT_HEADER_GEOMETRY。 */
   readonly headerGeometry?: HeaderGeometry | null
+  /** 分区展开/折叠态（驱动右侧状态箭头朝向）。 */
+  readonly expanded: boolean
+  /** 宽态（展开侧栏）= true；窄态（收起轨）不放箭头（原生窄轨无展开指示）。 */
+  readonly wide: boolean
   /** 挂到锚点 span 的 ref（宿主重挂探测与几何量测的原点）。 */
   readonly anchorRef: RefObject<HTMLSpanElement>
 }
@@ -1111,6 +1120,10 @@ export interface ProjectAnchorView {
  *   selectPanel；2026-11-05 用户指令：菜单行不再切换「项目」主面板）。拦截层
  *   与浮层分组路径同机制（同 testid/几何缺省/宽度口径），该路径已在生产验证
  *   React 合成事件 stopPropagation 可阻断宿主行按钮 onClick。
+ * - 宽态行右缘**状态箭头**（2026-11-05 用户指令）：▸ 折叠 / ▾ 展开（rotate
+ *   90° 过渡，与降级浮层路径 chevron 同语言同节拍）；pointer-events none——
+ *   点击穿透到下方拦截层（DOM 序在后漆面在上，不吃事件）；窄态（收起轨）
+ *   不放（原生窄轨无展开指示）。
  * - 降级窗口：零尺寸占位（overflow hidden 裁剪），树内位置保留供重挂探测，
  *   浮层分组自动接管。
  */
@@ -1149,6 +1162,42 @@ export function renderProjectAnchor(view: ProjectAnchorView, handlers: ProjectGr
           }}
         />
       ) : null}
+      {view.portalActive && view.wide ? (
+        <span
+          data-testid="fenix-projects-chevron"
+          style={{
+            position: 'absolute',
+            // 行右缘 = geometry.left + headerWidth；内缩 12px 行内边距线对齐
+            // 内容右缘（--dsh-sidebar-inline-padding 缺省口径），垂直居中于行。
+            top: geometry.top + (geometry.height - CHEVRON_BOX_SIZE) / 2,
+            left: geometry.left + headerWidth - CHEVRON_ROW_INSET - CHEVRON_BOX_SIZE,
+            width: CHEVRON_BOX_SIZE,
+            height: CHEVRON_BOX_SIZE,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            // 漆面在拦截层之上但不吃事件：点击穿透到下方拦截层（toggleHeader）。
+            pointerEvents: 'none',
+            // 与降级浮层路径同节拍：▸ 折叠 / ▾ 展开（rotate 90°）。
+            transition: 'transform var(--ds-transition-duration, 0.15s) var(--ds-ease-in-out, ease)',
+            transform: view.expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+          }}
+        >
+          <svg
+            width={CHEVRON_BOX_SIZE}
+            height={CHEVRON_BOX_SIZE}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </span>
+      ) : null}
     </span>
   )
 }
@@ -1172,8 +1221,9 @@ export function renderProjectAnchor(view: ProjectAnchorView, handlers: ProjectGr
  * - 卸载：清计时器/观察器并移除宿主（portal 随宿主移除，无残留）。
  *
  * 「项目」菜单行交互（2026-11-05 用户指令）：portalActive 时锚点携带整行
- * 拦截层，点击仅切换分区展开/折叠（renderProjectAnchor + projectGroupHandlers
- * .toggleHeader），不再切换「项目」主面板；分区渲染面按 expanded 折叠。
+ * 拦截层 + 宽态右侧状态箭头（▸ 折叠 / ▾ 展开），点击仅切换分区展开/折叠
+ * （renderProjectAnchor + projectGroupHandlers.toggleHeader），不再切换
+ * 「项目」主面板；分区渲染面按 expanded 折叠。
  */
 function ProjectSectionEntry({
   size,
@@ -1316,6 +1366,8 @@ function ProjectSectionEntry({
           // 拦截层宽度用原始量测（不钳 360）：侧栏拖宽时仍须盖住整行。
           headerWidth: hostWidth,
           headerGeometry,
+          expanded: snapshot.expanded,
+          wide: isWideSectionWidth(hostWidth),
           anchorRef,
         },
         handlers,

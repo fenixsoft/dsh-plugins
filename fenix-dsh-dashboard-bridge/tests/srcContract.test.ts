@@ -824,6 +824,8 @@ describe('「项目」Portal 分区（纯渲染 + 交互契约）', () => {
         headerWidth: 280,
         headerGeometry: { top: -10, left: -30, height: 36 } as const,
         anchorRef: { current: null },
+        expanded: true,
+        wide: true,
         ...overrides,
       }
     }
@@ -843,7 +845,7 @@ describe('「项目」Portal 分区（纯渲染 + 交互契约）', () => {
       const style = (tree?.props?.['style'] ?? {}) as Record<string, unknown>
       expect(style['position']).toBe('relative')
       expect(style['overflow']).toBe('visible')
-      expect(collectByType(tree, 'svg'), '文件夹图标在场').toHaveLength(1)
+      expect(collectByType(tree, 'svg'), '文件夹图标 + 右侧状态箭头').toHaveLength(2)
       // 拦截层：几何/宽度按量测落 style（宽度用原始量测 headerWidth，不钳 360）。
       const header = collectByTestId(tree, 'fenix-projects-header')[0]
       expect(header).toBeDefined()
@@ -883,6 +885,35 @@ describe('「项目」Portal 分区（纯渲染 + 交互契约）', () => {
       expect(style['overflow']).toBe('hidden')
       expect(collectByType(tree, 'svg')).toHaveLength(0)
       expect(collectByTestId(tree, 'fenix-projects-header')).toHaveLength(0)
+    })
+
+    it('右侧状态箭头（宽态）：展开 ▾（rotate 90°）/ 折叠 ▸；pointer-events none 点击落到拦截层', () => {
+      // 展开态：箭头在行右缘（几何右端内缩），rotate 90° 指向下（与降级路径
+      // chevron 同语言：▸ 折叠 / ▾ 展开）。
+      const open = renderProjectAnchor(anchorView({ expanded: true }), noopHandlers)
+      const openChevron = collectByTestId(open, 'fenix-projects-chevron')[0]
+      expect(openChevron, '展开态箭头在场').toBeDefined()
+      const openStyle = openChevron?.props?.['style'] as Record<string, unknown>
+      // 位置：行右缘 = geometry.left + headerWidth，内缩 12px 行内边距 + 16px 箭头盒。
+      expect(openStyle?.['left']).toBe(-30 + 280 - 12 - 16)
+      // 垂直居中于行：geometry.top + (行高 - 盒高)/2。
+      expect(openStyle?.['top']).toBe(-10 + (36 - 16) / 2)
+      expect(openStyle?.['transform']).toBe('rotate(90deg)')
+      expect(openStyle?.['pointerEvents']).toBe('none')
+      expect(collectByType(openChevron, 'svg'), '箭头 svg 在场').toHaveLength(1)
+
+      // 折叠态：同位箭头回正（▸）。
+      const closed = renderProjectAnchor(anchorView({ expanded: false }), noopHandlers)
+      const closedChevron = collectByTestId(closed, 'fenix-projects-chevron')[0]
+      expect(closedChevron, '折叠态箭头在场').toBeDefined()
+      expect((closedChevron?.props?.['style'] as Record<string, unknown>)?.['transform']).toBe('rotate(0deg)')
+    })
+
+    it('右侧状态箭头（窄态/降级）：收起轨不放箭头（原生窄轨无展开指示）', () => {
+      const rail = renderProjectAnchor(anchorView({ wide: false }), noopHandlers)
+      expect(collectByTestId(rail, 'fenix-projects-chevron')).toHaveLength(0)
+      const degraded = renderProjectAnchor(anchorView({ portalActive: false, wide: false }), noopHandlers)
+      expect(collectByTestId(degraded, 'fenix-projects-chevron')).toHaveLength(0)
     })
   })
 })
