@@ -13,7 +13,8 @@
  *   MutationObserver + 轮询兜底重试，连续不可达置 `degraded` 回落浮层分组；
  * - `projectGroupComponent`：「项目」条目内的浮层分组组件——降级路径保留
  *   （上轮实现不删），与分区共享 `projectGroupStore` 与 selectPanel 回调；
- * - `projectBadgeComponent`：项目行首字母圆形徽标（底色由项目名哈希稳定生成）。
+ * - `projectBadgeComponent`：项目行首字母圆形徽标（中性灰底 + 次级灰字，
+ *   2026-11-03 用户裁决：与侧栏单色图标语言一致，原哈希色相彩色徽标废弃）。
  *
  * 组件 factory 返回的外层组件为无 hook 纯函数（服务端/测试可直接求值元素树）；
  * 分区/分组内部经 `useSyncExternalStore` 订阅 `projectGroupStore`（轻量模块级
@@ -25,6 +26,9 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties, ReactElement, RefObject } from 'react'
+// primitives 仅在浏览器模块表可解析（vitest 以桩说明符替换，见 vitest.config.ts）；
+// 图标与 Tooltip 与原生工作区行 rowActions 同款基元。
+import { IconNewChatOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { compareNames } from './projectSync.js'
 
 /** ui-sidebar 传给图标组件的 owner props（SidebarPanelIconOwnerProps 子集）。 */
@@ -100,19 +104,12 @@ export function fixedIconComponent(id: FixedEntryId): (props: PanelIconProps) =>
   }
 }
 
-/** 项目名 → 稳定色相（简单多项式哈希，跨会话一致）。 */
-function nameHue(name: string): number {
-  let hash = 0
-  for (let index = 0; index < name.length; index += 1) {
-    hash = (hash * 31 + name.charCodeAt(index)) % 360
-  }
-  return hash
-}
-
-/** 项目条目首字母圆形徽标组件工厂（label=项目名，图标=首字母徽标）。 */
+/** 项目条目首字母圆形徽标组件工厂（label=项目名，图标=首字母徽标）。
+ * 配色口径（2026-11-03 用户裁决）：中性灰底 + 次级灰字，与侧栏菜单的单色
+ * 线性图标语言一致——原「项目名哈希色相」彩色徽标与 dsh web 侧栏风格不符。
+ * 底/字走 dsw alias（亮暗主题自适应），缺省回退浅色主题值。 */
 export function projectBadgeComponent(name: string): (props: PanelIconProps) => ReactElement {
   const letter = (Array.from(name.trim())[0] ?? '?').toUpperCase()
-  const hue = nameHue(name)
   return function ProjectBadge({ size = 18 }: PanelIconProps) {
     return (
       <span
@@ -121,8 +118,8 @@ export function projectBadgeComponent(name: string): (props: PanelIconProps) => 
           width: size,
           height: size,
           borderRadius: '50%',
-          background: `hsl(${hue} 42% 46%)`,
-          color: '#fff',
+          background: 'var(--dsw-alias-bg-overlay, #e9ecf2)',
+          color: 'var(--dsw-alias-label-secondary, #61666b)',
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -203,6 +200,9 @@ export const projectGroupStore = createProjectGroupStore()
 export interface ProjectGroupDeps {
   /** 点击项目行：切换主面板为该项目 iframe（index.ts 经 layout.selectPanel 实现）。 */
   readonly selectProject: (name: string) => void
+  /** 行内「新建会话」action：在该项目工作区新建/复用空白会话并切回会话视图
+   * （index.ts 经 uiWorkspace.startSession 实现，原生工作区行 + 按钮同款）。 */
+  readonly startProjectSession: (name: string) => void
 }
 
 /**
@@ -214,15 +214,58 @@ export interface ProjectGroupEventLike {
   preventDefault(): void
 }
 
+/* ======================= 行交互底色（注入式 CSS） ======================= */
+
+/**
+ * 项目行 hover / 选中 / 键盘焦点底色样式表。必须走 CSS 类规则而非 inline
+ * style：inline background 会压过一切 :hover 规则（透明底恒赢），正是
+ * 「项目行无 hover 高亮」的根因（2026-11-03 用户实测反馈）。注入形态对齐
+ * dsh 官方插件 CSS（style[data-plugin-css] 单例）；底色取
+ * interactive-bg-hover——与原生工作区行 hover/selected 同源变量，亮暗主题
+ * 自适应。node 测试环境无 document，注入跳过；CSS 文本导出供合同测试断言。
+ */
+export const PROJECT_ROW_CSS = [
+  '.fenix-project-row,.fenix-project-rail-row{background:transparent}',
+  // hover 与选中同色（原生工作区行同口径）：active 行恒高亮，hover 只点亮非选中行。
+  '.fenix-project-row:hover,.fenix-project-rail-row:hover,.fenix-project-row[data-active],.fenix-project-rail-row[data-active]{background:var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.18))}',
+  // 键盘焦点环对齐原生菜单行（.panelRow:focus-visible 同款）。
+  '.fenix-project-row:focus-visible{outline:var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));outline-offset:-2px}',
+  // 行尾「新建会话」action（原生工作区 rowActions 同款交互：行 hover 才显现，
+  // 图标钮 16×16 / radius-xs / tertiary 色，hover 只变色不加底——原生
+  // .rowActions/.iconButton 逐键口径）。
+  '.fenix-project-actions{display:none;align-items:center;justify-content:center;flex:none;width:20px;height:20px;margin-left:auto}',
+  '.fenix-project-row:hover .fenix-project-actions{display:inline-flex}',
+  '.fenix-project-action{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;border:none;border-radius:var(--dsw-radius-xs, 4px);background:transparent;cursor:pointer;color:var(--dsw-alias-label-tertiary, #81858c)}',
+  '.fenix-project-action:hover{color:var(--dsw-alias-label-primary, #0f1115)}',
+].join('\n')
+
+/** 注入样式单例的 data-plugin-css 标识（幂等重挂防重）。 */
+const PROJECT_ROW_CSS_TAG = 'fenix-dsh-dashboard-bridge/project-rows.css'
+
+function injectProjectRowCss(): void {
+  if (typeof document === 'undefined') return
+  if (document.querySelector(`style[data-plugin-css="${PROJECT_ROW_CSS_TAG}"]`) !== null) return
+  const tag = document.createElement('style')
+  tag.dataset.plugin = 'fenix-dsh-dashboard-bridge'
+  tag.dataset.pluginCss = PROJECT_ROW_CSS_TAG
+  tag.textContent = PROJECT_ROW_CSS
+  // head 缺失（极端时序）静默放弃：模块加载期 head 恒在，防御性兜底即可。
+  document.head?.appendChild(tag)
+}
+injectProjectRowCss()
+
 /** 分组块交互回调（事件已在内部 stopPropagation，阻断冒泡到行按钮的 selectPanel）。 */
 export interface ProjectGroupHandlers {
   readonly toggleHeader: (event: ProjectGroupEventLike) => void
   readonly selectProject: (name: string, event: ProjectGroupEventLike) => void
+  /** 行内「新建会话」action（原生工作区行 rowActions 的 + 按钮同款行为）。 */
+  readonly startProjectSession: (name: string, event: ProjectGroupEventLike) => void
 }
 
 /**
  * 分组块交互回调工厂（纯函数，可独立单测）：头部行仅切换展开/折叠；
- * 项目行交由 deps.selectProject。
+ * 项目行点击交由 deps.selectProject，「新建会话」action 交由
+ * deps.startProjectSession。
  */
 export function projectGroupHandlers(
   store: Pick<typeof projectGroupStore, 'toggleExpanded'>,
@@ -236,6 +279,10 @@ export function projectGroupHandlers(
     selectProject(name, event) {
       event.stopPropagation()
       deps.selectProject(name)
+    },
+    startProjectSession(name, event) {
+      event.stopPropagation()
+      deps.startProjectSession(name)
     },
   }
 }
@@ -253,8 +300,9 @@ function resolveIconSize(size: number | undefined): number {
   return size ?? 18
 }
 
-/** 分组列表行高（px）与最大高度（约 7 行，超出内部滚动）。 */
-const GROUP_ROW_HEIGHT = 30
+/** 分组列表行高（px）与最大高度（约 7 行，超出内部滚动）。34 = 原生工作区
+ * projectRow 行高（2026-11-03 用户裁决：项目列表样式与工作区列表一致）。 */
+const GROUP_ROW_HEIGHT = 34
 const GROUP_MAX_HEIGHT = 7 * GROUP_ROW_HEIGHT + 12
 
 /** 浮层列表的 fixed 视口锚点（px；滚动/尺寸变化时由 ProjectGroupInner 重锚）。 */
@@ -423,10 +471,16 @@ const groupFloatListStyle = (origin: ProjectGroupFloatOrigin, rowWidth: number):
   left: origin.left,
 })
 
-const groupRowStyle = (active: boolean): CSSProperties => ({
+const groupRowStyle = (_active: boolean): CSSProperties => ({
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
+  // 逐键对齐原生工作区 projectRow（ui-workspace .projectRow，2026-11-03 用户
+  // 裁决「项目列表与工作区列表样式一致」）：gap 6 / 行高 34 / radius-md /
+  // 14px 字 / 20px 行盒 / user-select none。底色（默认/hover/选中）不在
+  // inline——inline background 会压过 CSS :hover（无 hover 高亮的根因），
+  // 由 PROJECT_ROW_CSS 注入的类规则驱动，行挂 fenix-project-row 类 +
+  // data-active 属性。
+  gap: 6,
   height: GROUP_ROW_HEIGHT,
   // 行是限高滚动容器（flex column）的直接子项：默认 flex-shrink:1 会在内容
   // 超限时压缩行高而不是溢出滚动，滚动条永不出现（真机 3942 验证发现），
@@ -434,19 +488,19 @@ const groupRowStyle = (active: boolean): CSSProperties => ({
   flexShrink: 0,
   flexGrow: 0,
   padding: '0 8px',
-  borderRadius: 'var(--dsw-radius-sm, 6px)',
+  borderRadius: 'var(--dsw-radius-md, 12px)',
   border: 'none',
   cursor: 'pointer',
-  background: active ? 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.18))' : 'transparent',
   color: 'var(--dsw-alias-label-primary, inherit)',
   font: 'inherit',
-  fontSize: 13,
-  lineHeight: `${GROUP_ROW_HEIGHT}px`,
+  fontSize: 14,
+  lineHeight: '20px',
   textAlign: 'left',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   width: '100%',
   boxSizing: 'border-box',
+  userSelect: 'none',
 })
 
 const projectNameStyle: CSSProperties = {
@@ -469,11 +523,14 @@ function projectRow(
   withName: boolean,
 ): ReactElement {
   // 键盘可达：div[role=button] 非原生按钮，tabIndex 0 + Enter/Space 触发选中。
+  // hover/选中底色走 PROJECT_ROW_CSS 类规则（fenix-project-row /
+  // fenix-project-rail-row + data-active），inline 不带 background。
   return (
     <div
       key={name}
       role="button"
       tabIndex={0}
+      className={withName ? 'fenix-project-row' : 'fenix-project-rail-row'}
       data-testid={`fenix-project-row-${name}`}
       data-active={active || undefined}
       title={name}
@@ -485,8 +542,29 @@ function projectRow(
       }}
       style={rowStyle(active)}
     >
-      {projectBadgeComponent(name)({ size: 18 })}
+      {/* 徽标尺寸对齐原生图标槽：宽态行 16px（ui-workspace .slot 16×20 图标），
+          收起轨徽标 18px（原生收起轨图标 18px 口径）。 */}
+      {projectBadgeComponent(name)({ size: withName ? 16 : 18 })}
       {withName ? <span style={projectNameStyle}>{name}</span> : null}
+      {withName ? (
+        // 行尾「新建会话」action：显现/底色走 PROJECT_ROW_CSS（hover 才显现，
+        // 原生 rowActions 同款）；文案/aria 抄原生词典（actions.newSession /
+        // actions.newSession.aria）。onKeyDown 阻断冒泡——行级 Enter/Space
+        // 处理器会把按键当成「选中项目」，与按钮自身的 click 语义冲突。
+        <span className="fenix-project-actions">
+          <Tooltip label="新会话" side="bottom" align="end" delayMs={500}>
+            <button
+              type="button"
+              className="fenix-project-action"
+              aria-label={`在“${name}”中新建会话`}
+              onClick={(event) => handlers.startProjectSession(name, event)}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <IconNewChatOutlineRegular />
+            </button>
+          </Tooltip>
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -873,21 +951,28 @@ export interface ProjectSectionView {
   readonly rowWidth: number
 }
 
-/** 分区容器样式（紧贴「项目」菜单行下方：无自带标题——上方菜单即「项目」；无边框，仅底色+圆角）。 */
+/**
+ * 分区容器样式（紧贴「项目」菜单行下方：无自带标题——上方菜单即「项目」）。
+ * 原生工作区列表同款（2026-11-03 用户裁决）：无容器盒（无底色/圆角/内边距），
+ * 行直接铺在侧栏底上，与工作区行同为「透明行 + hover 高亮」形态。
+ */
 const sectionStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 2,
   boxSizing: 'border-box',
   width: 'auto',
-  margin: '0 10px 8px',
-  padding: 6,
+  margin: '2px 0 4px',
   minHeight: 0,
-  borderRadius: 'var(--dsw-radius-md, 8px)',
-  background: 'var(--dsw-specific-sidebar-fill, transparent)',
 }
 
-/** 分区列表容器样式：最大高度 + 内部滚动（行钉死高度让容器真实溢出）。 */
+/**
+ * 分区列表容器样式：最大高度 + 内部滚动（行钉死高度让容器真实溢出）。
+ * 滚动条几何逐项复刻原生工作区列表（.bhn1Oq_list）：列表右缘越过侧栏
+ * inline-padding 线、只留 scrollbar-offset（2px），行内容经 padding-right
+ * 收回到 padding 线——滚动条贴侧栏右缘渲染（全局 5px 细滚动条样式），
+ * 行盒两侧仍与原生行一样对齐 12px padding 线，行宽逐像素一致；
+ * scrollbar-gutter: stable 让溢出/不溢出两态行宽不变（无滚动条跳动）。
+ */
 const sectionListStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -896,6 +981,10 @@ const sectionListStyle: CSSProperties = {
   overflowY: 'auto',
   minHeight: 0,
   boxSizing: 'border-box',
+  marginRight: 'calc(-1 * (var(--dsh-sidebar-inline-padding, 12px) - var(--dsh-session-list-scrollbar-offset, 2px)))',
+  paddingRight:
+    'calc(var(--dsh-sidebar-inline-padding, 12px) - var(--dsh-scrollbar-width, 5px) - var(--dsh-session-list-scrollbar-offset, 2px))',
+  scrollbarGutter: 'stable',
 }
 
 /** 窄态徽标栈容器样式（仅徽标，居中成列，无横向溢出）。 */
@@ -911,8 +1000,9 @@ const sectionRailListStyle: CSSProperties = {
   padding: '2px 0',
 }
 
-/** 窄态单枚徽标行样式（徽标栈行：居中、随容器收缩、可高亮、无横向溢出）。 */
-const sectionRailRowStyle = (active: boolean): CSSProperties => ({
+/** 窄态单枚徽标行样式（徽标栈行：居中、随容器收缩、可高亮、无横向溢出）。
+ * 底色同宽态行走 PROJECT_ROW_CSS 类规则（fenix-project-rail-row）。 */
+const sectionRailRowStyle = (_active: boolean): CSSProperties => ({
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -920,7 +1010,6 @@ const sectionRailRowStyle = (active: boolean): CSSProperties => ({
   flexShrink: 0,
   borderRadius: 'var(--dsw-radius-sm, 6px)',
   cursor: 'pointer',
-  background: active ? 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.18))' : 'transparent',
 })
 
 /** 宽态分区行（首字母徽标 + 项目名，当前项高亮）：复用项目行渲染工厂。 */

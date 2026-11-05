@@ -12,6 +12,9 @@ const stubDshRuntime = {
   enforce: 'pre' as const,
   resolveId(id: string) {
     if (id === '@deepseek-ai/cordis') return '\0stub-dsh-cordis'
+    // primitives 桩同理（项目行「新建会话」action 消费 Tooltip/图标基元）：
+    // node 测试环境无 dsh client 模块表，最小函数桩保持元素树可求值。
+    if (id === '@deepseek-ai/dsh-client-ui-primitives') return '\0stub-dsh-primitives'
     return undefined
   },
   load(id: string) {
@@ -23,6 +26,18 @@ const stubDshRuntime = {
         '\t\tthis.ctx = ctx',
         '\t\tif (name !== undefined) this.name = name',
         '\t}',
+        '}',
+      ].join('\n')
+    }
+    if (id === '\0stub-dsh-primitives') {
+      return [
+        '// 最小 primitives 桩：Tooltip 直通 children，图标返回 null——',
+        '// 项目行元素树测试只断言结构（props/testid），不实际渲染。',
+        'export function Tooltip(props) {',
+        '\treturn props?.children ?? null',
+        '}',
+        'export function IconNewChatOutlineRegular() {',
+        '\treturn null',
         '}',
       ].join('\n')
     }

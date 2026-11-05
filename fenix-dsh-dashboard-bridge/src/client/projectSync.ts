@@ -97,6 +97,25 @@ export function parseProjectNames(payload: unknown): string[] {
 }
 
 /**
+ * 解析指定项目在 `/api/projects` 应答中的目录路径（项目行「新建会话」action
+ * 对无工作区项目自动建工作区用）：仅接受 `exists: true` 且 `path` 为非空
+ * 字符串的行——目录不存在的注册行（exists=false）拿不到可用路径，返回 null
+ * （调用方 warn 降级）。项目未注册/应答形状异常同样返回 null（与主链路的
+ * 抛错口径不同：这是点击期单次查询，静默降级即可，不产生未处理异常）。
+ */
+export function parseProjectPath(payload: unknown, name: string): string | null {
+  const projects = (payload as { projects?: unknown } | null | undefined)?.projects
+  if (!Array.isArray(projects)) return null
+  for (const item of projects) {
+    const row = item as { name?: unknown; path?: unknown; exists?: unknown } | null | undefined
+    if (row?.name !== name) continue
+    if (row.exists !== true) return null
+    return typeof row.path === 'string' && row.path.length > 0 ? row.path : null
+  }
+  return null
+}
+
+/**
  * 幂等 reconcile（main keyed 面板差异）：期望集 = 去重后的名称集合。
  * - 消失 → removeProject；
  * - 新增 → addProject；

@@ -46,6 +46,15 @@ declare module '@deepseek-ai/cordis' {
       inject(slot: string, factory: () => unknown): void
       /** 注册一个条目；返回注销 disposer（幂等，可安全重复调用）。 */
       register(options: SlotRegistrationOptions, component: unknown): () => void
+      /**
+       * 投影某插槽的每 cell 胜出条目（2026-11-05 官方面板重排读官方 label/icon
+       * 引用用）：list 槽 cell 键 = options.id，entries 按 priority 升序稳定重排
+       * 后每 cell 取首个——低 priority 重注册同 id 即遮蔽原条目。形状为
+       * { component, options }（ui-sidebar syncPanels 同款消费面）。
+       */
+      entriesOfSlot(slot: string): readonly { readonly component: unknown; readonly options: SlotRegistrationOptions }[]
+      /** 订阅插槽条目变更（ui-sidebar syncPanels 同款消费面）；返回退订函数。 */
+      subscribe(slot: string, fn: () => void): () => void
     }
     /** 宿主 WebServer 服务（@deepseek-ai/dsh-host-webserver 提供）。 */
     readonly webServer: {
@@ -67,6 +76,39 @@ declare module '@deepseek-ai/cordis' {
       /** 激活 main keyed 面板（panelId=null 回到会话视图）；未注册的 id 会抛错。 */
       selectPanel(panelId: string | null): void
     }
+    /**
+     * 工作区 UI 服务（@deepseek-ai/dsh-client-ui-workspace 提供，UiWorkspaceService）。
+     * 最小消费面：项目行「新建会话」action 复用原生 startSession(workspaceId)
+     * ——新建（或复用空白）会话并把主面板切回会话视图，与工作区行
+     * rowActions 的 + 按钮行为逐键相同。声明为可选：测试桩上下文不提供，
+     * 运行时守卫缺失即降级（design Risks 条款）。
+     */
+    readonly uiWorkspace?: {
+      /** 纯工作区控制器（items 形状以 WorkspaceView 为据：id/path/title）。 */
+      readonly workspaces: {
+        readonly list: {
+          getSnapshot(): {
+            readonly items: readonly {
+              readonly workspaceId: string
+              readonly path: string
+              readonly title: string
+            }[]
+          }
+        }
+      }
+      /** 新建（或复用空白）会话并切主面板到该会话（原生 startSession 同名）。 */
+      startSession(workspaceId: string): void
+    }
+    /**
+     * 工作区控制器服务（@deepseek-ai/dsh-api-workspace-controller 提供，键
+     * "workspaces"；ui-workspace 即经 ctx.get("workspaces") 消费）。最小消费面：
+     * 「新建会话」action 对无工作区的 fenix 项目按目录自动建工作区——与原生
+     * addWorkspace adoptDirectory 的 create({path}) 同键。声明可选理由同上。
+     */
+    readonly workspaces?: {
+      /** 按目录路径注册工作区；失败 reject（原生 WorkspaceCreateError 同语义）。 */
+      create(input: { readonly path: string }): Promise<{ readonly workspaceId: string }>
+    }
   }
 
   /** slots.register 的注册选项（SlotRegistrationOptions / KindOptions 子集）。 */
@@ -79,6 +121,12 @@ declare module '@deepseek-ai/cordis' {
     readonly key?: string
     /** 列表条目升序排序键；同序数保持注册顺序。 */
     readonly order?: number
+    /**
+     * 条目优先级（缺省 0）：list 槽 entries 按 priority 升序稳定重排后每 cell
+     * 取首个——同 id 低 priority 注册即遮蔽官方条目（chat-polish 同款遮蔽语义，
+     * 2026-11-05 官方面板重排消费）。
+     */
+    readonly priority?: number
     /** 行标题与可访问名：纯字符串或每次读取求值的 thunk。 */
     readonly label?: string | (() => string)
     /** 本条目文案所属词典命名空间；不声明则 label 按原样使用。 */
@@ -103,3 +151,28 @@ declare module '@deepseek-ai/cordis' {
     constructor(ctx: Context, name?: string)
   }
 }
+
+declare module '@deepseek-ai/dsh-client-ui-primitives' {
+  import type { ComponentType, ReactNode } from 'react'
+
+  /**
+   * 最小契约面（只覆盖本插件消费的导出）：发行包 primitives 为 CSS-in-JS
+   * 组件集，props 以 0.2.0-rc.2 发行包 lib 用法为准。Tooltip 与 NewChat
+   * 图标为原生工作区行「新建会话」rowActions 的同款基元（本项目行 action
+   * 与原生逐键同形）。
+   */
+  export interface TooltipProps {
+    /** 悬浮提示文案（原样使用，不做词典查找）。 */
+    readonly label: ReactNode
+    /** 弹出方位/对齐（native rowActions 用 bottom/end）。 */
+    readonly side?: 'top' | 'bottom' | 'left' | 'right'
+    readonly align?: 'start' | 'center' | 'end'
+    /** 悬浮延时（毫秒）。 */
+    readonly delayMs?: number
+    readonly children?: ReactNode
+  }
+  export const Tooltip: ComponentType<TooltipProps>
+  /** 线性「新建会话」图标（24 viewBox stroke 风格，缺省尺寸随宿主）。 */
+  export const IconNewChatOutlineRegular: ComponentType<Record<string, never>>
+}
+

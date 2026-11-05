@@ -404,7 +404,7 @@ describe('projectGroupStore（分组数据源契约）', () => {
     // Portal 分区纯渲染面（renderProjectSection）从同一快照渲染项目行。
     const tree = renderProjectSection(
       { projects: snapshot.projects, expanded: true, activeProject: null, wide: true, rowWidth: 260 },
-      { toggleHeader() {}, selectProject() {} },
+      { toggleHeader() {}, selectProject() {}, startProjectSession() {} },
     )
     expect(collectByTestId(tree, 'fenix-projects-section')).toHaveLength(1)
     expect(collectByTestId(tree, 'fenix-project-row-fenixd')).toHaveLength(1)
