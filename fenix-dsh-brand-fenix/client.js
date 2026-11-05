@@ -7,10 +7,11 @@
  *
  *   1. sidebar.brand.mark（size 24）——左上角图标：官方鲸鱼剪影 → Fenix 环结
  *      （取自 dashboard 顶栏 logo-64.png，data URI 内联，明暗主题同素材）。
- *   2. sidebar.brand.name（24px 高容器，letter-spacing .04em）——官方矢量
- *      wordmark「deepseek harness」→ 文字「fenix harness」。官方 wordmark 本质是
- *      Montserrat 风格几何无衬线（前端自带 @font-face 300/400/500），故直接以
- *      Montserrat 500 渲染，字号对齐官方字面视觉高度（~16px），颜色继承容器。
+ *   2. sidebar.brand.name（24px 高容器）——官方矢量 wordmark「deepseek harness」
+ *      → 复刻 dashboard 顶栏 HeaderTitle 排版：「Fenix」16px/700/字距 .3px +
+ *      「Harness」400/左距 6px/灰字（dsh 别名 --dsw-alias-label-tertiary，暗色
+ *      自动翻转）。字体栈 dsh --dsw-font-family 与 dashboard DSH_FONT_FAMILY
+ *      逐字一致。
  *   3. conversation.hero.brand.mark（size 34）——新建会话界面的空会话品牌标：
  *      官方动画鱼 fallback → 同款 Fenix 环结。不透传宿主 className（fish 类在
  *      hover 时对 mark 施加游动动画，不适用位图）。
@@ -150,23 +151,39 @@
 				})
 			}
 
-			/* 名称文字：样式对齐官方 wordmark（全小写、几何无衬线、颜色继承）。
+			/* 名称文字：复刻 dashboard 顶栏 HeaderTitle 排版（app.tsx）——
+			 * 「Fenix」16px/700/letterSpacing .3px + 「Harness」400/左距 6px/灰字。
+			 * 字体栈用 dsh 自身 --dsw-font-family（与 dashboard DSH_FONT_FAMILY 逐字
+			 * 一致）；灰字用 dsh 别名 --dsw-alias-label-tertiary（浅色 = antd
+			 * colorTextTertiary 同值 rgba(0,0,0,0.45)，暗色自动翻转）。
 			 * 官方 sidebar 名称容器自带 height:24px + letter-spacing:.04em + 居中，
-			 * 此处只补字体族/字号/字重。 */
+			 * 0.3px 字距须压过容器 .04em，故显式覆写 letterSpacing。 */
 			var FenixName = function () {
 				return react.createElement(
 					'span',
 					{
 						className: 'fdxbrand-name',
 						style: {
-							fontFamily: "'Montserrat', sans-serif",
+							fontFamily: 'var(--dsw-font-family, sans-serif)',
 							fontSize: '16px',
-							fontWeight: 500,
+							fontWeight: 700,
+							letterSpacing: '0.3px',
 							whiteSpace: 'nowrap',
 							lineHeight: '24px',
 						},
 					},
-					'fenix harness',
+					'Fenix',
+					react.createElement(
+						'span',
+						{
+							style: {
+								fontWeight: 400,
+								marginLeft: '6px',
+								color: 'var(--dsw-alias-label-tertiary, rgba(0,0,0,0.45))',
+							},
+						},
+						'Harness',
+					),
 				)
 			}
 
