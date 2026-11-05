@@ -1,0 +1,7 @@
+# fenix-dsh-chat-polish
+# dsh web 对话区打磨（留白 24px + 用户消息 Markdown 渲染）。
+# 全部逻辑位于 client.js；此处仅把本插件插入 web profile 的 loader 清单。
+
+- insert:
+    - id: fenix-dsh-chat-polish
+      name: fenix-dsh-chat-polish

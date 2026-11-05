@@ -1,0 +1,31 @@
+{
+  "name": "fenix-dsh-chat-polish",
+  "version": "0.1.0",
+  "description": "dsh web 对话区打磨：①对话列左右留白固定 24px（解除 920px 居中上限、输入卡对齐、隐藏列宽把手）②用户消息按 Markdown 渲染（复用宿主基线包 MarkdownText）",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.0 <0.3"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-chat"
+      ]
+    }
+  }
+}
