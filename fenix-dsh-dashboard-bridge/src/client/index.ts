@@ -1,7 +1,7 @@
 /**
  * fenix-dsh-dashboard-bridge Client 半（dsh.client, platform web）：
  * 向 `sidebar.panellist` 列表插槽注册 6 个固定菜单条目（概览/指挥中心/项目/
- * 设置/运维/帮助，order 10–18，2026-11-05 用户指令重排后段位）并以 priority -10
+ * 配置/运维/帮助，order 10–18，2026-11-05 用户指令重排后段位）并以 priority -10
  * 遮蔽重排官方 Plugins/自动化任务 条目（reorderOfficialPanels，零改 dist）；在
  * layout `main` keyed 插槽以相同 id 挂对应 iframe
  * 面板（hash 深链直达）；启动时拉取 `<prefix>/api/projects`，项目不再逐个
@@ -41,14 +41,15 @@ export interface FixedEntry {
 }
 
 export const FIXED_ENTRIES: readonly FixedEntry[] = [
-  // order 段位（2026-11-05 用户指令重排）：概览 10 / 项目 12 / 设置 13 为桥接
+  // order 段位（2026-11-05 用户指令重排）：概览 10 / 项目 12 / 配置 13 为桥接
   // 原段位；运维 14→15、指挥中心 11→16、帮助 15→18 为重排腾位——插件菜单
-  // （官方 order 0，经下方 OFFICIAL_PANEL_REORDER 遮蔽改写为 14）落到设置之后，
+  // （官方 order 0，经下方 OFFICIAL_PANEL_REORDER 遮蔽改写为 14）落到配置之后，
   // 指挥中心(16)与自动化任务（官方 order 10，遮蔽改写为 17）落到运维之后。
+  // 设置条目名「配置」（2026-11-05 用户指令）：避让 dsh web 既有「设置」官方菜单。
   { id: 'fenix-overview', label: '概览', route: '#/overview', order: 10 },
   { id: 'fenix-command-center', label: '指挥中心', route: '#/command-center', order: 16 },
   { id: 'fenix-projects', label: '项目', route: '#/projects', order: 12 },
-  { id: 'fenix-settings', label: '设置', route: '#/settings', order: 13 },
+  { id: 'fenix-settings', label: '配置', route: '#/settings', order: 13 },
   { id: 'fenix-activities', label: '运维', route: '#/activities', order: 15 },
   { id: 'fenix-help', label: '帮助', route: '#/help', order: 18 },
 ]
@@ -62,7 +63,7 @@ export const FIXED_ENTRIES: readonly FixedEntry[] = [
  * （官方 id 漂移时重排项自动缺席、降级为官方排位，不崩）。
  */
 const OFFICIAL_PANEL_REORDER: readonly { readonly id: string; readonly order: number }[] = [
-  // 插件（官方 plugin-manager 注册 order 0 排首位）→ 挪到设置(13)之后
+  // 插件（官方 plugin-manager 注册 order 0 排首位）→ 挪到配置(13)之后
   { id: 'plugins', order: 14 },
   // 自动化任务（官方 schedule 注册 order 10）→ 挪到指挥中心(16)之后
   { id: 'schedules', order: 17 },

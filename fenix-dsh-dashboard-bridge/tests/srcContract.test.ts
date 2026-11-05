@@ -254,8 +254,8 @@ describe('条目注册（桩 slots）', () => {
       'fenix-activities',
       'fenix-help',
     ])
-    expect(fixed.map((entry) => entry.options.label)).toEqual(['概览', '指挥中心', '项目', '设置', '运维', '帮助'])
-    // order 段位（2026-11-05 重排）：概览10 / 指挥中心16 / 项目12 / 设置13 /
+    expect(fixed.map((entry) => entry.options.label)).toEqual(['概览', '指挥中心', '项目', '配置', '运维', '帮助'])
+    // order 段位（2026-11-05 重排）：概览10 / 指挥中心16 / 项目12 / 配置13 /
     // 运维15 / 帮助18；视觉序由 OFFICIAL_PANEL_REORDER 遮蔽段位（14/17）合成。
     expect(fixed.map((entry) => entry.options.order)).toEqual([10, 16, 12, 13, 15, 18])
 
@@ -289,7 +289,7 @@ describe('条目注册（桩 slots）', () => {
     stub.stop()
   })
 
-  it('FIXED_ENTRIES 常量与 stub 注册一致（深链一一对应；2026-11-05 重排段位：设置13/运维15/指挥中心16/帮助18）', () => {
+  it('FIXED_ENTRIES 常量与 stub 注册一致（深链一一对应；2026-11-05 重排段位：配置13/运维15/指挥中心16/帮助18）', () => {
     expect(FIXED_ENTRIES.map((entry) => `${entry.id}${entry.route}${entry.order}`)).toEqual([
       'fenix-overview#/overview10',
       'fenix-command-center#/command-center16',
@@ -299,7 +299,7 @@ describe('条目注册（桩 slots）', () => {
       'fenix-help#/help18',
     ])
     // 重排段位契约（2026-11-05 用户指令）：与 OFFICIAL_PANEL_REORDER 遮蔽改写
-    // （plugins→14 / schedules→17）合成后，侧栏视觉序为 概览/项目/设置/插件/
+    // （plugins→14 / schedules→17）合成后，侧栏视觉序为 概览/项目/配置/插件/
     // 运维/指挥中心/自动化任务/帮助——桥接自身段位与官方遮蔽段位互不重叠。
     const ids = FIXED_ENTRIES.map((entry) => entry.id)
     expect(ids.indexOf('fenix-settings')).toBe(ids.indexOf('fenix-projects') + 1)
