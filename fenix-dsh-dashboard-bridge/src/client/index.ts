@@ -8,8 +8,9 @@
  * 注册顶层侧栏条目，而是驱动「项目」条目（order 12）的 Portal 内嵌分区
  * （条目列表 nav 与工作区之间的常驻分区；锚点漂移自动降级浮层分组）数据源
  * 与每项目 main keyed 面板（深链 `#/projects/<name>` 契约不变），60s 周期 +
- * window focus 重拉并幂等同步（见 projectSync.ts）。boot 后短轮询切到概览
- * 面板（bootToOverview，刷新不再落入上次会话视图）。
+ * window focus 重拉并幂等同步（见 projectSync.ts）。boot 后等工作区列表就绪
+ * 调 startSession() 落新会话界面（bootToNewSession，进入/刷新不再落入上次
+ * 会话视图，2026-11-05 二次定调覆盖同日「落概览」先行指令）。
  *
  * 注册形态对照发行包 @deepseek-ai/dsh-client-ui-plugin-manager/lib/client.js：
  * `ctx.slots.inject(slotName, factory)` + `ctx.slots.register(options, component)`，
@@ -121,28 +122,41 @@ export function reorderOfficialPanels(ctx: Context): () => void {
 }
 
 /**
- * boot 落概览（2026-11-05 用户指令「刷新后保持在概览页面」）：工作区模块的
- * restoreSelection 在 boot 链路把 mainReference 重开到上次会话（持久化
- * `dsh.sessions.current` 恢复 + recentWorkspace 兜底，两条路都绕不开），但其
- * 三分支全部 "preserve"——不调 selectPanel，默认面板态 null=会话视图，上次
- * 会话因此现身。本插件 boot 后短轮询切到自家概览面板一次：成功即停（250ms
- * ×40 上限防 main 面板未注册悬挂）；restore 链无面板写入，不存在覆写竞态；
- * 轮询窗内用户手点面板（<250ms，实际不可能）会被首轮覆盖，可接受。
- * node 环境（vitest 单测）无 window：整段跳过，不产计时器泄漏。
+ * boot 落新会话（2026-11-05 用户指令二次定调「进入/刷新默认停留在新会话界面」，
+ * 覆盖同日先行指令「落概览」）：工作区模块的 restoreSelection 在 boot 链路把
+ * mainReference 重开到上次会话（持久化 `dsh.sessions.current` 恢复 +
+ * recentWorkspace 兜底，两条路都绕不开），默认落点是上次会话视图。本插件
+ * boot 后短轮询调 `uiWorkspace.startSession()`——原生侧栏 New Session 按钮逐键
+ * 路径（新建/复用空白会话，blank 会话即新会话界面）。门禁：工作区 list 相位
+ * 'ready' 后才触发（过早调用 target 解析不到会 clearMain 落「选择工作区」空态，
+ * 与按钮点击观感不符）；250ms ×40 上限；node 环境（vitest 单测）无 window
+ * 整段跳过，不产计时器泄漏。
  */
-function bootToOverview(ctx: Context): () => void {
+function bootToNewSession(ctx: Context): () => void {
   if (typeof window === 'undefined') return () => {}
   let tries = 0
   const timer = setInterval(() => {
     tries += 1
-    try {
-      ctx.layout?.selectPanel?.('fenix-overview')
+    const ui = ctx.uiWorkspace
+    if (ui === undefined) {
       clearInterval(timer)
-    } catch {
-      if (tries >= 40) {
-        clearInterval(timer)
-        console.warn('[fenix-dsh-dashboard-bridge] boot 落概览失败：layout/main 面板未就绪')
-      }
+      return
+    }
+    const phase = ui.workspaces?.list?.getSnapshot?.().phase
+    if (phase !== 'ready' && tries < 40) return
+    clearInterval(timer)
+    if (phase !== 'ready') {
+      console.warn('[fenix-dsh-dashboard-bridge] boot 落新会话失败：工作区列表未就绪')
+      return
+    }
+    try {
+      ui.startSession()
+    } catch (error) {
+      console.warn(
+        `[fenix-dsh-dashboard-bridge] boot 落新会话失败：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
     }
   }, 250)
   return () => {
@@ -397,9 +411,9 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     }
   })
 
-  // 官方面板遮蔽重排 + boot 落概览（2026-11-05 用户指令，见两函数注释）。
+  // 官方面板遮蔽重排 + boot 落新会话（2026-11-05 用户指令，见两函数注释）。
   const stopReorder = reorderOfficialPanels(ctx)
-  const stopBootSwitch = bootToOverview(ctx)
+  const stopBootSwitch = bootToNewSession(ctx)
 
   // 项目数据同步：main keyed 面板差异注册 + 分组数据源整体替换。
   // 60s 周期 + window focus 幂等同步。

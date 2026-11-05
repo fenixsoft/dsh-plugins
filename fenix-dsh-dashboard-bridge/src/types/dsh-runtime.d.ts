@@ -88,6 +88,8 @@ declare module '@deepseek-ai/cordis' {
       readonly workspaces: {
         readonly list: {
           getSnapshot(): {
+            /** 就绪相位（'ready' 后 list 数据可用；boot 落新会话以此作门）。 */
+            readonly phase?: string
             readonly items: readonly {
               readonly workspaceId: string
               readonly path: string
@@ -96,8 +98,12 @@ declare module '@deepseek-ai/cordis' {
           }
         }
       }
-      /** 新建（或复用空白）会话并切主面板到该会话（原生 startSession 同名）。 */
-      startSession(workspaceId: string): void
+      /**
+       * 新建（或复用空白）会话并切主面板到该会话（原生 startSession 同名）。
+       * workspaceId 缺省 = 原生侧栏 New Session 按钮逐键路径（target 回落
+       * currentWorkspaceId ?? recent；无任何工作区时 clearMain 落无会话态）。
+       */
+      startSession(workspaceId?: string): void
     }
     /**
      * 工作区控制器服务（@deepseek-ai/dsh-api-workspace-controller 提供，键
