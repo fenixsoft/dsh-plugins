@@ -129,10 +129,11 @@ export function reorderOfficialPanels(ctx: Context): () => void {
  * mainReference 重开到上次会话（持久化 `dsh.sessions.current` 恢复 +
  * recentWorkspace 兜底，两条路都绕不开），默认落点是上次会话视图。本插件
  * boot 后短轮询调 `uiWorkspace.startSession()`——原生侧栏 New Session 按钮逐键
- * 路径（新建/复用空白会话，blank 会话即新会话界面）。门禁：工作区 list 相位
- * 'ready' 后才触发（过早调用 target 解析不到会 clearMain 落「选择工作区」空态，
- * 与按钮点击观感不符）；250ms ×40 上限；node 环境（vitest 单测）无 window
- * 整段跳过，不产计时器泄漏。
+ * 路径（新建/复用空白会话，blank 会话即新会话界面）。URL 带 `#panel=<id>` 深
+ * 链时改走 selectPanel 直达该面板（深链优先于默认落点）。门禁：工作区 list
+ * 相位 'ready' 后才触发（过早调用 target 解析不到会 clearMain 落「选择工作区」
+ * 空态，与按钮点击观感不符）；250ms ×40 上限；node 环境（vitest 单测）无
+ * window 整段跳过，不产计时器泄漏。
  */
 function bootToNewSession(ctx: Context): () => void {
   if (typeof window === 'undefined') return () => {}
@@ -149,6 +150,16 @@ function bootToNewSession(ctx: Context): () => void {
     clearInterval(timer)
     if (phase !== 'ready') {
       console.warn('[fenix-dsh-dashboard-bridge] boot 落新会话失败：工作区列表未就绪')
+      return
+    }
+    const hashPanelId = panelIdFromHash()
+    if (hashPanelId !== null) {
+      // 深链优先：URL 带 #panel=<id> 直达该面板，默认新会话落点让位
+      try {
+        ctx.layout?.selectPanel?.(hashPanelId)
+      } catch {
+        console.warn(`[fenix-dsh-dashboard-bridge] 深链面板 ${hashPanelId} 未注册，维持默认落点`)
+      }
       return
     }
     try {
@@ -373,6 +384,76 @@ export function projectEntrySink(ctx: Context, prefix: string): ProjectEntrySink
 }
 
 /**
+ * 面板深链 hash 解析（外层文档 URL：`#panel=<id>`）。与 iframe 内部的 dashboard
+ * hash 路由（#/overview 等）互不相干——iframe 有独立 URL 命名空间。无 hash 或
+ * 值为空返回 null。
+ */
+export function panelIdFromHash(): string | null {
+  if (typeof window === 'undefined') return null
+  const PANEL_HASH_PREFIX = '#panel='
+  if (!window.location.hash.startsWith(PANEL_HASH_PREFIX)) return null
+  const id = decodeURIComponent(window.location.hash.slice(PANEL_HASH_PREFIX.length))
+  return id.length > 0 ? id : null
+}
+
+/**
+ * 面板深链双向桥（2026-11-05 用户需求「菜单切换体现在 URL、可经 URL 直达」）：
+ * dsh 原生面板选中无 hash 事实源（layout client 无 hashchange 监听、无面板
+ * 订阅口），插件侧双向补齐、零改 dist——
+ * - 写向：包装 `ctx.layout.selectPanel`（ui-sidebar 行点击即
+ *   `ctx.layout.selectPanel(id)` 动态调用，包装拦全部切换源）。面板 id → 写
+ *   `location.hash = 'panel=<id>'`（赋值产生历史条目：浏览器后退可在面板间回
+ *   退，与 dashboard hash 路由同观感；hash 已同值时赋值无操作、无循环）；
+ *   null（会话视图）→ `history.replaceState` 清 hash（保 token 查询串、不产
+ *   垃圾历史条目、不触发 hashchange）。
+ * - 读向：`hashchange` 监听 → 解析 `#panel=<id>` → selectPanel（未注册 id 抛
+ *   错吞掉，维持当前视图）；刷新/分享链接/后退前进三类入口同路。
+ * - boot：bootToNewSession 内 hash 深链优先于默认新会话落点（见其注释）。
+ * 循环安全：hashchange → selectPanel → wrapper 复写同值 hash → 赋值无操作收敛。
+ * 形状漂移/测试桩自守：无 window 或 layout.selectPanel 缺失时整体跳过。
+ *
+ * @returns 恢复函数（摘 hashchange 监听、还原原生 selectPanel）。
+ */
+export function deepLinkPanels(ctx: Context): () => void {
+  if (typeof window === 'undefined') return () => {}
+  const layout = ctx.layout
+  if (typeof layout?.selectPanel !== 'function') return () => {}
+  // 原属性值原样保存/还原（不用 bind 副本：还原须恢复身份可逆性，防双层包装
+  // 残留——dispose/reload 语义下 bound 函数行为等价但身份漂移）
+  const original: (panelId: string | null) => void = layout.selectPanel
+  const applyHash = () => {
+    const id = panelIdFromHash()
+    if (id === null) return
+    try {
+      original.call(layout, id)
+    } catch {
+      // 未注册面板 id：忽略（维持当前视图）
+    }
+  }
+  const wrapped = (panelId: string | null): void => {
+    original.call(layout, panelId)
+    try {
+      if (panelId === null) {
+        if (panelIdFromHash() !== null) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        }
+        return
+      }
+      const want = '#panel=' + encodeURIComponent(panelId)
+      if (window.location.hash !== want) window.location.hash = want
+    } catch {
+      // 历史操作失败不致命（隐私模式等）
+    }
+  }
+  layout.selectPanel = wrapped
+  window.addEventListener('hashchange', applyHash)
+  return () => {
+    window.removeEventListener('hashchange', applyHash)
+    layout.selectPanel = original
+  }
+}
+
+/**
  * Client 插件体：注册 6 固定条目与 main 面板，启动项目列表同步。
  * slot 形状漂移（dsh 升级改名）时注册不生效、页面不崩（design Risks）。
  *
@@ -416,9 +497,11 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     }
   })
 
-  // 官方面板遮蔽重排 + boot 落新会话（2026-11-05 用户指令，见两函数注释）。
+  // 官方面板遮蔽重排 + boot 落新会话 + 面板深链双向桥（2026-11-05 用户指令，
+  // 见各函数注释）。
   const stopReorder = reorderOfficialPanels(ctx)
   const stopBootSwitch = bootToNewSession(ctx)
+  const stopDeepLink = deepLinkPanels(ctx)
 
   // 项目数据同步：main keyed 面板差异注册 + 分组数据源整体替换。
   // 60s 周期 + window focus 幂等同步。
@@ -431,6 +514,7 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   })
 
   return () => {
+    stopDeepLink()
     stopBootSwitch()
     stopReorder()
     stopSync()
