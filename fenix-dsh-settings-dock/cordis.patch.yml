@@ -1,0 +1,7 @@
+# fenix-dsh-settings-dock
+# dsh web 设置停靠（官方设置弹窗页面化停靠到内容区）。
+# 全部逻辑位于 client.js；此处仅把本插件插入 web profile 的 loader 清单。
+
+- insert:
+    - id: fenix-dsh-settings-dock
+      name: fenix-dsh-settings-dock
