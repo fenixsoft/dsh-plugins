@@ -1,0 +1,8 @@
+# fenix-dsh-auth
+# dsh web 账号密码登录（首页 / 接管 + /auth/* 端点 + 设置「登录」分区）。
+# 宿主半路由注册在 index.js；此处仅把本插件插入 web profile 的 loader 清单
+#（对齐 fenix-dsh-settings-dock 的先例形态）。
+
+- insert:
+    - id: fenix-dsh-auth
+      name: fenix-dsh-auth
