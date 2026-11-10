@@ -1,7 +1,7 @@
 {
   "name": "fenix-dsh-chat-polish",
-  "version": "0.1.0",
-  "description": "dsh web 对话区打磨：①对话列左右留白固定 24px（解除 920px 居中上限、输入卡对齐、隐藏列宽把手）②用户消息按 Markdown 渲染（复用宿主基线包 MarkdownText）",
+  "version": "0.2.0",
+  "description": "dsh web 对话区打磨：①对话列左右留白固定 24px（解除 920px 居中上限、输入卡对齐、隐藏列宽把手）②用户消息按 Markdown 渲染（复用宿主基线包 MarkdownText）③hero 工作区行左右缘对齐输入卡（分支/worktree 复选落右上角）④输入框 ↑/↓ 历史消息导航（首行↑召回已发送消息，草稿缓存，多行光标导航不冲突）",
   "license": "MIT",
   "type": "module",
   "exports": {

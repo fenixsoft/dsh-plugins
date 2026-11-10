@@ -39,6 +39,27 @@ dsh web 对话区打磨插件（纯 client 半，零构建，先例 `dsh-plugin-
    - 提交回声与 pending steering 气泡仍由官方渲染（transient 节点，消息落定后即换
      本渲染器）。
 
+5. **hero 工作区行左右缘对齐输入卡**（2026-11-10）
+   - `.wSkVaW_heroWorkspaceRow` 补与左缘同式的 `margin-right`，行右缘=输入卡右缘；
+   - git 分支 / New worktree 复选（`.wSkVaW_heroOptions` 原生 `margin-left:auto`）
+     随之落到对话框右上角，与左上的工作区/模式切换成对称布局。
+
+6. **输入框历史消息导航**（2026-11-10，↑/↓ 召回已发送消息）
+   - 在 `conversation.input.overlay`（list，session 作用域）注册 headless 控制器，
+     session 条目自动收 `inputActions`（官方 `setDraft` 写草稿通道）、`useInput`、
+     `useChat` 标准注入面，无任何私有 API；
+   - 非浏览态仅当光标已在**首行**（DOM Range 几何对比）按 ↑ 才召回上一条已发送
+     消息，多行文本的行间 ↑ 导航不受影响；
+   - 浏览态内 ↑=更旧、↓=更新，↓ 越过最新一条 → 恢复进浏览态前缓存的未发送草稿
+     并退出；Escape 同效；
+   - 浏览态中任何编辑/发送（composer input 事件）静默退出，不留幽灵状态；
+   - 历史源 = `useChat` 快照 `order → nodes` 过滤 `kind: user/steering` 按
+     `data.seq` 排序，取 `type:'text'` 块拼接，相邻重复折叠；
+   - 召回后光标置首（连按 ↑ 连续导航），↓/恢复后置末；IME 组合期（keyCode 229）
+     与非 plain 相位不接管；
+   - 监听为 document 捕获阶段单例，先于 Lexical 命令处理；组件异常由宿主
+     SlotErrorBoundary/abdicate 兜底。
+
 ## 版本钉扎与升级
 
 留白覆盖使用 dsh 0.2.0-rc.2 构建产物的 CSS-modules 哈希类（取自安装包

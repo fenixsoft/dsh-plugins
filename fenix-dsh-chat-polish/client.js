@@ -30,6 +30,26 @@
  *    视觉按官方 MessageItem.module.css 同值复刻，附件（图片/文件卡）行为一致。
  *    提交回声与 pending steering 气泡仍由官方渲染（transient 节点，落定后即换本
  *    渲染器）。
+ *
+ * 3. 输入框历史消息导航（↑ 召回上一条 / ↓ 切回，0.2.2-rc.1）。
+ *    在 conversation.input.overlay（list，session 作用域）注册一个 headless
+ *    控制器组件：session 条目自动收到 inputActions（SessionInputShell.actions，
+ *    setDraft(text) 官方写草稿通道）、useInput（shell.state 快照）、useChat
+ *    （CHAT bundle 提供的会话快照 {order,nodes}）与 sessionId。控制器挂
+ *    document 捕获阶段 keydown/input 监听：
+ *      - 非浏览态：仅当光标已在首行（DOM Range 几何对比）按 ↑ 才进入浏览态，
+ *        多行文本的行间 ↑ 导航不受影响；
+ *      - 浏览态内 ↑/↓ 独占（preventDefault+stopPropagation，先于 Lexical）；
+ *        ↑=更旧、↓=更新，↓ 越过最新一条→恢复进浏览态前缓存的草稿并退出；
+ *      - Escape 恢复草稿退出；浏览态中任何编辑/发送清空（composer input 事件）
+ *        静默退出，不留幽灵状态；
+ *      - 历史源 = useChat 快照 order→nodes 过滤 kind user/steering 按 data.seq
+ *        排序，取 content 中 type:'text' 块拼接（与官方投影一致），相邻重复折叠；
+ *      - 切走时未发送草稿缓存于模块内存（按会话单槽），↓ 越过最新即切回；
+ *        跨会话/刷新的草稿持久化由宿主 SessionInputShell 自身的 persistDraft
+ *        机制负责，本层不重复。
+ *    宿主崩溃路径：组件异常由 SlotErrorBoundary/abdicate 兜底，事件监听在
+ *    dispose 移除。
  */
 (function () {
 	'use strict'
@@ -52,6 +72,22 @@
 				'body:not(:has(.wSkVaW_embeddedBody)) [data-conversation-scroll] .EvIC1a_scroll{padding-left:24px;padding-right:24px}',
 				/* ChatView .column 解除 --dsh-chat-content-width 居中上限 */
 				'body:not(:has(.wSkVaW_embeddedBody)) [data-conversation-scroll] .EvIC1a_column{max-width:none}',
+				/* 全宽模式同步 --dsh-chat-content-width 为实际列宽（24px×2 侧距内 100%）。
+				 * 不补这行的话 dsh 的 .md-table-wide 对称出血公式（MarkdownText
+				 * .module.css：lead/spare 按 --dsh-chat-content-width 与 100cqw 求
+				 * 值）仍按核心默认 clamp(680px,640px,920px)=680px 计算，lead 解析为
+				 * 负 → margin-left:calc(-1*lead) 反转为正边距右推表格包装器 → 消息
+				 * 溢出链（overflow-x:visible 一路到 .EvIC1a_scroll）→ 对话框横向
+				 * 滚动条（2026-11-07 活站实证：wrapper 左缘 +130px、右缘 1070>940）。
+				 * 挂 .hWmORq_root（markdown 根）而非 .scroll，避免波及用户气泡宽度
+				 * 公式（.userStack 也消费该变量）。cqw 在消费元素处解析=988，减
+				 * 48px 侧距恰为实际列宽 940，随窗口宽度自适应 */
+				'body:not(:has(.wSkVaW_embeddedBody)) [data-conversation-scroll] .hWmORq_root{--dsh-chat-content-width:calc(100cqw - 48px)}',
+				/* wide 表 margin 右推夹紧：上行走变量同步后 lead 仍会余出 24px 正
+				 * margin（spare=(100cqw-内容宽)/2 的右出血项），把包装器相对正文
+				 * 右移 24px——公式退化路径，非设计意图。min(0px,…) 只夹右推、保留
+				 * 向左负 margin（真正出血场景）。双类抬特异性压过核心同选择器规则 */
+				'.hWmORq_body .md-table-wide.md-table-wide{margin-left:min(0px, calc(-1 * var(--dsh-table-lead)))}',
 				/* InputBar .root 侧距 16→24（bottom 4px 保持官方值） */
 				'body:not(:has(.wSkVaW_embeddedBody)) .uV2eYG_root{padding-left:24px;padding-right:24px}',
 				/* 输入卡 80% 宽度居中（根节点 align-items:center 自动居中），提示条/队列坞卡同轴 */
@@ -63,11 +99,14 @@
 				 * 「中间一小块」（2026-11-05 用户实证）；width:100% 才是铺满，
 				 * 内层输入卡 80% 与会话中态同轴 */
 				'body:not(:has(.wSkVaW_embeddedBody)) .wSkVaW_composerHero{width:100%}',
-				/* hero 工作区/模式行与输入卡左缘对齐（2026-11-05 用户指令）：行原生
-				 * 贴 hero 左缘（padding 0 16 0 20），铺满后与 80% 居中的卡片脱轴——
-				 * 用卡片同款公式取 margin-left：卡片列 = root 24px 侧距内 80% 居中，
-				 * 行左缘 = 24 + (100%-48)*0.1（改卡片侧距/宽度百分比须同步本式） */
-				'body:not(:has(.wSkVaW_embeddedBody)) .wSkVaW_heroWorkspaceRow{margin-left:calc(24px + (100% - 48px)*0.1);padding:0}',
+				/* hero 工作区/模式行与输入卡两缘对齐（2026-11-05 左缘对齐；2026-11-10
+				 * 右缘对齐：git 分支/worktree 复选经 .wSkVaW_heroOptions margin-left:auto
+				 * 贴行右缘，行右缘=卡片右缘后该控件组落到对话框右上角，与左上的工作区/
+				 * 模式下拉成对称布局）。行原生贴 hero 左右缘（padding 0 16 0 20），铺满
+				 * 后与 80% 居中的卡片脱轴——用卡片同款公式取对称 margin：卡片列 = root
+				 * 24px 侧距内 80% 居中，行左/右缘 = 24 + (100%-48)*0.1（改卡片侧距/
+				 * 宽度百分比须同步本式） */
+				'body:not(:has(.wSkVaW_embeddedBody)) .wSkVaW_heroWorkspaceRow{margin-left:calc(24px + (100% - 48px)*0.1);margin-right:calc(24px + (100% - 48px)*0.1);padding:0}',
 				/* 固定留白后无拖拽空间：隐藏列宽把手（防拖拽写入 localStorage 宽度偏好） */
 				'body:not(:has(.wSkVaW_embeddedBody)) [data-width-handle][data-width-handle]{display:none}',
 				/* 「回到底部」浮钮右距对齐 24px */
@@ -263,7 +302,247 @@
 				)
 			})
 
-			/* ── 插件体：样式注入 + keyed 插槽遮蔽注册 ── */
+			/* ═══ 输入框历史消息导航（feature 3）══════════════════════════════════ */
+
+		/* 当前挂载的控制器引用（单 composer 实例；headless 组件挂载时登记） */
+		var historyState = { owner: null }
+		/* 浏览态光标：pos = 从最新一条往回的步数（1=最新）；savedDraft = 进浏览态前的草稿 */
+		var nav = { browsing: false, pos: 0, savedDraft: null }
+		/* setDraft 触发 composer input 事件时抑制“编辑即退出”判定 */
+		var applying = false
+
+		/* chat 快照 → 按时间升序的已发送文本数组（user/steering，相邻重复折叠） */
+		function extractUserTexts(chat) {
+			var items = []
+			if (!chat || !chat.order || !chat.nodes || typeof chat.nodes.get !== 'function') return []
+			for (var i = 0; i < chat.order.length; i++) {
+				var node
+				try { node = chat.nodes.get(chat.order[i]) } catch (err) { node = null }
+				if (!node) continue
+				var kind = node.kind
+				if (kind !== 'user' && kind !== 'steering') continue
+				var data = node.data || {}
+				var text = textOfContent(data.content)
+				if (text === '') continue
+				/* data.seq 为权威时序；缺 seq 的节点按 order 次序垫底 */
+				items.push({
+					seq: typeof data.seq === 'number' ? data.seq : 1e9 + i,
+					text: text,
+				})
+			}
+			items.sort(function (a, b) { return a.seq - b.seq })
+			var out = []
+			for (var j = 0; j < items.length; j++) {
+				if (out.length > 0 && out[out.length - 1] === items[j].text) continue
+				out.push(items[j].text)
+			}
+			return out
+		}
+
+		function textOfContent(content) {
+			if (!Array.isArray(content)) return ''
+			var texts = []
+			for (var i = 0; i < content.length; i++) {
+				var block = content[i] || {}
+				if (block.type === 'text' && typeof block.text === 'string') texts.push(block.text)
+			}
+			return texts.join('')
+		}
+
+		/* ── 光标行几何（DOM Range，不碰 Lexical 内部）── */
+
+		/* 折叠选区的可视行 top；边界无字形矩形时按前字符/容器矩形近似 */
+		function caretRectTop(range) {
+			var rects = range.getClientRects()
+			if (rects.length > 0) return rects[0].top
+			var node = range.startContainer
+			var offset = range.startOffset
+			try {
+				if (node.nodeType === 3 && offset > 0) {
+					var probe = document.createRange()
+					probe.setStart(node, offset - 1)
+					probe.setEnd(node, offset)
+					var rs = probe.getClientRects()
+					if (rs.length > 0) return rs[rs.length - 1].top
+				}
+				if (node.nodeType === 1) {
+					var probe2 = document.createRange()
+					probe2.selectNodeContents(node)
+					var rc = probe2.getClientRects()
+					if (rc.length > 0) return range.startOffset === 0 ? rc[0].top : rc[rc.length - 1].top
+					var box = node.getBoundingClientRect()
+					if (box && (box.height > 0 || box.width > 0)) return box.top
+				}
+			} catch (err) { /* fallthrough */ }
+			return null
+		}
+
+		/* 编辑器全部内容的首行 top（过滤零尺寸矩形） */
+		function firstContentTop(editorEl) {
+			try {
+				var range = document.createRange()
+				range.selectNodeContents(editorEl)
+				var rects = range.getClientRects()
+				for (var i = 0; i < rects.length; i++) {
+					if (rects[i].height > 0 || rects[i].width > 0) return rects[i].top
+				}
+			} catch (err) { /* fallthrough */ }
+			return null
+		}
+
+		function atFirstLine(editorEl) {
+			var sel = window.getSelection()
+			if (!sel || sel.rangeCount === 0) return true
+			var range = sel.getRangeAt(0)
+			if (!range.collapsed) return false
+			var caretTop = caretRectTop(range)
+			if (caretTop === null) return true
+			var contentTop = firstContentTop(editorEl)
+			if (contentTop === null) return true
+			return Math.abs(caretTop - contentTop) < 8
+		}
+
+		/* 召回后的光标落位：↑ 置首（保证连按 ↑ 连续导航），↓/恢复置末 */
+		function placeCaretAtEdge(editorEl, atStart) {
+			try {
+				editorEl.focus()
+				var sel = window.getSelection()
+				if (!sel) return
+				var range = document.createRange()
+				range.selectNodeContents(editorEl)
+				range.collapse(atStart === true)
+				sel.removeAllRanges()
+				sel.addRange(range)
+			} catch (err) { /* 光标落位失败不影响文本 */ }
+		}
+
+		function applyRecall(owner, editorEl, text, dir) {
+			applying = true
+			try {
+				var actions = owner.actionsRef.current
+				if (actions && typeof actions.setDraft === 'function') actions.setDraft(text)
+			} finally {
+				window.requestAnimationFrame(function () {
+					window.requestAnimationFrame(function () {
+						placeCaretAtEdge(editorEl, dir === 'up')
+						applying = false
+					})
+				})
+			}
+		}
+
+		function exitBrowsing(keepSaved) {
+			nav.browsing = false
+			nav.pos = 0
+			if (keepSaved !== true) nav.savedDraft = null
+		}
+
+		/* document 捕获阶段 keydown：先于 Lexical 命令处理 */
+		function onHistoryKeydown(e) {
+			try {
+				if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return
+				if (e.isComposing || e.keyCode === 229) return
+				var target = e.target
+				if (!(target instanceof Element)) return
+				var editorEl = target.closest('[data-composer-input]')
+				if (!editorEl || editorEl.dataset.phase !== 'plain') return
+				var owner = historyState.owner
+				if (!owner) return
+
+				if (e.key === 'Escape') {
+					if (!nav.browsing) return
+					var restore = nav.savedDraft
+					exitBrowsing()
+					applyRecall(owner, editorEl, restore || '', 'down')
+					e.preventDefault()
+					e.stopPropagation()
+					return
+				}
+
+				var actions = owner.actionsRef.current
+				if (!actions || typeof actions.setDraft !== 'function') return
+				var hist = extractUserTexts(owner.chatRef.current)
+
+				if (!nav.browsing) {
+					if (e.key !== 'ArrowUp') return /* 草稿态 ↓ 是原生光标移动 */
+					if (!atFirstLine(editorEl)) return /* 多行：行间导航，不接管 */
+					if (hist.length === 0) return
+					var live = owner.draftRef.current
+					nav.savedDraft = typeof live === 'string' ? live : (editorEl.innerText || '')
+					nav.browsing = true
+					nav.pos = 1
+					applyRecall(owner, editorEl, hist[hist.length - 1], 'up')
+					e.preventDefault()
+					e.stopPropagation()
+					return
+				}
+
+				/* 浏览态：↑/↓ 独占 */
+				if (e.key === 'ArrowUp') {
+					if (nav.pos >= hist.length) { e.preventDefault(); e.stopPropagation(); return } /* 已最旧 */
+					nav.pos += 1
+					applyRecall(owner, editorEl, hist[hist.length - nav.pos], 'up')
+				} else {
+					if (nav.pos <= 1) {
+						/* 越过最新 → 恢复草稿并退出浏览态 */
+						var draft = nav.savedDraft
+						exitBrowsing()
+						applyRecall(owner, editorEl, draft || '', 'down')
+					} else {
+						nav.pos -= 1
+						applyRecall(owner, editorEl, hist[hist.length - nav.pos], 'down')
+					}
+				}
+				e.preventDefault()
+				e.stopPropagation()
+			} catch (err) {
+				exitBrowsing()
+			}
+		}
+
+		/* composer 编辑（键入/粘贴/发送清空）→ 静默退出浏览态；setDraft 自身触发的
+		 * input 用 applying 闸门豁免 */
+		function onHistoryInput(e) {
+			try {
+				if (applying || !nav.browsing) return
+				var target = e.target
+				if (!(target instanceof Element)) return
+				if (!target.closest('[data-composer-input]')) return
+				exitBrowsing()
+			} catch (err) { /* never */ }
+		}
+
+		/* headless 控制器：session 作用域插槽自动注入 inputActions/useInput/useChat */
+		var HistoryController = function HistoryController(props) {
+			var input = typeof props.useInput === 'function' ? props.useInput(function (s) { return s }) : null
+			var chat = typeof props.useChat === 'function' ? props.useChat(function (s) { return s }) : null
+
+			var refs = react.useRef(null)
+			if (refs.current === null) {
+				refs.current = {
+					actionsRef: { current: null },
+					chatRef: { current: null },
+					draftRef: { current: '' },
+				}
+			}
+			refs.current.actionsRef.current = props.inputActions || null
+			refs.current.chatRef.current = chat
+			refs.current.draftRef.current = input && typeof input.draft === 'string' ? input.draft : ''
+
+			react.useEffect(function () {
+				var api = refs.current
+				historyState.owner = api
+				return function () {
+					if (historyState.owner === api) {
+						historyState.owner = null
+						exitBrowsing()
+					}
+				}
+			}, [])
+			return null
+		}
+
+		/* ── 插件体：样式注入 + keyed 插槽遮蔽注册 ── */
 			return {
 				inject: ['slots'],
 				apply(ctx) {
@@ -301,7 +580,26 @@
 						stage('slots.inject', err)
 					}
 
+					/* feature 3：输入框历史导航。headless 控制器挂 conversation.input.overlay
+					 * （list，session 作用域——InputBar 卡片内 div[data-composer-overlay]，仅
+					 * sessionId 存在时渲染），session 条目自动收 inputActions/useInput/useChat
+					 * 标准注入面；全局捕获监听只挂一份。 */
+					try {
+						ctx.slots.inject('conversation.input.overlay', function () {
+							return ctx.slots.register(
+								{ name: 'conversation.input.overlay', id: 'fenix-history-nav', order: -100 },
+								HistoryController,
+							)
+						})
+					} catch (err) {
+						stage('slots.inject history', err)
+					}
+					document.addEventListener('keydown', onHistoryKeydown, true)
+					document.addEventListener('input', onHistoryInput, true)
+
 					return function dispose() {
+						document.removeEventListener('keydown', onHistoryKeydown, true)
+						document.removeEventListener('input', onHistoryInput, true)
 						var removed = styleTag.parentNode !== null
 						if (removed) styleTag.remove()
 						return removed && failures.length === 0
