@@ -518,3 +518,11 @@
   - 证据：.fenix/logs/fenixd.log 15:27:12.163Z WARNING：提示词占位符未解析（模板漂移，注入内容可能静默丢失）: agent=arbiter template=arbiter.md leftover=['{disposition_mode_section}', '{writable_surface_note}']——本 run 提示词确缺处置模式段与可写面注记两段。；触发 run_id=arbiter-add-session-advanced-search-1794497232（签名 add-session-advanced-search::inconclusive_loop，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 inconclusive_loop（spec=add-session-advanced-search）：'add-session-advanced-search' 连续 1 轮验证失败均被裁决归类 env（级二豁免握手首次命中即升级（judge 已裁决全 env），env 断言 20 条、blocked-env 场景 6 个），judge 已裁决全部失败归环境、等待人工豁免或修环境——自动重验已停止。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
   - 建议：['①修 arbiter.md 模板渲染管道：为两占位符补默认值或条件注入；②渲染侧对未解析占位符 fail-fast（派发前校验 leftover 为空）']
+
+## 2026-11-13
+### 可改进
+- **[arbiter:add-sess] impl修复申报缺真机效果探针（单测绿与真机无效并存白烧整轮重跑预算）**
+  - 影响：凡 bug-found→修复→重验循环中出现「单测绿但真机无效」的修复申报，即白烧一整轮 impl+合入+全量重验的算力与墙钟，并直接消耗 judge 重跑预算推向上限冻结（本案 rerun 6/5 的直接推手之一）；无诊断日志时归因还需额外黑盒探针轮。
+  - 证据：impl-result.json 申报 tsc 零错+vitest 120/120+产物核验 ctx.get 在场（16:54Z）→ e37d005 合入 → 部署 lib 17:12Z 重建并被新实例加载（symlink+ps 取证）→ 17:13:02Z report.json 与 T2 探针 job-mwdteer6-7 双源实证 title 全空/排序退化，修复机制真机无效。tests/host.test.ts 桩按 get 陷阱形态镜像（impl 自述），结构上无法覆盖「服务在真机不可达」类失效。；触发 run_id=arbiter-add-session-advanced-search-1794503583（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
+  - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
+  - 建议：①修复申报自检必含被修场景的最小真机探针复跑，修复前后失败指纹须发生变化方可申报完成；②judge bug-found 派修复时随单附失败指纹，收批先比对指纹是否变化再全量重跑；③与已记 todo 491（免重执行）组合可把无效修复环代价压到一轮以内。
