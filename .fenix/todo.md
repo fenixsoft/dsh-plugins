@@ -493,3 +493,8 @@
   - 证据：fenixd.log L14029-14064：第 6 轮重验 14 场景于 14:02:12-14:02:38 实际执行完毕且 report.json 落盘后，14:02:39.007 阶段3 判定门才 bump 计数至 6>5 冻结（judge_gate.py:443「先 bump 后判定」、L456-457）；judge 从未消费该轮证据，验证执行算力（实机执行+供给+探针）已花完才停。；触发 run_id=arbiter-add-session-advanced-search-1794492159（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
   - 建议：预算预检前移：验证 pipeline 入口/阶段2 执行前对 count+1>_MAX_JUDGE_RERUNS 预判即冻结（保持派发门 bump-then-check 语义兼容稳定性复用跳过计数）；或冻结告警携带本轮已执行 report 指纹，解冻后 judge 直接采信该轮证据免重执行。
+- **[arbiter:add-sess] judge重跑冻结文案单口径6/5未区分判定数与实派数**
+  - 影响：冻结告警与 STATE error 的读者（人工裁决、 Arbiter、dashboard）对「重跑次数」的第一印象偏大一次，可能误判病态循环程度；每次 judge_rerun_cap 冻结均复现该误导。
+  - 证据：judge_gate.py:395 计数口径含「被稳定性复用跳过但未实际派发的判定次数」，冻结文案「judge 重跑超上限（6/5 轮）」（fenixd.log L14064、STATE error 字段）读作 6 次 judge 实跑，而归档实派 5 次（STATE _judge_real_dispatches=5）；本案人工/仲裁读者需回捞归档才能对平口径。；触发 run_id=arbiter-add-session-advanced-search-1794492159（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
+  - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
+  - 建议：冻结文案与告警 evidence 段附双口径「判定 6/实派 5」（_judge_real_dispatches 已在 STATE 在盘，零新增取数）；或计数器拆分判定/实派双字段展示。
