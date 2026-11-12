@@ -448,3 +448,38 @@
   - 证据：STATE.md（框架状态台账）核实该条 status=blocked、frozen=True、updated=2026-10-14T17:43:13Z、error 字段载「同因重派循环（指纹 59c551238074）」；spec/changes/verify-dsh-plugins-live/tasks.md 清点 17 勾 3 未勾（grep 核实）；锁泄漏根因已由框架修复 acb0a75a8（10-15）落地，冻结只剩人工收口一步。
   - 调查评估：问题源不是本窗的 spec 工作，而是历史冻结条目的人工跟进通道。已核实：机制侧根因（worktree 形状误判锁泄漏）早已修复，解除冻结只差一次人工处置，但「待人工」条目无龄期展示、无重复提醒、每日自省数据摘要也不注入该清单，条目静默挂了 20 天。根因归属系统性缺口（人工待办缺跟进机制），与本窗告警核销条是同一缺口的两面（告警侧不核销、待办侧不催办）。与存量关系：10-16 既有条目已给完整改法（待人工专区+龄期倒序+超 24 小时重复告警），因本次 read_todo 关闭无法判定其闭环状态，此处以 20 天未动的新证据重申。结论：人工收口一步之遥，机制补强沿用既有条目方案即可。
   - 建议：人工对该 spec 做解冻收口：核对 3 项修复任务去留（修复或显式豁免留痕）；机制侧落地「待人工」专区——龄期倒序排列、超 24 小时重复告警一次、每日自省数据摘要固定注入该清单。
+
+## 2026-11-12
+
+### 浪费
+- **蒸馏重试台账卡 13 天，19 次告警零处置**
+  - 影响：知识蒸馏重试台账里的一条欠账自 10-30 登记起 13 天无人处置，期间告警通道空转发射 19 次全部无消费——重复告警未换来任何行动，欠账继续挂账。窗口内 18 次告警（数据摘要第 3 节 29 条信号的主力）+ 今日重启后第 19 次。
+  - 证据：todo.md 第 381 行未勾选项「knowledge-distill 重试：归档 2026-10-30-add-dsh-dashboard-bridge — 校验违规经 3 轮 run 仍未通过」；窗口内 18 次 knowledge_distill_retry_stale（蒸馏重试台账欠账超 24 小时警告，warning 级）信号在 11-03T00:10~11-04T00:00（本地）每 30~90 分钟重复发射，全部 handled=false、处置记录 0；daemon 停摆静默 9 天后今日 19:14 该指纹（26aa8b022971 为窗口内末条）再次发射，仍未处置；admin_alerts.json 中该指纹历史累计 25 次（10-31T00:00 起）。
+  - 调查评估：问题源是归档 spec 2026-10-30-add-dsh-dashboard-bridge（已归档的 dsh dashboard bridge 插件 SPEC）的知识蒸馏失败善后。已核实：台账条目 13 天未动（todo.md grep 核实）、19 次发射零处置、knowledge-distill-pending.json（在飞蒸馏批次台账）batches 为空即当前无重试在跑。蒸馏失败本身的根因未定：todo 只记「校验违规经 3 轮 run 仍未通过」，告警指引另列 unrecognized_model（模型拒识，宿主模型别名与 knowledge.model 配置不配）假说，现有证据不足以在两假说间裁决，此处只写形态层。与存量关系：11-03 既有条目「升级告警条件消失后不核销」是条件消失不核销，本条是其反面「条件不消失也不处置」——同一告警消费闭环缺口的两形态；spec/changes 活跃区无蒸馏相关立项。结论：13 天欠账加 19 次空转告警，既需人工处置个例，也够格立项催办机制。
+  - 建议：人工取证处置台账条目：先查 fenixd.log 10-30 前后 3 轮蒸馏 run 的失败明细，分清校验违规与模型拒识再动手，处置后勾选 todo.md 对应行。机制侧给蒸馏重试条目加龄期展示与升级（超 72 小时升 major 并进每日自省数据摘要固定注入），避免同指纹低级别重复发射无人消费。
+
+### 失误
+- **4 个 done spec 续推全败，无远程推送必败循环**
+  - 影响：今日 19:09 daemon 重启，恢复扫对 4 个已完成 SPEC 的发布推送步骤全部失败，每个进入 1/3 次退避重试——仓库根本没有远程仓库，重试永远无效，属结构性必败循环；4 个 done 条目的 error 字段被推送失败污染，每次 daemon 重启还会再来一轮（本会话最多再试 8 次）。实际代码成果无损失（已全部并入本地 master）。
+  - 证据：fenixd.log 11-12T11:09:50Z 四条 WARNING「Push failed ... error: src refspec main does not match any（推送目标分支 main 不存在）」attempt 1/3、退避 [300,900] 秒；STATE.md 四条目（add-fenix-skill-provider-plugin、polish-dsh-plugins-ui、bridge-projects-inline-section、add-session-grouper-and-shell-polish，均 done）error 字段同文。git remote -v 输出为空（无任何远程仓库）、git branch 仅 master 无 main。日志另有「pm.push.retry_backoff_seconds 非 list 或长度不足 2 None，回退默认退避」——该配置键缺失。全日志期（10-14 起）无更早推送尝试记录，今日启动扫为首次触发（为何 10-15/11-02 完成的 spec 今日才首推，触发机制未核实）。
+  - 调查评估：问题源是 daemon 重启时的 push retry sweep（推送续跑恢复扫，对 done spec 补投 approve_push 即推送审批门后的发布步骤）。已核实事实：单因确定性归因成立——无 remote 加分支名不匹配（目标 main、实际 master），git push origin main 结构性必败，与自省车道 10 月的失败同文同因。根因归属系统性缺口：框架推送步骤缺「无远程仓库」预检，本仓库为纯本地仓库，推送步骤本应短路豁免。与存量工作关系：todo.md 既有条目链「自省收尾 push 无远程必败第 8 次」（10-16~10-23 连续 8 天上报）同根因，当时建议的预检/跳过判一直未落地，如今同一缺口从自省车道扩散到 pm_engine 发布车道，波及面从 1 条目扩大到全部 done spec；与 gates.require_push_approval=true（推送需审批门）并存形成「审批门后是必败推送」的空转链。结论：修复方向明确，属配置预检缺口而非一次性失误。
+  - 建议：给推送步骤加 git 环境预检：无 remote 或无目标分支时标记 push=N/A 留痕跳过，不进退避重试、不写 error 字段，并清理现有 4 个 done 条目的污染 error；若确需异地发布则配置 remote 并统一分支名（master 改 main 或配置指向 master）。同时补齐 pm.push.retry_backoff_seconds 配置消除回退告警。
+
+- **一次配置保存致 10 角色模型链失效，4 分钟自愈**
+  - 影响：11-09 21:20（本地）一次模型链配置保存把全部 10 个角色的 provider 指向未注册名称，校验层当场将 10 条角色链标记失效——若发生在 daemon 在跑窗口，所有车道派发会同时被拒，属单次配置事故即可瘫痪全派发面。本次实际损失约等于零：daemon 停摆期无任何派发在跑，且约 4 分钟内修正自动复位。
+  - 证据：admin_alerts.json 11-09T13:20:40Z 同刻发出 10 条 major provider_ref_invalid（模型链引用未注册 provider 告警），指纹分别为 administrator/code-review/dispute-judge/fast-track/implementer/planner-judge/planner-plan/self-review/spec-review/verifier 各角色加 inferaiapi.com（引用了未注册的 provider 名），描述载明「该角色链已标记失效，派发将按模型链不可用归因，不回落默认网关」；21:24:39 又一发 spec-review:maomaoai（当时已注册列表仅剩 bigmodel.cn、deepseek）。全部 handled=true、handled_by=auto-resolve（配置修正后告警自动复位）。当前 .fenix/config.yaml 已无 inferaiapi.com/maomaoai 引用、亦无 agents.models 段（全文 100 行读取核实）。
+  - 调查评估：问题源不是任何 SPEC 的处置，而是 11-09 晚间一次 Dashboard/配置编辑会话。已核实事实：10 角色同刻中招说明是整段模型链批量重写而非单点笔误；校验防线有效（逐角色拦截、修正后自动复位），数据摘要第 3 节 29 条信号中 11 条即源于此。根因归属一次性执行失误（凭记忆手输了未注册的 provider 名），无系统性故障。与存量工作关系：今日 fenixd.log 有「alert cause 存量回填：6 条未处理告警按封闭映射补注根因（add-provider-validation-alert-governance 4.6）」，说明 provider 校验告警治理已有专项工作，本条不重复立项，只补交互防呆建议。结论：防线有效、损失为零的失误案例，价值在于暴露「批量编辑一次手滑可同时失效全部角色链」的复发敞口。
+  - 建议：在 provider 编辑面把模型链 provider 字段改为从已注册列表下拉选择（或保存前即时校验并标红未注册名），消除凭记忆手输的失误面；可在既有 provider 校验治理专项上追加一条交互防呆，无需独立立项。
+
+### 可改进
+- **框架停摆 8 天 18 小时零告警，自省断更 8 天**
+  - 影响：框架全车道不可用约 8 天 18 小时（可证区间 11-04 00:50 至 11-12 19:09 本地）：每日自省连续缺勤 8 天（11-04~11-11）、窗口 9 天仅 1 个 run、admin 告警通道静默 9 天无任何超时报警——框架死亡这件事本身没有任何机制能发现，全靠人工今日手动重启才恢复。
+  - 证据：fenixd.log 最后一条存活记录 2026-11-03T16:50:20Z（serving 回收周期日志），之后静默至 11-12T11:09:49Z 重启；supervisor.log 末条为 11-03T15:20:16Z daemon started，无退出记录（非正常终止）。self_review_state.json（自省执行台账）last_run_date=2026-11-03；git log 自省提交序列 5f15bd7（11-03 02:18）后断档至今日。runs 统计窗口内仅 1 个 run（spec-review-add-session-advanced-search-030c4c-1794481791，今日 19:09:51 启动的 spec 评审 run）。重启后恢复机制工作正常：promote 补触发、推送续扫、蒸馏告警 19:14 恢复发射。
+  - 调查评估：问题源是框架宿主环境的可用性，非任何 SPEC 处置所暴露。已核实事实：supervisor 与 daemon 同生共死，进程内组件全部失效后不存在任何进程外探针；停摆原因未定（无退出记录，宿主关机、掉电、进程被杀多假说并存），但「死亡无告警」这一缺口本身证据充分。与存量工作关系：10-16 既有条目「验证 spec 冻结 20 天无人跟进」指出待人工事项无跟进通道，本条是其更上游形态——框架死了连待人工清单都不会再产生；spec/changes 活跃区与 archive 均无看门狗类立项。附带影响已核实：今日 17:15 起草的 add-session-advanced-search（会话高级搜索 SPEC）因 daemon 19:09 才启动，评审启动滞后约 2 小时。结论：单点故障无死值开关（dead-man's switch，心跳超时即外部报警的进程外机制）是本窗口最大系统性缺口，证据链完整、够格立项。
+  - 建议：立项看门狗 SPEC：daemon 周期写心跳时间戳（daemon_runtime.json 现仅记 started_at，补 heartbeat 字段），由进程外机制（宿主 cron 或系统服务）检查心跳超 30 分钟即走独立出口告警（独立文件或宿主通知），恢复后自动补跑断更期间的每日自省。
+
+- **主树散件扩至 5 处，插件整目录未入库**
+  - 影响：主树未跟踪滞留面从既有条目盯防的 .claude/ 单目录扩大到 5 处：新增 playwright 验证散件与一个完整插件源码目录未入库，其中 fenix-dsh-clipboard-fallback（剪贴板回退插件，4 个源码文件）是真实工作成果，一旦误按框架草案整目录 ignore 或工作区受损即丢失；另有 dashboard-bridge 约 16 处改动近一天半无备份点。
+  - 证据：今日 19:10 重启首扫发出 3 条 maintree_untracked_stray_first_sight（主树 untracked 散件首现提示，info 级）：.pw-home（playwright 浏览器缓存，9 entries 约 68KB）、.pw-shots（3 张截图约 412KB）、fenix-dsh-clipboard-fallback（client.js/index.js/package.json/cordis.patch.yml 共 5.4KB）；另有 .pw.sh 与 .pwenv.sh（11-10 16:20 本地生成）及既有 .claude/。git status 核实 dashboard-bridge 9 个修改文件加 7 个新文件（locate.ts、rightTab.tsx、wsTooltip.ts 及 4 个测试），最后改动 11-11 11:18（本地）。首现提示把 fenix-dsh-clipboard-fallback 归类为「运行时产物目录」并自动起草整目录 gitignore 草案。
+  - 调查评估：问题源是主树散件周期盘点（重启后首扫）。已核实事实：散件面 5 处中，.pw-* 家族确为运行时产物（ignore 合理），但 fenix-dsh-clipboard-fallback 是含 package.json 的插件源码目录，框架草案将其归类为「运行时产物」属误判——草案虽仅建议不自动处置，人工照单采纳会把真实成果藏出版本控制。与存量工作关系：既有条目链「.claude/ 散件第 9 天滞留，首现提示仍无人消费」（10-15~10-24）已指出提示无消费闭环，本条是同机制缺口的新增散件面加新失准形态（源码误归类），非重复立项；spec/changes 无相关 SPEC。结论：散件治理立项必要性与既有条目一致，且须新增「草案生成防源码误伤」要求；未入库成果的入库动作优先于机制建设。
+  - 建议：先入库真实成果：git add fenix-dsh-clipboard-fallback 4 文件留痕，dashboard-bridge 改动提交或 stash 留备份点；.pw-home/.pw-shots/.pw.sh/.pwenv.sh 与 .claude/ 一并落 .gitignore 收口。机制侧给 gitignore 草案生成加源码特征识别（目录含 package.json 或成规模源码文件时不自动起草 ignore，改提示人工判断入库或 ignore），并入既有散件治理条目。
