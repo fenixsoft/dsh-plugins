@@ -106,7 +106,20 @@ export function fixedIconComponent(id: FixedEntryId): (props: PanelIconProps) =>
   }
 }
 
-/** iframe 面板组件：src 由调用方经 buildPanelSrc 拼装后传入。 */
+/**
+ * iframe 面板组件：src 由调用方经 buildPanelSrc 拼装后传入。
+ *
+ * 安全前提（同源完全信任，显式声明）：src 均为 `/fenix-dashboard/` 同源
+ * 前缀反代下发的自家静态资源，内容可信——故本 iframe 有意不加 sandbox：
+ * 同源文档与宿主页面完全同权（iframe 内脚本可直读 parent.document 与
+ * 宿主全局状态），该信任模型是本插件安全边界的单点假设。宿主侧消息通道
+ * （installDashboardSessionRequests，client/index.ts）对 event.origin 做
+ * 了严格校验（非宿主 origin 一律忽略），但那只是通道准入判定，并不构成
+ * 对 iframe 内容的能力隔离。若信任前提被破坏（反代路径可能注入第三方
+ * 内容），MUST 改造为 sandbox + postMessage 通道方案（注意
+ * allow-same-origin 与脚本并存时 sandbox 形同虚设，需同步收窄 iframe 能
+ * 力并把跨帧通信全量改走 postMessage）。
+ */
 export function DashboardPanel({ src }: { readonly src: string }): ReactElement {
   return (
     <div

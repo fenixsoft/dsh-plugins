@@ -189,7 +189,14 @@ function bootToNewSession(ctx: Context): () => void {
       clearInterval(timer)
       return
     }
-    const phase = ui.workspaces?.list?.getSnapshot?.().phase
+    let phase: string | undefined
+    try {
+      phase = ui.workspaces?.list?.getSnapshot?.().phase
+    } catch {
+      // 快照形状漂移（getSnapshot 缺席返回 undefined/非对象或抛错）：按未就绪
+      // 相位走既有重试/告警路径，不产生未处理异常（design Risks 条款）。
+      phase = undefined
+    }
     if (phase !== 'ready' && tries < 40) return
     clearInterval(timer)
     if (phase !== 'ready') {

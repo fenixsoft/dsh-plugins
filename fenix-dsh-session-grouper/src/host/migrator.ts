@@ -79,7 +79,7 @@ export function backupDirFor(dshHome: string, sessionId: SessionId): string {
   return join(backupsDir(dshHome), sessionId)
 }
 
-/** 台账行解析（单行损坏跳过不抛）。 */
+/** 台账行解析（单行损坏跳过不抛：JSON 语法损坏与非对象/关键字段形态异常行均按损坏行跳过）。 */
 export function parseLedger(dshHome: string): readonly MigrationLedgerEntry[] {
   const path = ledgerPath(dshHome)
   if (!existsSync(path)) return []
@@ -87,11 +87,28 @@ export function parseLedger(dshHome: string): readonly MigrationLedgerEntry[] {
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     const trimmed = line.trim()
     if (trimmed.length === 0) continue
+    let parsed: unknown
     try {
-      entries.push(JSON.parse(trimmed) as MigrationLedgerEntry)
+      parsed = JSON.parse(trimmed)
     } catch {
       // 单行损坏跳过，不影响其余行。
+      continue
     }
+    // 形态守卫：合法 JSON 但非对象（null/数字/数组等）或 sessionId/status 形态
+    // 不符 ⇒ 按损坏行跳过并 warn 留痕。否则坏行会以断言形态混入结果污染下游
+    // id 集（如 readMigratedSessionIds 对 null 条目访问 status 抛 TypeError，幂等
+    // 去重基准整体崩溃）；台账虽由本工具写入，部分写入/手工编辑/外部工具污染
+    // 均可能产生合法 JSON 的坏行。
+    const entry = parsed as Partial<MigrationLedgerEntry> | null
+    if (
+      entry === null || typeof entry !== 'object' ||
+      typeof entry.sessionId !== 'string' || entry.sessionId.length === 0 ||
+      (entry.status !== 'migrated' && entry.status !== 'pending-attach' && entry.status !== 'rolled-back')
+    ) {
+      console.warn(`fenix-dsh-session-grouper: 台账存在形态异常行，已按损坏行跳过：${trimmed.slice(0, 200)}`)
+      continue
+    }
+    entries.push(entry as MigrationLedgerEntry)
   }
   return entries
 }
@@ -114,6 +131,39 @@ export function appendLedger(dshHome: string, entry: MigrationLedgerEntry): void
   const path = ledgerPath(dshHome)
   mkdirSync(dirname(path), { recursive: true })
   appendFileSync(path, `${JSON.stringify(entry)}\n`, 'utf8')
+}
+
+/** 备份完整性清单路径（与备份目录同级，永不进入会话目录）。 */
+export function backupManifestPath(backupDir: string): string {
+  return `${backupDir}.manifest.json`
+}
+
+/** 递归收集目录清单：相对路径 → 字节数。 */
+function collectManifest(root: string, dir: string = root, files: Record<string, number> = {}): Record<string, number> {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) collectManifest(root, full, files)
+    else if (entry.isFile()) files[relative(root, full)] = statSync(full).size
+  }
+  return files
+}
+
+/** 回滚前核验：备份内容与封存清单逐文件比对（文件数 + 字节数）；清单缺失/损坏/不符均视为不可信。 */
+export function backupIntact(backupDir: string): boolean {
+  if (!existsSync(backupManifestPath(backupDir))) return false
+  let sealed: Record<string, number>
+  try {
+    sealed = JSON.parse(readFileSync(backupManifestPath(backupDir), 'utf8')) as Record<string, number>
+  } catch {
+    return false
+  }
+  let actual: Record<string, number>
+  try {
+    actual = collectManifest(backupDir)
+  } catch {
+    return false
+  }
+  return Object.keys(actual).length === Object.keys(sealed).length && Object.keys(actual).every((key) => sealed[key] === actual[key])
 }
 
 /** 迁移执行器：一个实例对应一个持久化后端 + 注册表 + 日志。 */
@@ -192,7 +242,7 @@ export class Migrator {
           mkdirSync(dirname(backupDir), { recursive: true })
           cpSync(dirname(srcLog), backupStaging, { recursive: true })
           renameSync(backupStaging, backupDir)
-          writeFileSync(this.backupManifestPath(backupDir), JSON.stringify(this.collectManifest(backupDir)), 'utf8')
+          writeFileSync(backupManifestPath(backupDir), JSON.stringify(collectManifest(backupDir)), 'utf8')
         } catch (error) {
           rmSync(backupStaging, { recursive: true, force: true })
           throw error
@@ -344,53 +394,33 @@ export class Migrator {
     } catch (error) {
       // attach 级失败：数据已一致，按 Decision 5(b) 记 pending-attach（不回滚数据）。
       const detail = `${pendingDetail === undefined ? 'attachSession 失败' : pendingDetail}：${errorMessage(error)}`
-      appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'pending-attach', detail, ...(backupDir === undefined ? {} : { backupDir }) })
+      // 台账落盘失败（磁盘满/EACCES 等）同样不进入数据回滚路径：此刻重写/归位
+      // 早已完成，外层 catch 的 rollbackPartialMigration 会把迁移成功的新产物整体
+      // 删除还原，而注册表内存态不随回滚校正——失败仅 warn 降级为「迁移成功但
+      // 台账缺失」。
+      try {
+        appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'pending-attach', detail, ...(backupDir === undefined ? {} : { backupDir }) })
+      } catch (ledgerError) {
+        this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移成功但台账 pending-attach 落盘失败（数据已一致不回滚；台账缺失该 id 会被下轮重复迁移，请人工核对）：${errorMessage(ledgerError)}`)
+      }
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 数据已迁移但归组未即时生效（pending-attach，下次启动/重启重试）：${detail}`)
       return { status: 'pending-attach', sessionId, fromCwd, toCwd, detail }
     }
-    appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'migrated', ...(backupDir === undefined ? {} : { backupDir }) })
+    try {
+      appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'migrated', ...(backupDir === undefined ? {} : { backupDir }) })
+    } catch (ledgerError) {
+      // 同上：台账写失败不回滚已一致数据，仅降级告警留痕。
+      this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移成功但台账 migrated 落盘失败（数据已一致不回滚；台账缺失该 id 会被下轮重复迁移，请人工核对）：${errorMessage(ledgerError)}`)
+    }
     this.log.info?.(`fenix-dsh-session-grouper: 会话 ${sessionId} 已迁移归组：${fromCwd} → ${toCwd}`)
     return { status: 'migrated', sessionId, fromCwd, toCwd }
-  }
-
-  /** 备份完整性清单路径（与备份目录同级，永不进入会话目录）。 */
-  private backupManifestPath(backupDir: string): string {
-    return `${backupDir}.manifest.json`
   }
 
   /** 清退备份目录与其完整性清单（既往周期遗留备份绝不充当本次「迁移前状态」）。 */
   private discardBackup(sessionId: SessionId): void {
     const backupDir = backupDirFor(this.dshHome, sessionId)
     rmSync(backupDir, { recursive: true, force: true })
-    rmSync(this.backupManifestPath(backupDir), { force: true })
-  }
-
-  /** 递归收集目录清单：相对路径 → 字节数。 */
-  private collectManifest(root: string, dir: string = root, files: Record<string, number> = {}): Record<string, number> {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) this.collectManifest(root, full, files)
-      else if (entry.isFile()) files[relative(root, full)] = statSync(full).size
-    }
-    return files
-  }
-
-  /** 回滚前核验：备份内容与封存清单逐文件比对（文件数 + 字节数）；清单缺失/损坏/不符均视为不可信。 */
-  private backupIntact(backupDir: string): boolean {
-    if (!existsSync(this.backupManifestPath(backupDir))) return false
-    let sealed: Record<string, number>
-    try {
-      sealed = JSON.parse(readFileSync(this.backupManifestPath(backupDir), 'utf8')) as Record<string, number>
-    } catch {
-      return false
-    }
-    let actual: Record<string, number>
-    try {
-      actual = this.collectManifest(backupDir)
-    } catch {
-      return false
-    }
-    return Object.keys(actual).length === Object.keys(sealed).length && Object.keys(actual).every((key) => sealed[key] === actual[key])
+    rmSync(backupManifestPath(backupDir), { force: true })
   }
 
   /**
@@ -409,7 +439,7 @@ export class Migrator {
     }
     // 信任备份前先核验完整性：清单缺失/损坏/内容不符 ⇒ 备份不可信，拒绝还原
     // （保留现场供人工核查），绝不以残缺副本覆盖仍然完好的原目录。
-    if (!this.backupIntact(backupDir)) {
+    if (!backupIntact(backupDir)) {
       this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 备份完整性核验未通过（${backupDir}），拒绝还原以保留现场，请人工核查后处置`)
       return 'restore-refused'
     }
@@ -428,8 +458,9 @@ export class Migrator {
       renameSync(stagingDir, originalDir)
       backupLocation = originalDir
       // 备份已就位：清退完整性清单文件（残留会在下轮被误当在册核验基准）。
+      // （本路径未走 rollback.ts 的 restoreFromBackup，此处清理为独立实现，幂等。）
       try {
-        rmSync(this.backupManifestPath(backupDir), { force: true })
+        rmSync(backupManifestPath(backupDir), { force: true })
       } catch {
         // 清理失败不影响回滚结果。
       }

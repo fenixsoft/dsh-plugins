@@ -304,13 +304,17 @@ export interface NativeTipSuppressor {
   stop(): void
 }
 
-/** 交互面角色选择器：body 直子 portal 若承载菜单/对话框/下拉等交互面，
- * 一律不命中消解。2026-11-11 回归教训——文件右键菜单的「在 Fenix 项目中
- * 定位」项文案内嵌项目名，文本匹配曾把整颗菜单挂载即隐身（display:none），
- * 用户侧表现为文件右键弹不出来；querySelector 不含自身，故 matches 与
- * querySelector 双查。role=status 提示条不在名单（维持既有行为）。 */
+/** 交互面角色选择器：body 直子 portal 若承载菜单/对话框/下拉/通知条等
+ * role 标记面，一律不命中消解。2026-11-11 回归教训——文件右键菜单的
+ * 「在 Fenix 项目中定位」项文案内嵌项目名，文本匹配曾把整颗菜单挂载即
+ * 隐身（display:none），用户侧表现为文件右键弹不出来；querySelector 不含
+ * 自身，故 matches 与 querySelector 双查。role=status/alert 通知条亦在名单
+ * （通知文案可内嵌项目名，挂载即被吞属误伤）。残留权衡：无任何 role 标记
+ * 的非交互 portal（无标记 toast 等）仍在误伤面内——文本包含是消解原生
+ * tooltip 的唯一可用判据（原生 tooltip 门户无交互角色、无可钉特征类名，
+ * tooltip 角色不可入名单），这类浮层命中后仅 refresh/stop 可解除。 */
 export const INTERACTIVE_PORTAL_ROLE_SELECTOR =
-  '[role="menu"],[role="menuitem"],[role="dialog"],[role="alertdialog"],[role="listbox"],[role="option"]'
+  '[role="menu"],[role="menuitem"],[role="dialog"],[role="alertdialog"],[role="listbox"],[role="option"],[role="status"],[role="alert"]'
 
 /** 纯函数守卫（node 可测）：portal 是否交互面（含自身）。 */
 export function looksLikeInteractivePortal(node: {
@@ -334,7 +338,7 @@ export function createNativeTipSuppressor(getNames: () => readonly string[]): Na
 
   const hideIfMatch = (node: HTMLElement): void => {
     if (node.hasAttribute(WORKSPACE_TIP_ATTR)) return // 本插件富卡不误伤
-    if (looksLikeInteractivePortal(node)) return // 菜单/对话框/下拉不误伤
+    if (looksLikeInteractivePortal(node)) return // 菜单/对话框/下拉/通知条不误伤
     if (hidden.has(node)) return
     const text = node.textContent ?? ''
     for (const name of getNames()) {
