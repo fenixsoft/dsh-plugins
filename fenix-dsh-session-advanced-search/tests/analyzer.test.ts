@@ -74,7 +74,7 @@ const SIGNAL = new AbortController().signal
 
 describe('rankCandidates 命中排序', () => {
   it('LLM 排名决定顺序，reason/confidence 透传，degraded=false', async () => {
-    const calls: { user: string }[] = []
+    const calls: { user: string; provider?: string; model?: string; system?: string }[] = []
     const llm = stubLlm(
       JSON.stringify({
         results: [
@@ -137,7 +137,7 @@ describe('rankCandidates 命中排序', () => {
       }),
     )
     const deps = { llm, agentDefaultModel: ROUTE, log: makeLog(), timeoutMs: 1000, topN: 2 }
-    const outcome = await rankCandidates(deps, 'q', [row('s1'), row('s2'), row('s3')], SIGNAL)
+    const outcome = await rankCandidates(deps, 'q', [row('s1', 1), row('s2', 1), row('s3', 1)], SIGNAL)
     expect(outcome.results.map((row) => row.sessionId)).toEqual(['s1', 's2'])
   })
 })

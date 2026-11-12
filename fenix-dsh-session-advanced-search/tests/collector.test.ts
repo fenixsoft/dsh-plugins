@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { byteTruncate, collectCandidates, extractFirstUserText, tokenize } from '../src/host/collector.js'
 import type { CollectorLog } from '../src/host/collector.js'
-import type { DshSessionController, DshSessionPersistence, DshSessionSnapshot } from '../src/types/dsh-runtime.js'
+import type { DshSessionController, DshSessionEvent, DshSessionHandle, DshSessionHeader, DshSessionPersistence, DshSessionSnapshot } from '../src/types/dsh-runtime.js'
 
 /** 带调用台账的假 persistence（open 只支持 'read'；写通道存在即记账）。 */
 class FakePersistence implements DshSessionPersistence {
@@ -33,17 +33,19 @@ class FakePersistence implements DshSessionPersistence {
     return Promise.resolve(this.snapshots.find((snapshot) => snapshot.header.id === id))
   }
 
-  open(id: string, access: 'read' | 'write', options?: { signal?: AbortSignal }): Promise<{ id: string; access: 'read' | 'write'; read(): Promise<{ events: unknown[] }>; close(): Promise<void> }> {
+  open(id: string, access: 'read' | 'write', options?: { signal?: AbortSignal }): Promise<DshSessionHandle> {
     this.calls.push({ method: 'open', args: [id, access, options] })
     if (access !== 'read') throw new Error(`fixture: write access must never happen (got ${access})`)
+    const header: DshSessionHeader = { version: 1, id, createdAt: 0, isSeeded: false }
     const text = this.excerptById.get(id) ?? ''
     const events = text.length > 0 ? [{ seq: 1, type: 'user/message', content: [{ type: 'text', text }] }] : []
     return Promise.resolve({
       id,
+      header,
       access,
       read: () => {
         this.calls.push({ method: 'read', args: [id] })
-        return Promise.resolve({ events })
+        return Promise.resolve({ events: events as DshSessionEvent[] })
       },
       close: () => {
         this.calls.push({ method: 'close', args: [id] })
@@ -281,6 +283,7 @@ describe('collectCandidates 首条用户消息节选', () => {
       const text = '正常节选'
       return Promise.resolve({
         id,
+        header: { version: 1, id, createdAt: 0, isSeeded: false },
         access,
         read: () => Promise.resolve({ events: [{ seq: 1, type: 'user/message', content: [{ type: 'text', text }] }] }),
         close: () => Promise.resolve(),

@@ -1,11 +1,12 @@
 import { defineConfig } from 'tsdown'
 
 // dsh 插件三入口（对齐 fenix-dsh-dashboard-bridge / fenix-dsh-session-grouper 先例）：
-// - Host 装配 `src/host/host.ts` → `lib/host.js`：ESM（dsh 宿主为 ESM；loader 消费
-//   的 cordis 插件服务类）。@deepseek-ai/cordis 保持 external 随宿主解析；其余
-//   host 模块（jobs/collector/analyzer/routes/shared）一并打包。
-// - Host loader 入口 `src/host/index.ts` → `lib/index.js`：薄 re-export（package.json
-//   main/exports `.` 指向它；clean:false 防止清掉先构建的 host.js）。
+// - Host 装配与 loader 入口 `src/host/index.ts` → `lib/index.js`：ESM（dsh 宿主
+//   为 ESM；package.json main/exports `.` 指向它）。@deepseek-ai/cordis 保持
+//   external 随宿主解析；其余 host 模块（jobs/collector/analyzer/routes/shared）
+//   一并打包。
+// - `src/host/host.ts` → `lib/host.js`：薄 re-export（tasks 5.1 产出面；
+//   clean:false 防止清掉先构建的 index.js）。
 // - Client 半 `src/client/index.ts` → `lib/client.js`：dsh client-modules 的懒加载
 //   CJS 工厂形态——`window.__ModuleLoader__.load({ id, factory })`，factory(require)
 //   内完整求值模块体并返回 module.exports（形态对齐发行包 client.js）。react 与
@@ -29,8 +30,8 @@ const clientExternals = [
 ]
 
 export default defineConfig([
-  { ...hostBase(), entry: { host: 'src/host/host.ts' }, clean: true },
-  { ...hostBase(), entry: { index: 'src/host/index.ts' }, clean: false },
+  { ...hostBase(), entry: { index: 'src/host/index.ts' }, clean: true },
+  { ...hostBase(), entry: { host: 'src/host/host.ts' }, clean: false },
   {
     entry: { client: 'src/client/index.ts' },
     outDir: 'lib',

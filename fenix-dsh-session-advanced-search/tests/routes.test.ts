@@ -12,7 +12,8 @@ import type { WebRequest, WebResponse } from '../src/types/dsh-runtime.js'
 
 /** 最小事件发射器（data/end 记账）。 */
 class FakeReq implements WebRequest {
-  private readonly listeners = new Map<string, ((chunk: unknown) => void)[]>()
+  private readonly listeners = new Map<string, ((chunk: Buffer | string) => void)[]>()
+  readonly headers: Record<string, string> = {}
   ended = false
 
   constructor(
@@ -20,14 +21,14 @@ class FakeReq implements WebRequest {
     readonly url: string,
   ) {}
 
-  on(event: string, listener: (chunk: unknown) => void): this {
+  on(event: 'data' | 'end', listener: (chunk: Buffer | string) => void): this {
     const list = this.listeners.get(event) ?? []
     list.push(listener)
     this.listeners.set(event, list)
     return this
   }
 
-  removeListener(event: string, listener: (chunk: unknown) => void): this {
+  removeListener(event: 'data', listener: (chunk: Buffer | string) => void): this {
     const list = this.listeners.get(event) ?? []
     const index = list.indexOf(listener)
     if (index >= 0) list.splice(index, 1)
@@ -40,7 +41,7 @@ class FakeReq implements WebRequest {
 
   emitEnd(): void {
     this.ended = true
-    for (const listener of this.listeners.get('end') ?? []) listener(undefined)
+    for (const listener of this.listeners.get('end') ?? []) listener(Buffer.alloc(0))
   }
 }
 
@@ -95,7 +96,7 @@ function setup(): {
   server: StubWebServer
   jobs: JobTable
   runJobs: string[]
-  runJobImpl: (jobId: string) => Promise<void>
+  setRunJob: (impl: (jobId: string) => Promise<void>) => void
   dispatch: (method: string, url: string, body?: string) => Promise<FakeRes>
 } {
   const server = new StubWebServer()
@@ -120,7 +121,7 @@ function setup(): {
     await handled
     return res
   }
-  return { server, jobs, runJobs, setRunJob: (impl) => (runJobImpl = impl), runJobImpl, dispatch }
+  return { server, jobs, runJobs, setRunJob: (impl) => (runJobImpl = impl), dispatch }
 }
 
 describe('路由注册对账', () => {

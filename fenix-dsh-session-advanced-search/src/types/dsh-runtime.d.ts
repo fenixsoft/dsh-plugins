@@ -57,6 +57,10 @@ declare module '@deepseek-ai/cordis' {
 
   /** cordis 插件服务基类（host 半插件形态，session-grouper 先例）。 */
   export class Service {
+    /** 插件 fiber 上下文（服务缝消费入口）。 */
+    readonly ctx: Context
+    /** 本服务注册在 ctx 下的名字。 */
+    name: string
     constructor(ctx: Context, name?: string)
     /** cordis 依赖注入声明：loader 等这些服务就绪后再 apply 本插件。 */
     static inject?: readonly string[]
@@ -96,14 +100,12 @@ export interface WebRequest {
   on(event: 'data', listener: (chunk: Buffer | string) => void): void
   on(event: 'end', listener: () => void): void
   removeListener(event: 'data', listener: (chunk: Buffer | string) => void): void
-  [key: string]: unknown
 }
 
 /** handler 可写的响应 sink 被消费面。 */
 export interface WebResponse {
   writeHead(status: number, headers?: Record<string, string>): unknown
   end(body?: Buffer | string): unknown
-  [key: string]: unknown
 }
 
 /** 会话持久化 header 的被消费面（安装包 SessionHeader 结构子集）。 */
