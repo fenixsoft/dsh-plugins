@@ -28,7 +28,7 @@
 - **D3 LLM 单调用排序**：候选集摘要打包进一个 prompt，一次 LLM 调用返回 JSON 排名（id+reason+confidence）。成本 O(1) 次调用；超时 `llmTimeoutMs=60000`，解析失败/超时 → 回退机械排序并置 `degraded` 标记。理由：逐会话调用成本 O(n)；本地嵌入索引属 Non-Goal。LLM 服务从宿主 dsh 既有 LLM 服务缝获取（session-titles 同模式），不自带 provider 配置。
 - **D4 预筛管线（只读）**：`sessionPersistence.list()` 全量 header → 可选时间范围过滤（header 时间戳）→ 关键词计分（标题+cwd；命中加分）→ 截断 `maxCandidates=30`（评分优先、同分取最近活跃）。摘要构造只读 header + 首条用户消息节选（限前 2KB/会话），不整段读大会话。
 - **D5 跳转缝（实现期侦察钉死）**：目标为「主视图切到既有会话」。`startSession()` 只开新会话不可用；实现期第一优先侦察 `dsh-client-ui-session`/侧栏选中态缝（如 sessions 服务 open/select 或侧栏列表项受控行为）。缝不存在时兜底：UI 层触发侧栏对应列表项 click。此侦察是 tasks 1.x 首个任务，结论回填本节。
-- **D6 任务模型**：host 进程内 `Map<jobId, Job>`，AbortController 取消；不跨重启持久（弹窗内等待语义，重启丢任务可接受，client 轮询 404 即按 error 收尾）。多标签页天然隔离：jobId 只回发起方。
+- **D6 任务模型**：host 进程内 `Map<jobId, Job>`，AbortController 取消；不跨重启持久（弹窗内等待语义，重启丢任务可接受，client 轮询 404 即按 error 收尾）。多标签页天然隔离：jobId 只回发起方；「同一 client 单在途」约束由 client 半提交前 DELETE 旧任务保证（4.4），host 不做隐式取消（避免跨标签页互踩）。
 - **D7 配置（loader config）**：`enabled`(true)、`maxCandidates`(30)、`topN`(5)、`llmTimeoutMs`(60000)。非法值装载期显式抛错（session-grouper 纪律）。
 - **D8 弹窗构形**：client 半复用 `dsh-client-ui-primitives` 基元（Button/Input 等）保证观感一致；无 Dialog 原语时自绘轻量 overlay + Esc 关闭。图标按钮用内联 SVG 放大镜+星标形态（仅图标，title=「高级搜索」）。
 

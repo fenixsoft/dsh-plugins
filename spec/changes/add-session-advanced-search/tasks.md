@@ -57,6 +57,8 @@
   kind: new
 - path: fenix-dsh-session-advanced-search/tests/dialog.test.ts
   kind: new
+- path: fenix-dsh-session-advanced-search/tests/jump.test.ts
+  kind: new
 - path: spec/changes/add-session-advanced-search/design.md
   kind: modify
 ```
@@ -75,9 +77,9 @@
 
 ## 3. host 半：任务、收集、分析、路由
 
-- [ ] 3.1 `src/host/jobs.ts` + `tests/jobs.test.ts`：进程内任务表（Map<jobId,Job> + AbortController）；单任务语义（在途时新提交取消旧任务）；DELETE 取消；GET 未知 jobId 返回 404 语义；任务状态机与终态幂等
-- [ ] 3.2 `src/host/collector.ts` + `tests/collector.test.ts`：只读收集（sessionPersistence.list 全量 header，覆盖全部工作区）→ 可选时间范围过滤 → 关键词计分（标题+cwd 命中加分）→ maxCandidates 截断（评分优先、同分取最近活跃）；首条用户消息节选 ≤2KB；测试含只读断言（收集前后测试夹具产物的内容与 mtime 不变）与时间过滤/截断/零候选分支
-- [ ] 3.3 `src/host/analyzer.ts` + `tests/analyzer.test.ts`：LLM 单调用排序（候选摘要打包单 prompt，严格 JSON 解析出 id+reason+confidence，按 topN 截取）；LLM 缺失/超时/解析失败 → 机械评分排序回退并置 degraded=true；测试用 stub LLM 覆盖命中排序、失败回退、空候选、topN 截断
+- [ ] 3.1 `src/host/jobs.ts` + `tests/jobs.test.ts`：进程内任务表（Map<jobId,Job> + AbortController，支持多在途任务并存）；「同一 client 单在途、重复提交取消旧任务」语义由 client 半保证（见 4.4 提交前 DELETE 旧任务；host 不做隐式取消，避免跨标签页互踩，与 design D6 多标签页隔离一致）；DELETE 取消；GET 未知 jobId 返回 404 语义；任务状态机与终态幂等
+- [ ] 3.2 `src/host/collector.ts` + `tests/collector.test.ts`：只读收集（sessionPersistence.list 全量 header，覆盖全部工作区）→ 可选时间范围过滤 → 关键词计分（标题+cwd 命中加分）→ maxCandidates 截断（评分优先、同分取最近活跃）；首条用户消息节选 ≤2KB；管线逐级可观测（采集链路交付项）：收集总数→时间过滤后→计分截断后各阶段候选数量以 debug 级日志逐级输出；测试含只读断言（收集前后测试夹具产物的内容与 mtime 不变）与时间过滤/截断/零候选分支
+- [ ] 3.3 `src/host/analyzer.ts` + `tests/analyzer.test.ts`：LLM 单调用排序（候选摘要打包单 prompt，严格 JSON 解析出 id+reason+confidence，按 topN 截取）；LLM 缺失/超时/解析失败 → 机械评分排序回退并置 degraded=true，且按原因分类记录 warn 级日志（服务缺失/超时/解析失败）映射进 degraded 原因；测试用 stub LLM 覆盖命中排序、失败回退、空候选、topN 截断
 - [ ] 3.4 `src/host/routes.ts` + `tests/routes.test.ts`：webServer.register 三端点契约（POST 建 job 立即返回 jobId；GET 轮询 phase/results/degraded；DELETE 取消）；路径前缀 `/api/session-advanced-search`；与测试桩 webServer 缝对账
 - [ ] 3.5 `src/host/index.ts`：host 半装配（config 解析、依赖缝缺失 error 级显式停用不注册路由、注册/卸载对称）
 
@@ -85,7 +87,7 @@
 
 - [ ] 4.1 `src/client/searchButton.ts` + `tests/searchButton.test.ts`（jsdom）：MutationObserver + design.md 回填的锚点签名，在 X 按钮左侧插入仅图标按钮（内联 SVG、title/hover 提示「高级搜索」）；锚点失配 → warn 日志 + 放弃注入不抛错；测试覆盖注入成功位置、hover 提示、失配降级、卸载清理（observer 断开、按钮移除）
 - [ ] 4.2 `src/client/searchDialog.tsx` + `tests/dialog.test.ts`（jsdom）：高级搜索弹窗（复用 dsh-client-ui-primitives 基元，缺原语自绘 overlay）——描述输入（空/空白时提交禁用）、可选开始/结束日期、关闭按钮与 Esc、关闭重开状态重置、提交后 1s 轮询进度并展示阶段文案（收集会话/预筛候选/agent 分析中）、结果列表（标题/工作区/时间/理由/置信度）、degraded 标注（「LLM 分析不可用，已按机械匹配排序」）、空态文案、候选点击回调
-- [ ] 4.3 `src/client/jump.ts`：会话跳转——优先 design.md 回填的服务缝，无缝时侧栏列表项 UI click 兜底；跨工作区会话直接生效；跳转前后关闭弹窗
+- [ ] 4.3 `src/client/jump.ts` + `tests/jump.test.ts`：会话跳转——优先 design.md 回填的服务缝，无缝时侧栏列表项 UI click 兜底；跨工作区会话直接生效；跳转前后关闭弹窗；测试以 stub 缝注入覆盖服务缝优先、兜底 click、跨工作区参数传递、关闭弹窗分支
 - [ ] 4.4 `src/client/index.ts`：client 半装配——按钮点击开弹窗、提交经 fetch 调 POST jobs、轮询 GET、重复提交取消旧任务（DELETE+新建）、候选点击调 jump、卸载清理对称
 
 ## 5. 构建、文档与收尾
