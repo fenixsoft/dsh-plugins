@@ -361,8 +361,18 @@ export interface ProjectSyncOptions {
  * 判据），缺失者 `workspaces.create({ path })` 注册（不开会话）——只增不改
  * 不删；对齐拉取失败/超时跳过整轮（不建不删）；逐项目注册失败 warn 跳过
  * （下轮重试）。依赖任一缺席整段禁用（零动作，不产生未处理异常）。
+ *
+ * 快照瞬空防护（同 panels.tsx rescan 口径）：`seen` 记录对齐循环是否见过
+ * 非空快照——曾非空后转空 = 宿主重载空窗（判定面不可信），本轮不判差
+ * 不建区（只增不删，瞬窗误建无法回收），等下一轮快照恢复再对齐；从未非
+ * 空过的首启真真空才放行创建。
  */
-async function alignWorkspaces(options: ProjectSyncOptions, names: readonly string[], isStopped: () => boolean): Promise<void> {
+async function alignWorkspaces(
+  options: ProjectSyncOptions,
+  names: readonly string[],
+  isStopped: () => boolean,
+  seen: { hasNonEmptyItems: boolean },
+): Promise<void> {
   const fetchRows = options.fetchProjectRows
   const listItems = options.workspaceItems
   const createWorkspace = options.createWorkspace
@@ -394,6 +404,14 @@ async function alignWorkspaces(options: ProjectSyncOptions, names: readonly stri
     )
   }
   const items = listItems()
+  if (items.length > 0) seen.hasNonEmptyItems = true
+  else if (seen.hasNonEmptyItems) {
+    // 快照瞬空（曾非空后转空——实测 dsh Remote model 周期性重载时 items 瞬空，
+    // 同 panels.tsx rescan 防护口径）：判定面不可信，本轮不判差不建区（只增
+    // 不删，瞬窗误建的工作区不会被回收），等下一轮快照恢复后再对齐。
+    console.warn('[fenix-dsh-dashboard-bridge] 工作区快照瞬空（此前曾非空），本轮对齐跳过（不建区，等快照恢复）')
+    return
+  }
   for (const row of rows) {
     if (isStopped()) return
     if (row.path === null) continue // 目录不可达项目不对齐（D3：exists 判据前置）
@@ -420,6 +438,8 @@ export function startProjectSync(options: ProjectSyncOptions): () => void {
   let current: ReadonlySet<string> = new Set()
   let stopped = false
   let inFlight = false
+  // 对齐步快照形态记忆（跨轮持久、每循环实例独立）：见过非空快照后，空快照按瞬窗处理。
+  const alignSeen = { hasNonEmptyItems: false }
 
   const pull = async (): Promise<void> => {
     if (stopped || inFlight) return
@@ -429,7 +449,7 @@ export function startProjectSync(options: ProjectSyncOptions): () => void {
       if (!stopped) {
         current = reconcileProjects(current, names, options.sink)
         options.sink.setProjects(names)
-        await alignWorkspaces(options, names, () => stopped)
+        await alignWorkspaces(options, names, () => stopped, alignSeen)
       }
     } catch (error) {
       // 拉取失败：仅保留既有状态（面板与数据源原样），无未处理异常，

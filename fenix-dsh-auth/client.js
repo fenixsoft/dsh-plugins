@@ -39,6 +39,7 @@
 			var createElement = react.createElement
 			var useEffect = react.useEffect
 			var useState = react.useState
+			var useRef = react.useRef
 
 			/* 官方注册尾兜底值（0.2.2-rc.1 实测：plugins=15；动态探测失败时本
 			 * 分区落在 official 尾部 +1，不与官方分区争序）。 */
@@ -102,6 +103,10 @@
 				var busyState = useState(false)
 				var busy = busyState[0]
 				var setBusy = busyState[1]
+				/* 卸载旗标（ref 版，跨渲染持久）：onSave/onRemove 的异步回调在弹窗
+				 * 关闭（组件卸载）后跳过 setState，与 useEffect 的 cancelled 旗标
+				 * 同口径。 */
+				var unmountedRef = useRef(false)
 
 				/* 挂载回填：GET {configured, username}；401 = 未登录（dsh 会话过期）。 */
 				useEffect(function () {
@@ -126,6 +131,7 @@
 					})
 					return function () {
 						cancelled = true
+						unmountedRef.current = true
 					}
 				}, [])
 
@@ -148,8 +154,11 @@
 					fetch('/auth/credentials', {
 						method: 'POST',
 						headers: { 'content-type': 'application/json' },
-						body: JSON.stringify({ username: username, password: password, confirm: confirm }),
+						/* confirm 仅用于客户端一致性校验，不随请求体发送（服务端该
+						 * 字段可选，validateCredentialInput 缺省跳过一致性校验）。 */
+						body: JSON.stringify({ username: username, password: password }),
 					}).then(function (response) {
+						if (unmountedRef.current) return
 						if (response.ok) {
 							setStatus({ configured: true, username: username })
 							setPassword('')
@@ -159,6 +168,7 @@
 							setMessage({ kind: 'error', text: '请先登录后再配置账号密码' })
 						} else if (response.status === 400) {
 							response.json().then(function (data) {
+								if (unmountedRef.current) return
 								var texts = {
 									'invalid-username': '用户名需要 1-64 个字符',
 									'password-too-short': '密码至少 8 个字符',
@@ -168,6 +178,7 @@
 								}
 								setMessage({ kind: 'error', text: texts[data && data.error] || '校验失败（' + (data && data.error) + '）' })
 							}).catch(function () {
+								if (unmountedRef.current) return
 								setMessage({ kind: 'error', text: '校验失败（HTTP 400）' })
 							})
 						} else if (response.status === 403) {
@@ -176,8 +187,10 @@
 							setMessage({ kind: 'error', text: '保存失败（HTTP ' + response.status + '）' })
 						}
 					}).catch(function () {
+						if (unmountedRef.current) return
 						setMessage({ kind: 'error', text: '保存失败：服务不可达' })
 					}).finally(function () {
+						if (unmountedRef.current) return
 						setBusy(false)
 					})
 				}
@@ -188,6 +201,7 @@
 					setBusy(true)
 					setMessage(null)
 					fetch('/auth/credentials', { method: 'DELETE' }).then(function (response) {
+						if (unmountedRef.current) return
 						if (response.ok) {
 							setStatus({ configured: false, username: null })
 							setPassword('')
@@ -199,8 +213,10 @@
 							setMessage({ kind: 'error', text: '移除失败（HTTP ' + response.status + '）' })
 						}
 					}).catch(function () {
+						if (unmountedRef.current) return
 						setMessage({ kind: 'error', text: '移除失败：服务不可达' })
 					}).finally(function () {
+						if (unmountedRef.current) return
 						setBusy(false)
 					})
 				}

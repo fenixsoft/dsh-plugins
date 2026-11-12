@@ -296,10 +296,30 @@ export interface RowQueryLike {
 }
 
 /**
- * 行内名称文本定位（D1 锚点链第二步）：遍历行内全部元素，取「无子元素且
- * 文本内容（trim 后）与项目名精确相等」的元素——官方行名称结构为
- * span.projectText > span.title 双层，无子元素约束天然命中内层 title；
- * MUST NOT 依赖 CSS module 哈希类名。未命中返回 null（该行不装层，静默降级）。
+ * 名称文本候选判据：无元素子节点，或仅含拦截层子节点——拦截层由 ensureOverlay
+ * append 进名称文本内部，严格无子判据会让挂层后的名称文本永久失明、rescan
+ * 无法再命中，ensureOverlay 的换层分支（同文本位项目名变化）不可达。node 桩
+ * 替身的 children 只有 length、无从检子元素属性，一律按「有非层子元素」处理
+ * （既有替身行为不变）。
+ */
+function isNameTextCandidate(node: NameTextLike): boolean {
+  if (node.children.length === 0) return true
+  const children = node.children as unknown as readonly unknown[]
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index] as { getAttribute?: (name: string) => string | null } | undefined
+    const attribute = child?.getAttribute?.(WORKSPACE_NAV_OVERLAY_ATTR)
+    if (attribute === undefined || attribute === null) return false
+  }
+  return true
+}
+
+/**
+ * 行内名称文本定位（D1 锚点链第二步）：遍历行内全部元素，取「无子元素（或
+ * 仅含拦截层子元素，见 isNameTextCandidate）且文本内容（trim 后）与项目名
+ * 精确相等」的元素——官方行名称结构为 span.projectText > span.title 双层，
+ * 无子元素约束天然命中内层 title；挂层后的 title 经拦截层子元素例外维持
+ * 命中（同文本位项目名变化时换层分支可达）。MUST NOT 依赖 CSS module 哈希
+ * 类名。未命中返回 null（该行不装层，静默降级）。
  */
 export function findNameTextElement(row: RowQueryLike, name: string): NameTextLike | null {
   let found: NameTextLike | null = null
@@ -307,7 +327,7 @@ export function findNameTextElement(row: RowQueryLike, name: string): NameTextLi
   for (let index = 0; index < nodes.length; index += 1) {
     const node = nodes[index]
     if (node === null || node === undefined) continue
-    if (node.children.length !== 0) continue
+    if (!isNameTextCandidate(node)) continue
     if ((node.textContent ?? '').trim() !== name) continue
     found = node // 文档序持续覆盖：同文本嵌套时取最深命中
   }

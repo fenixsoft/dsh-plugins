@@ -123,6 +123,11 @@ export function reorderOfficialPanels(ctx: Context): () => void {
     return () => {}
   }
   const done = new Set<string>()
+  // unsubscribe 声明提前并给安全初值：attempt 末尾「全部到位即退订」引用本
+  // 变量，而部分事件总线对已有状态做同步首播（subscribe 注册后即刻回调
+  // attempt）——彼时若两个官方条目都已登场，const 后置声明会踩 TDZ 抛
+  // ReferenceError（apply 调用点无 try/catch，整个插件激活失败）。
+  let unsubscribe: () => void = () => {}
   const attempt = () => {
     let entries: ReturnType<Context['slots']['entriesOfSlot']>
     try {
@@ -157,7 +162,7 @@ export function reorderOfficialPanels(ctx: Context): () => void {
     }
     if (done.size >= OFFICIAL_PANEL_REORDER.length) unsubscribe()
   }
-  const unsubscribe = ctx.slots.subscribe('sidebar.panellist', attempt)
+  unsubscribe = ctx.slots.subscribe('sidebar.panellist', attempt)
   attempt() // 官方先于本插件注册时首轮即中
   return unsubscribe
 }
@@ -239,24 +244,31 @@ export interface ClientPluginOptions extends BridgeConfigInput {
 /** 默认项目列表拉取超时（毫秒）：悬挂请求超时后 abort，不让同步循环永久停摆。 */
 const FETCH_PROJECTS_TIMEOUT_MS = 10_000
 
+/**
+ * 默认拉取公共内核：GET `<prefix>api/projects` → 原始 JSON 应答（AbortController
+ * + 10s 超时 + !ok 抛错单点维护）。defaultFetchProjects / defaultFetchProjectPath /
+ * defaultFetchProjectRows 三个入口只保留各自的解析步，超时口径与错误文案改一处即全量生效。
+ */
+async function fetchProjectRowsWithTimeout(prefix: string): Promise<unknown> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), FETCH_PROJECTS_TIMEOUT_MS)
+  try {
+    const response = await fetch(`${prefix}api/projects`, {
+      headers: { accept: 'application/json' },
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      throw new Error(`fenix-dsh-dashboard-bridge: 拉取项目列表失败 HTTP ${response.status}`)
+    }
+    return await response.json()
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 /** 默认项目列表拉取：GET `<prefix>api/projects` → parseProjectNames（10s 超时）。 */
 export function defaultFetchProjects(prefix: string): ProjectListFetcher {
-  return async () => {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), FETCH_PROJECTS_TIMEOUT_MS)
-    try {
-      const response = await fetch(`${prefix}api/projects`, {
-        headers: { accept: 'application/json' },
-        signal: controller.signal,
-      })
-      if (!response.ok) {
-        throw new Error(`fenix-dsh-dashboard-bridge: 拉取项目列表失败 HTTP ${response.status}`)
-      }
-      return parseProjectNames(await response.json())
-    } finally {
-      clearTimeout(timeout)
-    }
-  }
+  return async () => parseProjectNames(await fetchProjectRowsWithTimeout(prefix))
 }
 
 /**
@@ -355,22 +367,7 @@ async function startProjectSessionInner(
 
 /** 默认项目目录查询：GET `<prefix>api/projects` → parseProjectPath（10s 超时，同主链路口径）。 */
 export function defaultFetchProjectPath(prefix: string): (name: string) => Promise<string | null> {
-  return async (name) => {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), FETCH_PROJECTS_TIMEOUT_MS)
-    try {
-      const response = await fetch(`${prefix}api/projects`, {
-        headers: { accept: 'application/json' },
-        signal: controller.signal,
-      })
-      if (!response.ok) {
-        throw new Error(`fenix-dsh-dashboard-bridge: 拉取项目列表失败 HTTP ${response.status}`)
-      }
-      return parseProjectPath(await response.json(), name)
-    } finally {
-      clearTimeout(timeout)
-    }
-  }
+  return async (name) => parseProjectPath(await fetchProjectRowsWithTimeout(prefix), name)
 }
 
 /**
@@ -461,22 +458,7 @@ export function installDashboardSessionRequests(
 /** 默认项目行拉取：GET `<prefix>api/projects` → 原始应答（工作区对齐步逐行
  * 解析用；10s 超时同主链路口径）。 */
 export function defaultFetchProjectRows(prefix: string): ProjectRowsFetcher {
-  return async () => {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), FETCH_PROJECTS_TIMEOUT_MS)
-    try {
-      const response = await fetch(`${prefix}api/projects`, {
-        headers: { accept: 'application/json' },
-        signal: controller.signal,
-      })
-      if (!response.ok) {
-        throw new Error(`fenix-dsh-dashboard-bridge: 拉取项目列表失败 HTTP ${response.status}`)
-      }
-      return await response.json()
-    } finally {
-      clearTimeout(timeout)
-    }
-  }
+  return async () => fetchProjectRowsWithTimeout(prefix)
 }
 
 /**
@@ -570,8 +552,15 @@ export function panelIdFromHash(): string | null {
   if (typeof window === 'undefined') return null
   const PANEL_HASH_PREFIX = '#panel='
   if (!window.location.hash.startsWith(PANEL_HASH_PREFIX)) return null
-  const id = decodeURIComponent(window.location.hash.slice(PANEL_HASH_PREFIX.length))
-  return id.length > 0 ? id : null
+  // 非法百分号序列（分享/手输链接如 #panel=100%）令 decodeURIComponent 抛
+  // URIError——按无深链（null）处理，不让异常沿 hashchange 事件或 boot 轮询
+  // 回调外溢（applyHash 的 try 只包 original.call，此处抛出即未处理异常）。
+  try {
+    const id = decodeURIComponent(window.location.hash.slice(PANEL_HASH_PREFIX.length))
+    return id.length > 0 ? id : null
+  } catch {
+    return null
+  }
 }
 
 /**
