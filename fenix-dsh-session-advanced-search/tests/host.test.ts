@@ -131,7 +131,25 @@ function makeCtx(overrides: {
     },
   }
   for (const key of overrides.omit ?? []) delete full[key]
-  return { ctx: full as unknown as import('@deepseek-ai/cordis').Context, webServer, logs, effects }
+  // cordis get 陷阱忠实镜像（BUG-01 回归基座）：插件 static inject 仅声明
+  // webServer/sessionPersistence——其余服务键既使宿主已激活，loader 隔离语境
+  // 下属性访问仍抛「cannot get property without inject」（实机复现坐实）；
+  // 合法探测姿势是 ctx.get(name)（ReflectService.get 免 inject 读取，缺失
+  // 返回 undefined 不抛）。宽松桩（属性访问静默 undefined）正是 BUG-01 漏网
+  // 缺口，此处 MUST NOT 退回。
+  const injectKeys = ['webServer', 'sessionPersistence']
+  const serviceKeys = [...injectKeys, 'sessionController', 'llm', 'agentDefaultModel']
+  const raw = full as Record<string, unknown>
+  raw.get = (name: string) => raw[name]
+  const proxied = new Proxy(raw, {
+    get(target, prop) {
+      if (typeof prop === 'string' && serviceKeys.includes(prop) && !injectKeys.includes(prop)) {
+        throw new Error(`cannot get property "${prop}" without inject`)
+      }
+      return Reflect.get(target, prop)
+    },
+  })
+  return { ctx: proxied as unknown as import('@deepseek-ai/cordis').Context, webServer, logs, effects }
 }
 
 /** 构造被测插件（装配即注册；phase 轮询一律经公开路由座位驱动）。 */
@@ -203,6 +221,20 @@ describe('装配：runJob 管线端到端', () => {
     expect(status.phase).toBe('done')
     expect(status.degraded).toBe(true)
     expect(status.results?.[0]).toMatchObject({ sessionId: 's1', degraded: true })
+  })
+
+  it('BUG-01 回归：可选缝探测走 ctx.get——缝在场即增强（镜像桩属性访问抛错下 title 仍落地）', async () => {
+    const { ctx, webServer, logs } = makeCtx({})
+    // 镜像桩保真自检：未声明 inject 的服务键属性访问必须抛（cordis get 陷阱形态）。
+    expect(() => (ctx as unknown as Record<string, unknown>).sessionController).toThrow(/without inject/)
+    makePlugin(ctx, undefined)
+    const created = await webServer.post(JSON.stringify({ query: '标题' }))
+    const status = await pollViaRoute(webServer, created.jobId as string)
+    expect(status.phase).toBe('done')
+    // 增强生效：投影 title 落进结果，且无 header-only 降级日志——
+    // 若 safeSeam 退回属性访问（BUG-01 形态），此用例必然转红。
+    expect(status.results?.[0]).toMatchObject({ sessionId: 's1', title: '标题' })
+    expect(logs.debug.some((m) => m.includes('sessionController 缝缺失'))).toBe(false)
   })
 
   it('collector 抛错 → error 收尾（中文 message）', async () => {

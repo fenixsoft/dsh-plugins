@@ -8,11 +8,13 @@
  *   （cordis 时序保证 + loader 显式等就绪）；缺失/形态不符 → error 级显式
  *   停用，不注册路由。
  * - 可选服务缝（`sessionController` / `llm` / `agentDefaultModel`）**不进
- *   inject**：cordis 对未声明 inject 的服务在构造期属性访问即抛
- *   「cannot get property without inject」，而放进 inject 会变成硬依赖
- *   （宿主裁剪该服务时插件永不激活）。故管线执行期经 safeSeam 探测，
- *   缺失走 collector（header-only）/ analyzer（机械回退 degraded）的既有
- *   降级路径——搜索可用性不受影响。
+ *   inject**：放进 inject 会变成硬依赖（宿主裁剪该服务时插件永不激活）；
+ *   而未声明 inject 的服务经上下文代理属性访问即抛「cannot get property
+ *   without inject」（cordis get 陷阱——BUG-01 根因：属性访问探测恒
+ *   undefined → sessionController 标题增强整体失效）。故管线执行期经
+ *   safeSeam 以 ctx.get(name)（cordis 免 inject 读取；官方 dsh-schedule
+ *   同缝消费姿势）探测，缺失走 collector（header-only）/ analyzer（机械
+ *   回退 degraded）的既有降级路径——搜索可用性不受影响。
  * - `enabled=false`：info 级停用（零注册零管线；client 半仍注入入口，
  *   提交将得到 404——dsh client-modules 不下发插件配置，client 无法感知
  *   此开关，README 已知限制条目记录该偏差）。
@@ -201,14 +203,17 @@ export default class FenixSessionAdvancedSearch extends Service {
 }
 
 /**
- * 运行时可选缝安全探测：cordis 上下文代理对未声明 inject 的服务在属性访问
- * 时抛错（grouper 先例注释），统一收口为 undefined（降级路径由此触发）。
+ * 运行时可选缝安全探测（BUG-01 契约注释）：cordis 上下文代理对未声明
+ * inject 的服务**属性访问即抛**「cannot get property without inject」（get
+ * 陷阱；loader 隔离语境下既使服务已在宿主激活也不豁免——实机复现坐实，
+ * 属性访问探测恒 undefined → 标题增强整体失效）。探测 MUST 走
+ * `ctx.get(name)`：cordis ReflectService.get「without the inject
+ * requirement」，服务未提供或提供方 fiber 未激活时返回 undefined 不抛
+ * （官方 dsh-schedule 以 ctx.get("sessionController") 消费同一缝）。
+ * 返回 undefined 即走 collector（header-only）/ analyzer（机械回退
+ * degraded）既有降级路径。
  */
 function safeSeam<T>(ctx: Context, key: 'sessionController' | 'llm' | 'agentDefaultModel'): T | undefined {
-  try {
-    const value: unknown = (ctx as unknown as Record<string, unknown>)[key]
-    return (value ?? undefined) as T | undefined
-  } catch {
-    return undefined
-  }
+  const value: unknown = ctx.get(key)
+  return (value ?? undefined) as T | undefined
 }
