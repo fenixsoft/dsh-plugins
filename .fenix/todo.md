@@ -526,3 +526,8 @@
   - 证据：impl-result.json 申报 tsc 零错+vitest 120/120+产物核验 ctx.get 在场（16:54Z）→ e37d005 合入 → 部署 lib 17:12Z 重建并被新实例加载（symlink+ps 取证）→ 17:13:02Z report.json 与 T2 探针 job-mwdteer6-7 双源实证 title 全空/排序退化，修复机制真机无效。tests/host.test.ts 桩按 get 陷阱形态镜像（impl 自述），结构上无法覆盖「服务在真机不可达」类失效。；触发 run_id=arbiter-add-session-advanced-search-1794503583（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
   - 建议：①修复申报自检必含被修场景的最小真机探针复跑，修复前后失败指纹须发生变化方可申报完成；②judge bug-found 派修复时随单附失败指纹，收批先比对指纹是否变化再全量重跑；③与已记 todo 491（免重执行）组合可把无效修复环代价压到一轮以内。
+- **[arbiter:add-sess] judge重跑计数把infra中断轮计入预算（被杀死的实派也占上限）**
+  - 影响：infra 抖动（进程被杀等）不产出任何判定信息却消耗重跑预算；环境不稳时上限被 infra 噪声提前击穿，冻结早于真实收敛进度，误导人工裁决对循环病态程度的判断（与已记 todo 496「计数口径含未实派判定」同族的新子形态）。
+  - 证据：15:50:00Z 重置后窗口内归档实派仅 5 次（16:06/16:18/16:40/17:01[Exit 143 SIGTERM]/17:12Z，archive mtimes+转录尾行），17:13:02Z 冻结时 _judge_rerun_count=6——计数比窗口内实派数至少多 1，多计来源与被杀 round-11（1794502522）及其补派相关（算术互证：fenixd.log L14280 重置记录+archive mtimes+STATE 计数；精确 bump 点需 judge_gate.py 计数面复核，上轮 arbiter 已引 :443 bump-then-check）。；触发 run_id=arbiter-add-session-advanced-search-1794503583（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
+  - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
+  - 建议：计数器区分「产出判定的实派」与「中断/跳过实派」，后者不计入重跑上限；或中断轮随补派合并计数；冻结告警附双口径（判定数/实派数，_judge_real_dispatches 已在盘）。
