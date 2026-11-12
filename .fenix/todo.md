@@ -489,31 +489,37 @@
   - 调查评估：问题源是主树散件周期盘点（重启后首扫）。已核实事实：散件面 5 处中，.pw-* 家族确为运行时产物（ignore 合理），但 fenix-dsh-clipboard-fallback 是含 package.json 的插件源码目录，框架草案将其归类为「运行时产物」属误判——草案虽仅建议不自动处置，人工照单采纳会把真实成果藏出版本控制。与存量工作关系：既有条目链「.claude/ 散件第 9 天滞留，首现提示仍无人消费」（10-15~10-24）已指出提示无消费闭环，本条是同机制缺口的新增散件面加新失准形态（源码误归类），非重复立项；spec/changes 无相关 SPEC。结论：散件治理立项必要性与既有条目一致，且须新增「草案生成防源码误伤」要求；未入库成果的入库动作优先于机制建设。
   - 建议：先入库真实成果：git add fenix-dsh-clipboard-fallback 4 文件留痕，dashboard-bridge 改动提交或 stash 留备份点；.pw-home/.pw-shots/.pw.sh/.pwenv.sh 与 .claude/ 一并落 .gitignore 收口。机制侧给 gitignore 草案生成加源码特征识别（目录含 package.json 或成规模源码文件时不自动起草 ignore，改提示人工判断入库或 ignore），并入既有散件治理条目。
 - **[arbiter:add-sess] judge硬上限冻结点后移于验证执行之后致整轮执行白烧与证据滞留**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：凡触顶冻结均白烧一整轮验证执行的算力与墙钟（场景集越大越贵），且冻结时点证据新鲜（执行完成）但无判定归属，解冻重验需重执行或依赖缓存指纹跨轮采信，证据链多绕一轮；本案即冻结于「修复已生效的执行证据已产出了 12 秒后」。
   - 证据：fenixd.log L14029-14064：第 6 轮重验 14 场景于 14:02:12-14:02:38 实际执行完毕且 report.json 落盘后，14:02:39.007 阶段3 判定门才 bump 计数至 6>5 冻结（judge_gate.py:443「先 bump 后判定」、L456-457）；judge 从未消费该轮证据，验证执行算力（实机执行+供给+探针）已花完才停。；触发 run_id=arbiter-add-session-advanced-search-1794492159（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
   - 建议：预算预检前移：验证 pipeline 入口/阶段2 执行前对 count+1>_MAX_JUDGE_RERUNS 预判即冻结（保持派发门 bump-then-check 语义兼容稳定性复用跳过计数）；或冻结告警携带本轮已执行 report 指纹，解冻后 judge 直接采信该轮证据免重执行。
 - **[arbiter:add-sess] judge重跑冻结文案单口径6/5未区分判定数与实派数**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：冻结告警与 STATE error 的读者（人工裁决、 Arbiter、dashboard）对「重跑次数」的第一印象偏大一次，可能误判病态循环程度；每次 judge_rerun_cap 冻结均复现该误导。
   - 证据：judge_gate.py:395 计数口径含「被稳定性复用跳过但未实际派发的判定次数」，冻结文案「judge 重跑超上限（6/5 轮）」（fenixd.log L14064、STATE error 字段）读作 6 次 judge 实跑，而归档实派 5 次（STATE _judge_real_dispatches=5）；本案人工/仲裁读者需回捞归档才能对平口径。；触发 run_id=arbiter-add-session-advanced-search-1794492159（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
   - 建议：冻结文案与告警 evidence 段附双口径「判定 6/实派 5」（_judge_real_dispatches 已在 STATE 在盘，零新增取数）；或计数器拆分判定/实派双字段展示。
 - **[arbiter:add-sess] 验证实例夹具明文契约与workspace压缩后端失配跨轮复发**
+  - 自进化：问题部分成立 / 建议不合理 / — 不需要
   - 影响：验证实例官方搜索/会话链路持续不可用：依赖官方会话数据的场景反复 blocked-env/phase=error（本案第 6 轮 3 个 live 场景新失败签名与 entry-injection 复发均疑似此根），env 轮次反复消耗验证预算与 Admin 车道处置轮次，收敛被环境债拖长。
   - 证据：web-boot.log:2 workspace 报「session artifact .../session-fsas0001-*/session.v4.jsonl uses .jsonl, but this backend is configured for compression zstd」→workspaceRegistry/sessionController/ui-deliverables 级联 pending（:6-8）；告警台账 0498acd 处置记录显示 Admin 曾以 rm -rf 隔离 home 清过同一污染并重建，但场景 sas-live-fixture-sessions-seed 契约要求每轮落盘明文 .jsonl 夹具（其自述 sessionPersistence.list() 重扫可列举故 pass），失配随每轮重播必复发——verify.yaml/profile 的 workspace 压缩配置（框架验证基础设施）与场景夹具契约（SPEC 内）存在系统性张力。；触发 run_id=arbiter-add-session-advanced-search-1794492159（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
   - 建议：验证实例 profile/verify.yaml 的 workspace 压缩模式与夹具契约对齐（compression none 或夹具独立 root）；或夹具场景按 dsh-session-format v4+zstd 行形态落盘（r5 报告已预留该修正路径）；两方向需设计取舍（改环境配置 vs 改夹具形态），宜立项统一裁定。
 - **[arbiter:add-sess] inconclusive 停车态下 manual_fixed_reverify choice 前置条件不满足的必败重试环**
+  - 自进化：问题部分成立 / 建议部分合理 / — 不需要
   - 影响：所有「spec 未冻结的 inconclusive_loop 停车」场景下，Admin 车道被引导选择一个机制上必被 choice 执行器拒绝的动作，空转烧 run（本次两连）直至升级 arbiter；告警/转录侧 resolved 表象与框架侧执行失败不一致，污染审计链与处置链配额语义。
   - 证据：.fenix/logs/fenixd.log 15:27:11Z ERROR：处置 choice 执行失败 choice_id=manual_fixed_reverify spec='add-session-advanced-search'：spec 未处于冻结/blocked 态（当前 implemented），重置验证仅对验证链冻结/blocked 开放；15:39:51Z 恢复跳过日志（_inconclusive_attempts=1 停车持续）；admin run 1794496729 转录自报 result=resolved/success=true 与框架实际拒绝执行不对称。；触发 run_id=arbiter-add-session-advanced-search-1794497232（签名 add-session-advanced-search::inconclusive_loop，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 inconclusive_loop（spec=add-session-advanced-search）：'add-session-advanced-search' 连续 1 轮验证失败均被裁决归类 env（级二豁免握手首次命中即升级（judge 已裁决全 env），env 断言 20 条、blocked-env 场景 6 个），judge 已裁决全部失败归环境、等待人工豁免或修环境——自动重验已停止。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
   - 建议：['①inconclusive 停车写入时同步把 spec 置为冻结/blocked 态，使 manual_fixed_reverify 前置成立；②choice 执行器放宽前置至「implemented 且 _inconclusive_attempts>0」态并显式清计数；③choice 执行失败时在告警终态与 run 归档转录回写执行失败标注，消除 resolved 表象']
 - **[arbiter:add-sess] SAS live 夹具命中层从未绿：种子场景缺运行实例可见性自检**
+  - 自进化：问题部分成立 / 建议部分合理 / — 不需要
   - 影响：env 级联修复后 dg/tf 大概率以断言层失败进入 product/test-defect 分类循环；历史上每轮全 env 级联归因把它掩埋在级联签名下无法独立暴露，6 个 web 结果展示场景同被依赖传播遮蔽——同一盲区将持续消耗验证轮次。
   - 证据：fail_history.json 第 2 轮 dg/tf 归 product-bug、verdict_cache.json 各轮指纹无任何 pass 记录（该层从未正向证明）；本 run 探针 done 任务完整 JSON {results:[], degraded:false}（盘面夹具在场、boot 零级联、collector.ts 计分截断 slice(0,max(1,N)) 不可能把非空收零→收集层 in-process 为空）；admin run 1794496338 烟测同观察（results 空、degraded=false）。；触发 run_id=arbiter-add-session-advanced-search-1794497232（签名 add-session-advanced-search::inconclusive_loop，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 inconclusive_loop（spec=add-session-advanced-search）：'add-session-advanced-search' 连续 1 轮验证失败均被裁决归类 env（级二豁免握手首次命中即升级（judge 已裁决全 env），env 断言 20 条、blocked-env 场景 6 个），judge 已裁决全部失败归环境、等待人工豁免或修环境——自动重验已停止。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
   - 建议：['①种子场景（sas-live-fixture-sessions-seed）尾追加运行实例 API 级自检：SAS job 查询夹具标记词须返回≥1 结果，失败即 fail-fast 归装配/env；②验证引擎在 seed 场景后注入 persistence.list() 计数探针与盘面文件数对账；③judge 归因规则细化：服务激活健康探针不过时才允许 env 归因，激活正常时的断言失败强制进入 product/test-defect 细分，避免整场景级 env 伞遮蔽']
 - **[arbiter:add-sess] arbiter 提示词模板占位符未解析（模板漂移静默丢段）**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：arbiter 车道提示词不完整：处置哲学（默认可救/禁项枚举）与可写面说明静默丢失，裁决基座依赖车头残句推断，跨 run 行为不一致风险。
   - 证据：.fenix/logs/fenixd.log 15:27:12.163Z WARNING：提示词占位符未解析（模板漂移，注入内容可能静默丢失）: agent=arbiter template=arbiter.md leftover=['{disposition_mode_section}', '{writable_surface_note}']——本 run 提示词确缺处置模式段与可写面注记两段。；触发 run_id=arbiter-add-session-advanced-search-1794497232（签名 add-session-advanced-search::inconclusive_loop，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 inconclusive_loop（spec=add-session-advanced-search）：'add-session-advanced-search' 连续 1 轮验证失败均被裁决归类 env（级二豁免握手首次命中即升级（judge 已裁决全 env），env 断言 20 条、blocked-env 场景 6 个），judge 已裁决全部失败归环境、等待人工豁免或修环境——自动重验已停止。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
@@ -522,11 +528,13 @@
 ## 2026-11-13
 ### 可改进
 - **[arbiter:add-sess] impl修复申报缺真机效果探针（单测绿与真机无效并存白烧整轮重跑预算）**
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
   - 影响：凡 bug-found→修复→重验循环中出现「单测绿但真机无效」的修复申报，即白烧一整轮 impl+合入+全量重验的算力与墙钟，并直接消耗 judge 重跑预算推向上限冻结（本案 rerun 6/5 的直接推手之一）；无诊断日志时归因还需额外黑盒探针轮。
   - 证据：impl-result.json 申报 tsc 零错+vitest 120/120+产物核验 ctx.get 在场（16:54Z）→ e37d005 合入 → 部署 lib 17:12Z 重建并被新实例加载（symlink+ps 取证）→ 17:13:02Z report.json 与 T2 探针 job-mwdteer6-7 双源实证 title 全空/排序退化，修复机制真机无效。tests/host.test.ts 桩按 get 陷阱形态镜像（impl 自述），结构上无法覆盖「服务在真机不可达」类失效。；触发 run_id=arbiter-add-session-advanced-search-1794503583（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
   - 建议：①修复申报自检必含被修场景的最小真机探针复跑，修复前后失败指纹须发生变化方可申报完成；②judge bug-found 派修复时随单附失败指纹，收批先比对指纹是否变化再全量重跑；③与已记 todo 491（免重执行）组合可把无效修复环代价压到一轮以内。
 - **[arbiter:add-sess] judge重跑计数把infra中断轮计入预算（被杀死的实派也占上限）**
+  - 自进化：问题部分成立 / 建议部分合理 / — 不需要
   - 影响：infra 抖动（进程被杀等）不产出任何判定信息却消耗重跑预算；环境不稳时上限被 infra 噪声提前击穿，冻结早于真实收敛进度，误导人工裁决对循环病态程度的判断（与已记 todo 496「计数口径含未实派判定」同族的新子形态）。
   - 证据：15:50:00Z 重置后窗口内归档实派仅 5 次（16:06/16:18/16:40/17:01[Exit 143 SIGTERM]/17:12Z，archive mtimes+转录尾行），17:13:02Z 冻结时 _judge_rerun_count=6——计数比窗口内实派数至少多 1，多计来源与被杀 round-11（1794502522）及其补派相关（算术互证：fenixd.log L14280 重置记录+archive mtimes+STATE 计数；精确 bump 点需 judge_gate.py 计数面复核，上轮 arbiter 已引 :443 bump-then-check）。；触发 run_id=arbiter-add-session-advanced-search-1794503583（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
