@@ -95,3 +95,13 @@
 - [x] 5.1 全量 `vitest run` 通过且 `tsdown` 构建成功产出 lib/host.js 与 lib/client.js（在插件目录内 `pnpm install` + `pnpm test` + `pnpm build`，零测试跳过零构建告警阻断）
 - [x] 5.2 `README.zh.md` 完整成文：机制（注入缝/HTTP API/分析管线/降级矩阵）、配置表（enabled/maxCandidates/topN/llmTimeoutMs）、安装人工步骤（目录进 profile pnpm workspace + `/root/.dsh/profiles/web/cordis.patch.yml` insert 登记 + 重启 profile——明确标注为人工步骤）、回滚（insert 移除）、已知限制（锚点签名记录：侦察得到的精确 DOM 形态，供官方升级后修缝）
 - [x] 5.3 确认 `spec/changes/add-session-advanced-search/design.md` 的 D5 与 Open Questions 节已回填 1.1 侦察结论（精确锚点签名、跳转缝键名或兜底路径、LLM 服务键），与实现代码一致
+
+## 验证修复（原地打回第 1 轮）
+
+### 上轮实现结论（自动携带，来自上一轮 implementer 收工结论）
+
+会话高级搜索 dsh 插件 fenix-dsh-session-advanced-search 全量实现：shared 协议/配置（2.1-2.3）、host 半只读收集+机械预筛+LLM 单调用语义排序+三端点 HTTP API+cordis Service 装配（3.1-3.5）、client 半搜索框 DOM 注入入口+React 高级搜索弹窗+uiWorkspace 跳转/侧栏兜底+装配（4.1-4.4）、tsdown 三产物构建（lib/index.js·lib/host.js ESM + lib/client.js __ModuleLoader__ CJS 工厂）与 README.zh.md（5.1-5.3）。vitest 117/117 用例零跳过全绿（10 文件），tsc --noEmit 零错误，构建期修复 react-dom/client 子路径未列 external 导致的 react-dom 误打包。安装（profile workspace link + cordis.patch.yml insert + 重启）为人工步骤已写入 README；deviation：client 半无法感知 host enabled（dsh client-modules 不下发配置），enabled=false 时 POST 404 显式提示，已记录 README 已知限制
+
+- [ ] 先复核失败有效性：逐条核对 `spec/changes/add-session-advanced-search/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码
+- [ ] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码
+- [ ] 修复后重跑验证确认通过
