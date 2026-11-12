@@ -213,6 +213,16 @@ export interface DshAgentDefaultModel {
 /** 宿主 Context 的插件可消费服务缝（与 @deepseek-ai/cordis 声明合并）。 */
 declare module '@deepseek-ai/cordis' {
   interface Context {
+    /**
+     * cordis 运行时免 inject 服务读取（ReflectService.get 混入；可选缝探测
+     * 唯一合法姿势——服务未提供/提供方 fiber 未激活时返回 undefined 不抛）。
+     * 未声明 inject 的服务**属性访问即抛**「cannot get property without
+     * inject」（BUG-01 根因：属性访问探测恒 undefined → 标题增强整体失效）。
+     * 本声明系插件侧消费契约：cordis 主入口类型不导出该混入（reflect.d.ts
+     * augmentation 未随 index.d.ts 出口），运行时形态经 cordis 4.x 实源与
+     * 官方 dsh-schedule ctx.get("sessionController") 同缝消费双重坐实。
+     */
+    get(name: string): unknown
     /** 宿主 WebServer 服务（@deepseek-ai/dsh-host-webserver 提供）。 */
     readonly webServer: {
       /** 注册命名路由；同 (kind, path) 重复注册会抛错。返回注销 disposer。 */
