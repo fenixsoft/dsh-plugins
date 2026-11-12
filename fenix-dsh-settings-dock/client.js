@@ -58,8 +58,15 @@
 				/* 头部关闭按钮退役（用户定调 2026-11-07）：停靠后退出走 Esc。
 				 * 关闭按钮 = header 行唯一直接 button 子元素（壳 chrome，aria 名
 				 * 来自 settings.close 槽位的 sr-only 文案，aria-label 属性为空，
-				 * 故按结构定位，不依赖哈希类与 locale 文案） */
-				'html body [data-shortcut-modal="settings"] [class*="_header"] > button { display: none; }',
+				 * 故按结构定位，不依赖哈希类与 locale 文案）。header 行并非面板
+				 * 直属子节点（rc.2 实测 面板 > content > header），`>` 直子收紧
+				 * 不可用；改用 :not 排除 section 根内同片段元素——各设置页自身
+				 * 已有 _header 片段类（rc.2 实测 plugins-inventory 的 *_headerEnd，
+				 * Menu 锚按钮只隔一层包装即成直接 button 子元素），不排除会被
+				 * 连带隐藏（升级复核点：宿主若在壳 header 行内 settings.action
+				 * 槽位外新加直接 button 子元素、或 section 根类漂移出 *_section
+				 * 片段，此条失配/误伤，升级时优先复核） */
+				'html body [data-shortcut-modal="settings"] [class*="_header"]:not([class*="_section"] *) > button { display: none; }',
 				/* section 根容器自适应停靠宽度（用户定调 2026-11-07）：各设置页
 				 * 根容器按 800px 弹窗设计写死 max-width（models/agent-preset 720px、
 				 * plugins/plugin-inventory 760px），铺满后右侧大片空白。各包 section

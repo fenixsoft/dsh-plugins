@@ -145,7 +145,10 @@
 			'rgnVtQ12Td88pjY2HDiy8MRUPf+/h9evcUZTfZi8NAnLsSHhzX9IV/7f4JX/MnMFgCsAXAHgCgBXAPiFffybAAMAsN4HZm4Dmu0A' +
 			'AAAASUVORK5CYII='
 
-			/* 环结图标：方形位图，随宿主槽位给定的边长 */
+			/* 环结图标：方形位图，随宿主槽位给定的边长。sidebar.brand.mark 与
+			 * conversation.hero.brand.mark 两槽位共用本组件（实现完全一致，仅槽位
+			 * 语义不同：sidebar 顶栏图标 24px；hero 空会话品牌标 34px，不透传宿主
+			 * className——官方 fish 类挂 hover 游动动画，不适用位图） */
 			var FenixMark = function (props) {
 				return react.createElement('img', {
 					src: FENIX_LOGO_URI,
@@ -179,7 +182,7 @@
 							height: 38,
 							viewBox: '0 0 124 38',
 							role: 'img',
-							ariaLabel: 'Fenix Harness — The AI-Native SDLC',
+							'aria-label': 'Fenix Harness — The AI-Native SDLC',
 							style: { display: 'block', overflow: 'visible' },
 						},
 						react.createElement(
@@ -224,18 +227,6 @@
 				)
 			}
 
-			/* hero 品牌标：同环结，34px；不透传 className（官方 fish 类挂 hover 游动动画） */
-			var FenixHeroMark = function (props) {
-				return react.createElement('img', {
-					src: FENIX_LOGO_URI,
-					width: props.size,
-					height: props.size,
-					alt: '',
-					style: { display: 'block' },
-					draggable: false,
-				})
-			}
-
 			return {
 				inject: ['slots'],
 				apply(ctx) {
@@ -253,7 +244,7 @@
 					var attempts = [
 						['sidebar.brand.mark', occupy('sidebar.brand.mark', FenixMark)],
 						['sidebar.brand.name', occupy('sidebar.brand.name', FenixName)],
-						['conversation.hero.brand.mark', occupy('conversation.hero.brand.mark', FenixHeroMark)],
+						['conversation.hero.brand.mark', occupy('conversation.hero.brand.mark', FenixMark)],
 					]
 					for (var i = 0; i < attempts.length; i++) {
 						try {

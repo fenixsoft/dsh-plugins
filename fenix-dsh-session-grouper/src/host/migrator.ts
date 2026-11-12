@@ -24,10 +24,10 @@
  * 半迁移状态；attach 级失败 → 按设计 Decision 5(b) 记 pending-attach（下次
  * dsh-web 重启全量重索引后重试收敛），数据已一致不回滚。
  */
-import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { targetSessionDirKey } from '../shared/rules.js'
 import type { DshSessionEvent, DshSessionHeader, DshSessionPersistence, DshSessionSnapshot, DshWorkspace, DshWorkspaceRegistry, SessionId } from '../types/seam.js'
 import { errorMessage } from './sessionScan.js'
@@ -133,9 +133,16 @@ export class Migrator {
   /**
    * 执行单个迁移计划项。单会话失败不抛出：返回结果对象由调用层决定是否
    * 继续整轮（错误隔离）。
+   *
+   * item.header 仅为计划参考字段，实现不消费：迁移基准 header 以
+   * requireSnapshot 实时取回的 before.header 为准（计划生成与执行存在时间窗，
+   * 计划 header 可能陈旧），基准一致性由 fromCwd === before.header.cwd 复核兜底。
    */
-  async migrate(item: { sessionId: SessionId; header: DshSessionHeader; fromCwd: string; toCwd: string }): Promise<MigrateOutcome> {
+  async migrate(item: { sessionId: SessionId; header?: DshSessionHeader; fromCwd: string; toCwd: string }): Promise<MigrateOutcome> {
     const { sessionId, fromCwd, toCwd } = item
+    // 外层失败日志的处置口径（默认「备份前早期失败」）：仅当内层 catch 实际
+    // 执行过回滚且备份还原成功才允许宣称「已回滚」，不得虚报。
+    let rollbackResult: 'rolled-back' | 'no-backup' | 'restore-refused' = 'no-backup'
     try {
       // (1) 迁移前修订快照 + 计划基准复核。
       const before = await this.requireSnapshot(sessionId)
@@ -170,14 +177,26 @@ export class Migrator {
           return await this.attachAndLedger(sessionId, before.header, toCwdCanonical, fromCwd, toCwd)
         }
 
-        // (4) 备份先行（原会话目录全量复制）。备份目录先清空重建：cpSync 对既存
-        // 目录是合并语义（逐项覆盖、不删除多出文件），直接并入会让陈旧 generation
+        // (4) 备份先行（原会话目录全量复制），两阶段原子晋升：先复制到主备份区
+        // 下唯一 staging 目录，成功后 rename 晋升为正式备份目录并封存完整性清单。
+        // cpSync 中途失败（磁盘满/个别文件不可读）时 staging 即刻清退，正式备份
+        // 目录保持「无备份」状态，回滚自然走「失败发生于备份前、数据未改动」
+        // 分支，绝不以残缺副本覆盖完好原目录。先清空旧备份：cpSync 对既存目录
+        // 是合并语义（逐项覆盖、不删除多出文件），直接并入会让陈旧 generation
         // 跨周期残留，回滚还原时又被带回会话目录。
-        const srcLog = await this.requireCurrentLog(sessionId)
         const backupDir = backupDirFor(this.dshHome, sessionId)
-        rmSync(backupDir, { recursive: true, force: true })
-        mkdirSync(backupDir, { recursive: true })
-        cpSync(dirname(srcLog), backupDir, { recursive: true })
+        this.discardBackup(sessionId)
+        const srcLog = await this.requireCurrentLog(sessionId)
+        const backupStaging = `${backupDir}.staging-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+        try {
+          mkdirSync(dirname(backupDir), { recursive: true })
+          cpSync(dirname(srcLog), backupStaging, { recursive: true })
+          renameSync(backupStaging, backupDir)
+          writeFileSync(this.backupManifestPath(backupDir), JSON.stringify(this.collectManifest(backupDir)), 'utf8')
+        } catch (error) {
+          rmSync(backupStaging, { recursive: true, force: true })
+          throw error
+        }
 
         // (5) 以新 header 重写物化到目标 cwd 目录（目标已有 generation 即拒绝）。
         const newHeader: DshSessionHeader = { ...before.header, cwd: toCwd }
@@ -197,12 +216,24 @@ export class Migrator {
       } catch (error) {
         // 数据级失败：回滚到原状态，不留半迁移。
         if (!closed) await this.closeHandle(handle, sessionId)
-        this.rollbackPartialMigration(sessionId, fromCwd, toCwd)
+        rollbackResult = this.rollbackPartialMigration(sessionId, fromCwd, toCwd)
         throw error
       }
     } catch (error) {
+      // 失败阶段如实区分：仅备份已晋升且还原成功才宣称「已回滚」；备份前早期
+      // 失败未改动任何数据；备份不可信/还原未完成时现场保留待人工核查。
       const detail = errorMessage(error)
-      this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败已回滚：${detail}`)
+      // 显式断言加宽后再比较：TS 跨嵌套 catch 再抛路径的 CFA 跟不到内层 catch
+      // 的赋值，会把 rollbackResult 收窄成初值字面量并误判比较无交集（TS2367）；
+      // 运行时值域即此三者并集（内层 catch 实际写入），断言还原真实类型。
+      const result = rollbackResult as 'rolled-back' | 'no-backup' | 'restore-refused'
+      if (result === 'rolled-back') {
+        this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败已回滚：${detail}`)
+      } else if (result === 'restore-refused') {
+        this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败（备份不可信，未执行还原，现场保留，详见回滚告警）：${detail}`)
+      } else {
+        this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移早期失败（未改动数据，无需回滚）：${detail}`)
+      }
       return { status: 'failed', sessionId, detail }
     }
   }
@@ -322,16 +353,65 @@ export class Migrator {
     return { status: 'migrated', sessionId, fromCwd, toCwd }
   }
 
+  /** 备份完整性清单路径（与备份目录同级，永不进入会话目录）。 */
+  private backupManifestPath(backupDir: string): string {
+    return `${backupDir}.manifest.json`
+  }
+
+  /** 清退备份目录与其完整性清单（既往周期遗留备份绝不充当本次「迁移前状态」）。 */
+  private discardBackup(sessionId: SessionId): void {
+    const backupDir = backupDirFor(this.dshHome, sessionId)
+    rmSync(backupDir, { recursive: true, force: true })
+    rmSync(this.backupManifestPath(backupDir), { force: true })
+  }
+
+  /** 递归收集目录清单：相对路径 → 字节数。 */
+  private collectManifest(root: string, dir: string = root, files: Record<string, number> = {}): Record<string, number> {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) this.collectManifest(root, full, files)
+      else if (entry.isFile()) files[relative(root, full)] = statSync(full).size
+    }
+    return files
+  }
+
+  /** 回滚前核验：备份内容与封存清单逐文件比对（文件数 + 字节数）；清单缺失/损坏/不符均视为不可信。 */
+  private backupIntact(backupDir: string): boolean {
+    if (!existsSync(this.backupManifestPath(backupDir))) return false
+    let sealed: Record<string, number>
+    try {
+      sealed = JSON.parse(readFileSync(this.backupManifestPath(backupDir), 'utf8')) as Record<string, number>
+    } catch {
+      return false
+    }
+    let actual: Record<string, number>
+    try {
+      actual = this.collectManifest(backupDir)
+    } catch {
+      return false
+    }
+    return Object.keys(actual).length === Object.keys(sealed).length && Object.keys(actual).every((key) => sealed[key] === actual[key])
+  }
+
   /**
    * 数据级失败回滚：以备份为准恢复原目录、清理半迁移目标目录。
    * 备份不存在（失败发生在备份前）时数据未动，仅告警。
+   * 返回处置口径供外层失败日志如实措辞：'rolled-back' = 备份已还原就位；
+   * 'no-backup' = 无备份、数据未改动；'restore-refused' = 备份不可信或还原
+   * 中断，拒绝/未能还原，现场保留（详见告警）。
    */
-  private rollbackPartialMigration(sessionId: SessionId, fromCwd: string, toCwd: string): void {
+  private rollbackPartialMigration(sessionId: SessionId, fromCwd: string, toCwd: string): 'rolled-back' | 'no-backup' | 'restore-refused' {
     const root = this.lastKnownRoot
     const backupDir = backupDirFor(this.dshHome, sessionId)
     if (root === undefined || !existsSync(backupDir)) {
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 失败发生于备份前（root=${String(root)}，backup=${existsSync(backupDir)}），数据未改动，无需回滚`)
-      return
+      return 'no-backup'
+    }
+    // 信任备份前先核验完整性：清单缺失/损坏/内容不符 ⇒ 备份不可信，拒绝还原
+    // （保留现场供人工核查），绝不以残缺副本覆盖仍然完好的原目录。
+    if (!this.backupIntact(backupDir)) {
+      this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 备份完整性核验未通过（${backupDir}），拒绝还原以保留现场，请人工核查后处置`)
+      return 'restore-refused'
     }
     // 备份真实位置随回滚推进变化：backupDir → stagingDir（第一段 rename 后）→
     // originalDir（还原完成）。失败日志必须报告当下真实位置，排障者按提示才能
@@ -347,6 +427,12 @@ export class Migrator {
       backupLocation = stagingDir
       renameSync(stagingDir, originalDir)
       backupLocation = originalDir
+      // 备份已就位：清退完整性清单文件（残留会在下轮被误当在册核验基准）。
+      try {
+        rmSync(this.backupManifestPath(backupDir), { force: true })
+      } catch {
+        // 清理失败不影响回滚结果。
+      }
       const targetDir = join(root, targetSessionDirKey(toCwd, sessionId))
       if (targetDir !== originalDir && existsSync(targetDir)) {
         rmSync(targetDir, { recursive: true, force: true })
@@ -359,8 +445,10 @@ export class Migrator {
         }
       }
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚到迁移前状态（备份已还原至 ${originalDir}）`)
+      return 'rolled-back'
     } catch (error) {
       this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚自检失败（备份保留于 ${backupLocation}）：${errorMessage(error)}`)
+      return 'restore-refused'
     }
   }
 }

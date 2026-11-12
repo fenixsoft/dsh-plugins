@@ -127,6 +127,23 @@ export async function verifyPassword(password, payload) {
 }
 
 /**
+ * 校验登录用户名与凭据记录（常量时间比较）：登录语义包含账号名，密码正确但
+ * 用户名不匹配同样判失败（handleLogin 同路分流 error=invalid，与密码错误共用
+ * 限流计数）。记录未含 username（形态异常）一律判不匹配——正常写入路径恒保存
+ * username。
+ * @param username - 待校验用户名。
+ * @param payload - 凭据记录 payload。
+ * @returns 用户名匹配时 true。
+ */
+export function verifyUsername(username, payload) {
+	if (typeof username !== 'string' || payload === null || typeof payload !== 'object') return false
+	const expected = typeof payload.username === 'string' ? Buffer.from(payload.username, 'utf8') : undefined
+	if (expected === undefined) return false
+	const candidate = Buffer.from(username, 'utf8')
+	return candidate.length === expected.length && timingSafeEqual(candidate, expected)
+}
+
+/**
  * 创建进程内失败限流器（design D8：Map<remoteAddress, entry>；每次尝试
  * 顺带清理过期条目防泄漏；重启即清零）。
  */
@@ -384,6 +401,10 @@ function defaultPort(scheme) {
  * Origin/Host 同源判定（design：端口按协议默认值归一化——https 443 / http 80
  * 与省略端口等价；Origin 头缺失按同源放行（仍受限流）；解析失败（含
  * Origin: null 跨源形态）判不同源）。
+ * 已知边界：缺失放行依赖「浏览器跨源 POST 必带 Origin」，剥离 Origin 的反向
+ * 代理或非浏览器发送方可绕过本判定——带 cookie 认证的 credentials 写路径
+ * （POST/DELETE）因此改用 isSameOriginStrict，login 保留宽松判定（另有失败
+ * 限流兜底）。
  * @param origin - 请求 Origin 头（可 undefined）。
  * @param host - 请求 Host 头（`hostname[:port]`，IPv6 带方括号）。
  * @param protocol - 监听协议（'http:' | 'https:'）。
@@ -407,6 +428,20 @@ export function isSameOrigin(origin, host, protocol = 'http:') {
 	const originPort = originUrl.port === '' ? defaultPort(originUrl.protocol) : originUrl.port
 	const hostPort = hostUrl.port === '' ? defaultPort(scheme) : hostUrl.port
 	return originUrl.hostname.toLowerCase() === hostUrl.hostname.toLowerCase() && originPort === hostPort
+}
+
+/**
+ * 写请求严格同源判定（isSameOrigin 的收紧态）：Origin 头缺失/为空一律判不同
+ * 源。带 cookie 认证的 credentials 写路径在同源判定之外仅剩 admit 一层防线，
+ * 不容「缺失 = 同源」放行；浏览器对同源 POST/DELETE 必带 Origin，正常客户端
+ * 不受影响（剥离 Origin 的代理会收到 403 cross-origin，可据此定位）。
+ * @param origin - 请求 Origin 头（可 undefined）。
+ * @param host - 请求 Host 头（`hostname[:port]`，IPv6 带方括号）。
+ * @param protocol - 监听协议（'http:' | 'https:'）。
+ */
+export function isSameOriginStrict(origin, host, protocol = 'http:') {
+	if (origin === undefined || origin === null || String(origin).trim() === '') return false
+	return isSameOrigin(origin, host, protocol)
 }
 
 /** 凭据设置参数校验（SPEC：username 1-64、password ≥8 且与 confirm 一致）。 */
@@ -775,7 +810,7 @@ function createIndexHandler({ connection, webServer, credentials, limiter, log }
 /**
  * 登录端点 `/auth/login`（design D4/D8）：GET（含 ?error= 白名单）直出登录
  * 页；POST 同源校验 → 8KB 限读 + Content-Type 白名单解析 → 限流判定 → scrypt
- * 校验；成功 303 `authenticatedUrl(origin + '/')`（原生 authorizeIndex 随即
+ * + 用户名校验；成功 303 `authenticatedUrl(origin + '/')`（原生 authorizeIndex 随即
  * 铸 cookie 并 303 回 `./`，地址栏不残留 token）；失败 303 error=invalid；
  * 未配置 303 error=unconfigured；锁定 303 error=locked；超长/类型不符 400。
  */
@@ -834,14 +869,18 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 				return writeRedirect(req, res, '/auth/login?error=unconfigured')
 			}
 
-			let ok
+			let passwordOk
 			try {
-				ok = await verifyPassword(parsed.password, payload)
+				passwordOk = await verifyPassword(parsed.password, payload)
 			} catch (error) {
 				log('warn', `password verification failed unexpectedly (${error?.message ?? error})`)
-				ok = false
+				passwordOk = false
 			}
-			if (!ok) {
+			/* username 一并校验（凭据记录保存的账号名参与判定，不再只是展示）。
+			 * scrypt 无条件先跑：用户名错与密码错同路分流（同一 error=invalid +
+			 * 限流计数），不靠响应时序区分哪个字段错。 */
+			const usernameOk = verifyUsername(parsed.username, payload)
+			if (!passwordOk || !usernameOk) {
 				limiter.fail(remoteAddress)
 				return writeRedirect(req, res, '/auth/login?error=invalid')
 			}
@@ -867,10 +906,11 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 
 /**
  * 凭据端点 `/auth/credentials`（design D6/D9）：三方法均要求 admit 通过
- * （未认证 401）；GET `{configured, username}`（不回显密码/哈希/盐）；POST
- * 同源 + 参数校验（username 1-64、password ≥8、confirm 一致）→ scrypt 派生
- * → modifyRecord 写入；DELETE 同源 → deleteRecord + 清该来源限流（回退
- * token-only）；参数非法 400 JSON。
+ * （未认证 401）；GET `{configured, username}`（不回显密码/哈希/盐）；POST/
+ * DELETE 严格同源（isSameOriginStrict：Origin 缺失判 403）；POST 参数校验
+ * （username 1-64、password ≥8、confirm 一致）+ key 段校验 → scrypt 派生 →
+ * modifyRecord 写入；DELETE → deleteRecord + 清该来源限流（回退 token-only）；
+ * 参数非法 400 JSON。
  */
 function createCredentialsHandler({ connection, credentials, limiter, webServer, log }) {
 	return async function handleCredentials(req, res) {
@@ -897,7 +937,9 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 
 			if (req.method === 'POST') {
 				const protocol = listenerProtocol(webServer)
-				if (!isSameOrigin(headerValue(req.headers, 'origin'), headerValue(req.headers, 'host'), protocol)) {
+				/* 写路径用严格同源（review a9fb0cff763d）：Origin 缺失判 403，
+				 * cookie 认证的写请求在同源判定之外仅剩 admit 一层防线。 */
+				if (!isSameOriginStrict(headerValue(req.headers, 'origin'), headerValue(req.headers, 'host'), protocol)) {
 					log('warn', 'credential write rejected: cross-origin request')
 					writeJson(res, 403, { error: 'cross-origin' })
 					return
@@ -919,6 +961,14 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 					writeJson(res, 400, { error: invalid })
 					return
 				}
+				/* 凭据 key 段写入前实际校验（review b85f804d0d02）：兑现头注释
+				 * 「KEY_SEGMENT_PATTERN 语义校验」的运行路径承诺；当前常量为静态
+				 * 合法值，此处是 key 动态化前的哨兵。 */
+				if (!isCredentialKeySegment(CREDENTIAL_SCOPE) || !isCredentialKeySegment(CREDENTIAL_ID)) {
+					log('warn', `credential key segment invalid (${CREDENTIAL_KEY}); refusing to write record`)
+					writeJson(res, 500, { error: 'internal' })
+					return
+				}
 				const { salt, hash } = await hashPassword(parsed.password)
 				await credentials.modifyRecord(CREDENTIAL_KEY, async () => ({
 					kind: 'grant',
@@ -930,7 +980,7 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 
 			if (req.method === 'DELETE') {
 				const protocol = listenerProtocol(webServer)
-				if (!isSameOrigin(headerValue(req.headers, 'origin'), headerValue(req.headers, 'host'), protocol)) {
+				if (!isSameOriginStrict(headerValue(req.headers, 'origin'), headerValue(req.headers, 'host'), protocol)) {
 					log('warn', 'credential delete rejected: cross-origin request')
 					writeJson(res, 403, { error: 'cross-origin' })
 					return

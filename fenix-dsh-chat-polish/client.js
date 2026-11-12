@@ -110,7 +110,7 @@
 				/* 固定留白后无拖拽空间：隐藏列宽把手（防拖拽写入 localStorage 宽度偏好） */
 				'body:not(:has(.wSkVaW_embeddedBody)) [data-width-handle][data-width-handle]{display:none}',
 				/* 「回到底部」浮钮右距对齐 24px */
-				'[data-conversation-scroll] .EvIC1a_toBottomSlot{padding-right:24px}',
+				'body:not(:has(.wSkVaW_embeddedBody)) [data-conversation-scroll] .EvIC1a_toBottomSlot{padding-right:24px}',
 				/* 滚动条对齐 dashboard（浏览器默认观感；宽度收至 10px、thumb 加深至
 				 * #a0a0a0，并补出 dsh 未定义的上下/左右箭头按钮——定义了 ::-webkit-scrollbar
 				 * 系列后按钮不再由 UA 自动出现，需显式绘制。暗色按 dsh 自身的
@@ -194,9 +194,9 @@
 						box.style.opacity = '0'
 						document.body.appendChild(box)
 						box.select()
-						document.execCommand('copy')
+						var copied = document.execCommand('copy')
 						document.body.removeChild(box)
-						done(true)
+						done(copied === true)
 					} catch (err) {
 						done(false)
 					}
@@ -220,7 +220,8 @@
 					}
 				}, [])
 				var onClick = function () {
-					copyText(props.text, function () {
+					copyText(props.text, function (ok) {
+						if (ok !== true) return /* 复制失败不误报「已复制」 */
 						setCopied(true)
 						if (timer.current !== null) window.clearTimeout(timer.current)
 						timer.current = window.setTimeout(function () { setCopied(false) }, 1500)
@@ -490,7 +491,10 @@
 						applyRecall(owner, editorEl, draft || '', 'down')
 					} else {
 						nav.pos -= 1
-						applyRecall(owner, editorEl, hist[hist.length - nav.pos], 'down')
+						/* 列表可能在浏览期间缩短（会话快照更新），夹回上界防负索引 */
+						if (nav.pos > hist.length) nav.pos = hist.length
+						var item = hist[hist.length - nav.pos]
+						applyRecall(owner, editorEl, typeof item === 'string' ? item : '', 'down')
 					}
 				}
 				e.preventDefault()
