@@ -47,6 +47,14 @@ case "$cmd" in
     mkdir -p "$VHOME"
     exec 9>"$VHOME.lock"
     flock 9
+    # 0) sessions 明文残留清扫（admin 2026-11-12，spec=add-session-advanced-search
+    #    inconclusive_loop 根治）：实例持久化后端钉 compression=zstd，上一轮场景
+    #    种子若遗留明文 session.v4.jsonl，serve boot 扫描即 encodingMismatch，炸掉
+    #    workspace→workspaceRegistry→sessionController→ui-deliverables 级联（整轮
+    #    env 的跨轮复发根因——种子自清扫在场景执行阶段，永远晚于 boot 一拍）。
+    #    prepare 先于 serve boot 执行，在此清扫保证 boot 永见干净盘面；夹具本体
+    #    由种子场景每轮以 zstd 形态重写，与彼处清扫构成双层防御。
+    find "$VHOME/sessions" -type f -name 'session.v4.jsonl' -delete 2>/dev/null || true
     # 插件产物在场性守卫（构建由 verify.yaml prepare 前置步骤完成）
     if [ ! -f "$PLUGIN_DIR/lib/index.js" ] || [ ! -f "$PLUGIN_DIR/lib/client.js" ]; then
       echo "[verify-web-bridge] 插件 lib/ 缺失：先跑 pnpm --dir fenix-dsh-dashboard-bridge install && pnpm --dir fenix-dsh-dashboard-bridge run build" >&2
