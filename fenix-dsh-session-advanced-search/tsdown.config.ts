@@ -26,6 +26,8 @@ const clientExternals = [
   'react',
   'react/jsx-runtime',
   'react-dom',
+  // createRoot 来自子路径入口（react-dom external 不覆盖子路径，须显式声明）。
+  'react-dom/client',
   '@deepseek-ai/dsh-client-ui-primitives',
 ]
 
