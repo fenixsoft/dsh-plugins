@@ -255,7 +255,8 @@
 					}
 
 					return function dispose() {
-						return failures.length === 0
+						/* 返回值语义对齐兄弟插件口径「清理是否实际执行」：本插件无 style 标签/监听器等本地资源需清理（槽位注册由宿主框架管理），恒返回 true；failures 仅为激活期状态，不代表清理结果 */
+						return true
 					}
 				},
 			}
