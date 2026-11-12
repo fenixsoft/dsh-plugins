@@ -102,6 +102,6 @@
 
 会话高级搜索 dsh 插件 fenix-dsh-session-advanced-search 全量实现：shared 协议/配置（2.1-2.3）、host 半只读收集+机械预筛+LLM 单调用语义排序+三端点 HTTP API+cordis Service 装配（3.1-3.5）、client 半搜索框 DOM 注入入口+React 高级搜索弹窗+uiWorkspace 跳转/侧栏兜底+装配（4.1-4.4）、tsdown 三产物构建（lib/index.js·lib/host.js ESM + lib/client.js __ModuleLoader__ CJS 工厂）与 README.zh.md（5.1-5.3）。vitest 117/117 用例零跳过全绿（10 文件），tsc --noEmit 零错误，构建期修复 react-dom/client 子路径未列 external 导致的 react-dom 误打包。安装（profile workspace link + cordis.patch.yml insert + 重启）为人工步骤已写入 README；deviation：client 半无法感知 host enabled（dsh client-modules 不下发配置），enabled=false 时 POST 404 显式提示，已记录 README 已知限制
 
-- [ ] 先复核失败有效性：逐条核对 `spec/changes/add-session-advanced-search/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码
-- [ ] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码
-- [ ] 修复后重跑验证确认通过
+- [x] 先复核失败有效性：逐条核对 `spec/changes/add-session-advanced-search/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码（复核结论：BUG-01 为真实产品 Bug——已读 dsh-host-webserver 实源 `match()`：`pathname === prefix || startsWith(prefix + '/')`、exact 命中优先、最长前缀胜出，routes.ts:64 尾斜杠座位令深层路径永不命中；断言与契约一致，零场景文件缺陷）
+- [x] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码（routes.ts prefix 座位 path 去尾斜杠并与 exact 座位同 path（exact 命中优先故 POST 不受影响）+契约注释；tests/routes.test.ts 分发桩改忠实镜像 `match()` 语义（宽松 startsWith 是 BUG-01 漏网缺口），新增「prefix 座位无尾斜杠」与「深层路径 404 出自 handler 而非分发兜底」两回归用例；tests/host.test.ts 三处座位键同步修正）
+- [x] 修复后重跑验证确认通过（tsc --noEmit 零错误；vitest 119/119 零跳过全绿，10 文件，较上轮 +2 回归用例；tsdown 构建三产物成功且产物内 prefix 座位 path 确认无尾斜杠；live 场景链由框架验证链重跑，run 内不重复执行）
