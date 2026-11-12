@@ -174,7 +174,7 @@ describe('装配：注册/卸载对称', () => {
     const { ctx, webServer, effects } = makeCtx({})
     makePlugin(ctx, undefined)
     expect(webServer.registerCalls).toBe(2)
-    expect([...webServer.seats.keys()].sort()).toEqual([`exact:${JOBS_PATH}`, `prefix:${JOBS_PATH}/`].sort())
+    expect([...webServer.seats.keys()].sort()).toEqual([`exact:${JOBS_PATH}`, `prefix:${JOBS_PATH}`].sort())
     for (const dispose of effects) dispose()
     expect(webServer.seats.size).toBe(0)
   })
@@ -230,7 +230,7 @@ describe('装配：runJob 管线端到端', () => {
 
 /** 经 prefix 座位轮询至终态并返回最终 SearchJobStatus。 */
 async function pollViaRoute(webServer: StubWebServer, jobId: string, timeoutMs = 2000): Promise<{ phase: string; degraded?: boolean; message?: string; results?: { sessionId: string; reason: string; confidence: number; degraded?: boolean }[] }> {
-  const seat = webServer.seats.get(`prefix:${JOBS_PATH}/`)
+  const seat = webServer.seats.get(`prefix:${JOBS_PATH}`)
   if (seat === undefined) throw new Error('prefix seat missing')
   const deadline = Date.now() + timeoutMs
   for (;;) {
@@ -244,7 +244,7 @@ async function pollViaRoute(webServer: StubWebServer, jobId: string, timeoutMs =
 
 /** 经 prefix 座位发 DELETE，返回是否 200。 */
 async function deleteViaRoute(webServer: StubWebServer, jobId: string): Promise<boolean> {
-  const seat = webServer.seats.get(`prefix:${JOBS_PATH}/`)
+  const seat = webServer.seats.get(`prefix:${JOBS_PATH}`)
   if (seat === undefined) throw new Error('prefix seat missing')
   const res = await requestVia(seat.handler, 'DELETE', `${JOBS_PATH}/${jobId}`)
   return res.status === 200

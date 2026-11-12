@@ -67,7 +67,12 @@ class FakeRes implements WebResponse {
   }
 }
 
-/** webServer.register 桩：座位表记账 + 按 exact→prefix 分发（dsh-host-webserver 语义）。 */
+/**
+ * webServer.register 桩：座位表记账 + 分发忠实镜像 dsh-host-webserver `match()`
+ * 语义——exact 表命中优先，prefix 表按 `pathname === prefix ||
+ * startsWith(prefix + '/')` 匹配、最长前缀胜出（带尾斜杠座位令深层路径永不
+ * 命中——验证轮 BUG-01 的回归防线，禁止放宽为宽松 startsWith）。
+ */
 class StubWebServer {
   readonly seats = new Map<string, { kind: string; path: string; handler: (req: WebRequest, res: WebResponse) => void | Promise<void> }>()
 
@@ -82,9 +87,13 @@ class StubWebServer {
   dispatch(req: FakeReq, res: FakeRes): void | Promise<void> {
     const exact = this.seats.get(`exact:${req.url}`)
     if (exact !== undefined) return exact.handler(req, res)
+    let best: { kind: string; path: string; handler: (req: WebRequest, res: WebResponse) => void | Promise<void> } | undefined
     for (const seat of this.seats.values()) {
-      if (seat.kind === 'prefix' && req.url.startsWith(seat.path)) return seat.handler(req, res)
+      if (seat.kind !== 'prefix') continue
+      if (req.url !== seat.path && !req.url.startsWith(`${seat.path}/`)) continue
+      if (best === undefined || seat.path.length > best.path.length) best = seat
     }
+    if (best !== undefined) return best.handler(req, res)
     res.writeHead(404, { 'content-type': 'application/json' })
     res.end('{"error":"no route"}')
     return undefined
@@ -127,12 +136,34 @@ function setup(): {
 describe('路由注册对账', () => {
   it('两个座位：exact 任务集合 + prefix 动态项；dispose 后座位清空', () => {
     const { server } = setup()
-    expect([...server.seats.keys()].sort()).toEqual([`exact:${JOBS_PATH}`, `prefix:${JOBS_PATH}/`].sort())
+    expect([...server.seats.keys()].sort()).toEqual([`exact:${JOBS_PATH}`, `prefix:${JOBS_PATH}`].sort())
     // webServer.register 返回的 disposer 均被汇总。
     const { server: server2 } = setup()
     const registered = registerSearchRoutes(server2, { jobs: new JobTable(), runJob: () => Promise.resolve(), log: { warn: () => {} } })
     registered.dispose()
     expect(server2.seats.size).toBe(0)
+  })
+
+  it('prefix 座位 path 无尾斜杠（dsh-host-webserver prefix 契约，BUG-01 回归）', () => {
+    const { server } = setup()
+    const prefixSeat = server.seats.get(`prefix:${JOBS_PATH}`)
+    expect(prefixSeat).toBeDefined()
+    expect(prefixSeat?.path).toBe(JOBS_PATH)
+    expect(prefixSeat?.path.endsWith('/')).toBe(false)
+  })
+
+  it('深层路径 /jobs/:id 经忠实分发命中 prefix 座位（404 出自 handler 而非分发兜底）', async () => {
+    const { dispatch } = setup()
+    const created = await dispatch('POST', JOBS_PATH, JSON.stringify({ query: 'q' }))
+    const { jobId } = created.json() as { jobId: string }
+    // 命中 prefix 座位的铁证：未知 id 的 404 出自路由 handler（job not found）而非
+    // 分发桩兜底（no route）——尾斜杠座位下深层路径会落兜底（验证轮 BUG-01 形态）。
+    const unknownRes = await dispatch('GET', `${JOBS_PATH}/ghost`)
+    expect(unknownRes.status).toBe(404)
+    expect(unknownRes.json()).toEqual({ error: 'job not found' })
+    const knownRes = await dispatch('GET', `${JOBS_PATH}/${jobId}`)
+    expect(knownRes.status).toBe(200)
+    expect(knownRes.json()).toMatchObject({ jobId, phase: 'collecting' })
   })
 })
 

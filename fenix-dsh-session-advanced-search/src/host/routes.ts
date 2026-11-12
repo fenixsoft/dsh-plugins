@@ -7,8 +7,12 @@
  *   DELETE /api/session-advanced-search/jobs/:id    取消（幂等；未知 id 404）
  *
  * 注册形态：`POST 建任务` 走 exact 座位（无前缀冲突），`/:id` 两条动态路径共用
- * 一个 prefix 座位（auth 先例 + dsh-host-webserver kind 语义）。响应一律 JSON
- * （no-store）；请求体 64KB 上限（query 文本余量充足）。
+ * 一个 prefix 座位（auth 先例 + dsh-host-webserver kind 语义）。prefix 座位 path
+ * MUST 不带尾斜杠——dsh-host-webserver `match()` 规则为
+ * `pathname === prefix || startsWith(prefix + '/')`（exact 命中优先、prefix 最长
+ * 前缀胜出），带尾斜杠座位令深层路径永不命中（验证轮 BUG-01 教训，tests/
+ * routes.test.ts 以忠实分发桩钉死）。响应一律 JSON（no-store）；请求体 64KB
+ * 上限（query 文本余量充足）。
  *
  * 「重复提交取消旧任务」语义由 client 半保证（提交前 DELETE 旧任务）——host
  * 不做隐式取消（design D6 多标签页隔离）。
@@ -61,7 +65,9 @@ export function registerSearchRoutes(webServer: WebServerSeam, deps: RouteDeps):
   disposers.push(
     webServer.register({
       kind: 'prefix',
-      path: `${JOBS_PATH}/`,
+      // 无尾斜杠：dsh-host-webserver match 为 pathname===prefix||startsWith(prefix+'/')，
+      // 带尾斜杠座位使深层路径（/jobs/:id）永不命中（验证轮 BUG-01 根因）。
+      path: JOBS_PATH,
       handler: (req, res) => handleJobItem(deps, req, res),
     }),
   )
