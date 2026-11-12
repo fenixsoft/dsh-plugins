@@ -1,0 +1,85 @@
+{
+  "name": "fenix-dsh-session-advanced-search",
+  "version": "0.1.0",
+  "description": "dsh web 会话高级搜索：侧栏搜索框内注入「高级搜索」入口（DOM 缝），弹窗以自然语言描述+可选时间范围发起跨工作区会话分析任务；host 半只读收集会话产物、机械预筛、经 profile 既有 LLM 单调用语义排序（失败降级机械评分），候选一键跳转（uiWorkspace.openSession）",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/host.js",
+    "lib/client.js"
+  ],
+  "engines": {
+    "dsh": ">=0.2.2-rc.1 <0.3"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "NO_COLOR=1 vitest run"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    },
+    "config": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "总开关：false 时 client 不注入入口、host 不注册路由"
+      },
+      "maxCandidates": {
+        "type": "number",
+        "default": 30,
+        "description": "机械预筛候选集上限（评分优先、同分取最近活跃截断），约束 LLM 输入规模"
+      },
+      "topN": {
+        "type": "number",
+        "default": 5,
+        "description": "LLM 排序后返回的 Top-N 候选数量"
+      },
+      "llmTimeoutMs": {
+        "type": "number",
+        "default": 60000,
+        "description": "LLM 单调用端到端超时（毫秒），超时回退机械评分排序"
+      }
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "~24.0.0",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.1",
+    "jsdom": "^26.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tsdown": "^0.23.1",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

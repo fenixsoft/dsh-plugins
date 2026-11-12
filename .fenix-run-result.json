@@ -1,21 +1,25 @@
 {
- "status": "success",
- "spec": "add-session-grouper-and-shell-polish",
- "summary": "验证修复（原地打回第 1 轮）三任务完成：(1) 复核失败有效性——grouper-smoke-registration-and-migration 5 断言失败确证为真实产品 Bug BUG-01（插件类缺 static inject 声明，真机 loader 日志实证 cannot get property without inject → 1 entry did not activate）；4 个 web 场景失败均系场景静态 token 与 serve 启动令牌轮换竞态的 401 级联（env 豁免，静态对应场景上轮已 pass），无需修场景文件。(2) 产品修复两处——src/host/index.ts 补 static readonly inject=['workspaceRegistry','sessionPersistence']（对齐 bridge host webServer 先例，服务名真源 dsh-workspace）+ hostContract 增 inject 声明契约守卫测试；重跑演练中新发现并修复回滚 CLI 第二处真实缺陷（静态 peer import 依赖 ESM parent-walk 致宿主直接执行 ERR_MODULE_NOT_FOUND → 候选根自定位 DSH_PKG_ROOT → 缺省全局安装布局 → 兜底标准解析；--root 缺省从 --dsh-home/DSH_HOME 推导），README 与安装文档同步。(3) 重跑验证确认通过——真实 dsh 0.2.0-rc.2 loader 隔离 DSH_HOME 端到端复现失败场景：插件激活无 without inject、注册两项目工作区、worktree 冷会话迁移归位+备份+台账、根直属会话归入（dsh 注册表自归组，插件幂等去重）、在飞跳过、作用域外不动、CLI 回滚演练 26 断言 ALL PASS；enabled=false 零动作复验 11 断言 ALL PASS（含无插件对照 boot 实证 dsh 基线自注册）；grouper 69 + bridge 65 用例全绿、双 typecheck 零错、双构建成功；证据落 .fenix/verify-evidence/add-session-grouper-and-shell-polish/（web 日志/夹具清单/断言脚本与输出）。",
- "completed_tasks": [
-  "1.1",
-  "1.2",
-  "2.1",
-  "3.1",
-  "3.2",
-  "4.1",
-  "4.2",
-  "4.3",
-  "5.1",
-  "6.1",
-  "6.2",
-  "6.3",
-  "7.1",
-  "7.2"
- ]
+  "status": "success",
+  "spec": "add-session-advanced-search",
+  "summary": "会话高级搜索 dsh 插件 fenix-dsh-session-advanced-search 全量实现：shared 协议/配置（2.1-2.3）、host 半只读收集+机械预筛+LLM 单调用语义排序+三端点 HTTP API+cordis Service 装配（3.1-3.5）、client 半搜索框 DOM 注入入口+React 高级搜索弹窗+uiWorkspace 跳转/侧栏兜底+装配（4.1-4.4）、tsdown 三产物构建（lib/index.js·lib/host.js ESM + lib/client.js __ModuleLoader__ CJS 工厂）与 README.zh.md（5.1-5.3）。vitest 117/117 用例零跳过全绿（10 文件），tsc --noEmit 零错误，构建期修复 react-dom/client 子路径未列 external 导致的 react-dom 误打包。安装（profile workspace link + cordis.patch.yml insert + 重启）为人工步骤已写入 README；deviation：client 半无法感知 host enabled（dsh client-modules 不下发配置），enabled=false 时 POST 404 显式提示，已记录 README 已知限制",
+  "completed_tasks": [
+    "1.1",
+    "1.2",
+    "1.3",
+    "2.1",
+    "2.2",
+    "2.3",
+    "3.1",
+    "3.2",
+    "3.3",
+    "3.4",
+    "3.5",
+    "4.1",
+    "4.2",
+    "4.3",
+    "4.4",
+    "5.1",
+    "5.2",
+    "5.3"
+  ]
 }

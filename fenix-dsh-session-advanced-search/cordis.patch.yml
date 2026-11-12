@@ -1,0 +1,8 @@
+# fenix-dsh-session-advanced-search
+# dsh web 会话高级搜索（client 半搜索框 DOM 注入 + host 半 /api/session-advanced-search
+# 分析管线）。host 半路由注册在 lib/index.js；此处仅把本插件插入 web profile 的
+# loader 清单（对齐 fenix-dsh-auth / fenix-dsh-settings-dock 的先例形态）。
+
+- insert:
+    - id: fenix-dsh-session-advanced-search
+      name: fenix-dsh-session-advanced-search
