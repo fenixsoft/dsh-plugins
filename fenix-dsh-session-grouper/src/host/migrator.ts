@@ -223,9 +223,13 @@ export class Migrator {
       // 失败阶段如实区分：仅备份已晋升且还原成功才宣称「已回滚」；备份前早期
       // 失败未改动任何数据；备份不可信/还原未完成时现场保留待人工核查。
       const detail = errorMessage(error)
-      if (rollbackResult === 'rolled-back') {
+      // 显式断言加宽后再比较：TS 跨嵌套 catch 再抛路径的 CFA 跟不到内层 catch
+      // 的赋值，会把 rollbackResult 收窄成初值字面量并误判比较无交集（TS2367）；
+      // 运行时值域即此三者并集（内层 catch 实际写入），断言还原真实类型。
+      const result = rollbackResult as 'rolled-back' | 'no-backup' | 'restore-refused'
+      if (result === 'rolled-back') {
         this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败已回滚：${detail}`)
-      } else if (rollbackResult === 'restore-refused') {
+      } else if (result === 'restore-refused') {
         this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败（备份不可信，未执行还原，现场保留，详见回滚告警）：${detail}`)
       } else {
         this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移早期失败（未改动数据，无需回滚）：${detail}`)
