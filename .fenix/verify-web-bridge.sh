@@ -4,6 +4,11 @@
 # 起草：Administrator（spec=add-dsh-dashboard-bridge 验证环境阻塞：
 # 场景 kind 集含 api/web，被测应用 = 「dsh web + 本仓库 fenix-dsh-dashboard-bridge
 # 插件」实例；验证契约 serve 段经此脚本提供。非产品代码，验证基础设施。）
+# 增补：Administrator 2026-11-12（spec=add-session-advanced-search 验证环境
+# 阻塞：prepare 硬编码仅装配 bridge，被测插件 fenix-dsh-session-advanced-search
+# 从未进 profile → API 三端点 404 / web 入口无从注入，13 场景整轮 env。
+# 现按同构形态增补第二被测插件的产物守卫 / plugin add / loader insert 条目 /
+# 装配自检；新 SPEC 插件进验证须在此登记，与 verify.yaml prepare 构建步成对。）
 #
 # 设计（对齐 docs/help/fenix-dashboard-bridge-install.md 人工步骤，验证隔离化）：
 # - 隔离 DSH_HOME=/root/.fenix-verify/dsh-web-home：与生产 /root/.dsh（生产
@@ -25,6 +30,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN_DIR="$ROOT/fenix-dsh-dashboard-bridge"
+# 2026-11-12 扩展（admin，spec=add-session-advanced-search 验证环境阻塞）：装配链
+# 从单插件（bridge）扩为「bridge + session-advanced-search」——bridge 未声明
+# dsh.bundle，须显式写 profile cordis.patch.yml insert；SAS 声明了
+# dsh.bundle.patch: ./cordis.patch.yml，dsh plugin add 时 loader 自动并入其包内
+# patch 条目（实证 dump-config 出现 # == fenix-dsh-session-advanced-search 段），
+# 故 SAS 仅需链接、无需显式 insert（显式重写会与其自动条目重复）。
+SAS_PLUGIN_DIR="$ROOT/fenix-dsh-session-advanced-search"
 VHOME="/root/.fenix-verify/dsh-web-home"
 
 cmd="${1:-}"
@@ -40,10 +52,17 @@ case "$cmd" in
       echo "[verify-web-bridge] 插件 lib/ 缺失：先跑 pnpm --dir fenix-dsh-dashboard-bridge install && pnpm --dir fenix-dsh-dashboard-bridge run build" >&2
       exit 1
     fi
+    if [ ! -f "$SAS_PLUGIN_DIR/lib/index.js" ] || [ ! -f "$SAS_PLUGIN_DIR/lib/client.js" ] || [ ! -f "$SAS_PLUGIN_DIR/lib/host.js" ]; then
+      echo "[verify-web-bridge] session-advanced-search lib/ 缺失：先跑 pnpm --dir fenix-dsh-session-advanced-search install && pnpm --dir fenix-dsh-session-advanced-search run build" >&2
+      exit 1
+    fi
     # 1) 官方 web 模板初始化隔离 profile（幂等：profile 已在则直接复用）
     DSH_HOME="$VHOME" dsh --profile web --dump-config >/dev/null 2>&1
     # 2) 链接插件包进 profile workspace（幂等；插件无 prod 依赖，离线秒级）
     DSH_HOME="$VHOME" dsh plugin --profile web add "$PLUGIN_DIR" >/dev/null
+    # 2b) 链接 session-advanced-search（其 dsh.bundle.patch 由 add 自动并入组合
+    #     tree，无需也不应再显式写 insert——见文件头 2026-11-12 扩展注释）
+    DSH_HOME="$VHOME" dsh plugin --profile web add "$SAS_PLUGIN_DIR" >/dev/null
     # 3) loader insert 条目（确定性覆写：隔离 profile 是验证生成物，无人工层；
     #    插件未声明 dsh.bundle，须显式 insert 才会被装载——cordis-plugin-include
     #    语义：顶层非 insert 形态是「改已有条目」，会 warn entry not found）
@@ -53,12 +72,17 @@ case "$cmd" in
     - id: fenix-dsh-dashboard-bridge
       name: fenix-dsh-dashboard-bridge
 PATCH
-    # 4) 装配自检：组合树必须含插件条目，否则 fail-fast（不带病启动）
-    if ! DSH_HOME="$VHOME" dsh --profile web --dump-config 2>/dev/null | grep -q "id: fenix-dsh-dashboard-bridge"; then
+    # 4) 装配自检：组合树必须含两插件条目，否则 fail-fast（不带病启动）
+    TREE="$(DSH_HOME="$VHOME" dsh --profile web --dump-config 2>/dev/null)"
+    if ! grep -q "id: fenix-dsh-dashboard-bridge" <<<"$TREE"; then
       echo "[verify-web-bridge] 装配自检失败：组合树无 fenix-dsh-dashboard-bridge 条目" >&2
       exit 1
     fi
-    echo "[verify-web-bridge] prepare ok: 隔离 profile 装配就绪（$VHOME）"
+    if ! grep -q "id: fenix-dsh-session-advanced-search" <<<"$TREE"; then
+      echo "[verify-web-bridge] 装配自检失败：组合树无 fenix-dsh-session-advanced-search 条目（dsh.bundle.patch 未并入？）" >&2
+      exit 1
+    fi
+    echo "[verify-web-bridge] prepare ok: 隔离 profile 双插件装配就绪（$VHOME）"
     ;;
   serve)
     port="${1:-${FENIX_VERIFY_PORT:-}}"
@@ -66,8 +90,11 @@ PATCH
       echo "[verify-web-bridge] serve 需要端口（{port} 占位符注入或 FENIX_VERIFY_PORT）" >&2
       exit 1
     fi
-    # 装配在场守卫（跳过 prepare 直接 serve 时 fail-fast，而非裸启动无插件实例）
-    if ! grep -q "fenix-dsh-dashboard-bridge" "$VHOME/profiles/web/cordis.patch.yml" 2>/dev/null; then
+    # 装配在场守卫（跳过 prepare 直接 serve 时 fail-fast，而非裸启动无插件实例）：
+    # bridge 走 profile cordis.patch.yml 显式 insert；SAS 走 bundle patch 自动
+    # 并入（不落 profile 文件），以 node_modules 链接为在场凭证
+    if ! grep -q "fenix-dsh-dashboard-bridge" "$VHOME/profiles/web/cordis.patch.yml" 2>/dev/null \
+       || [ ! -e "$VHOME/profiles/web/node_modules/fenix-dsh-session-advanced-search" ]; then
       echo "[verify-web-bridge] 隔离 profile 未装配（先执行 $0 prepare）" >&2
       exit 1
     fi

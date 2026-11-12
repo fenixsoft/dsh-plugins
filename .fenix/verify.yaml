@@ -33,6 +33,12 @@ prepare:
   - run: |
       pnpm --dir fenix-dsh-dashboard-bridge install --frozen-lockfile --prefer-offline
       pnpm --dir fenix-dsh-dashboard-bridge run build
+  # 2026-11-12 admin（spec=add-session-advanced-search env 阻塞）：被测集新增
+  # fenix-dsh-session-advanced-search，装配链（verify-web-bridge.sh）与 prepare
+  # 构建步骤对称扩入；SAS 包声明 dsh.bundle.patch，prepare 后由 add 自动并入。
+  - run: |
+      pnpm --dir fenix-dsh-session-advanced-search install --frozen-lockfile --prefer-offline
+      pnpm --dir fenix-dsh-session-advanced-search run build
   - run: bash .fenix/verify-web-bridge.sh prepare
 
 serve:
