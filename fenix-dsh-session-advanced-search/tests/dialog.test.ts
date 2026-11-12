@@ -68,7 +68,7 @@ async function mountDialog(overrides?: Partial<SearchDialogProps> & { fetchImpl?
     ...overrides,
   } as SearchDialogProps
   const openSessions: string[] = []
-  currentProps = { ...currentProps, onOpenSession: (id: string) => openSessions.push(id) }
+  currentProps = { ...currentProps, onOpenSession: (id: string, _title: string) => openSessions.push(id) }
   await act(async () => {
     root.render(createElement(SearchDialog, currentProps))
   })

@@ -34,8 +34,8 @@ export interface SearchDialogProps {
   readonly open: boolean
   /** 关闭回调（关闭按钮 / Esc / 候选跳转后的装配层串联）。 */
   readonly onClose: () => void
-  /** 候选点击回调（装配层接 jump + onClose）。 */
-  readonly onOpenSession: (sessionId: string) => void
+  /** 候选点击回调（装配层接 jump + onClose；title 供侧栏兜底匹配）。 */
+  readonly onOpenSession: (sessionId: string, title: string) => void
   /** fetch 注入面（测试 stub）。 */
   readonly fetchImpl?: FetchFace
   /** 轮询间隔毫秒（缺省 1000，design/spec 钉死值；测试可调）。 */
@@ -331,7 +331,7 @@ export function SearchDialog(props: SearchDialogProps): ReactElement | null {
           <ul style={resultListStyle}>
             {results.map((row) => (
               <li key={row.sessionId}>
-                <button type="button" style={resultItemStyle} onClick={() => props.onOpenSession(row.sessionId)}>
+                <button type="button" style={resultItemStyle} onClick={() => props.onOpenSession(row.sessionId, row.title)}>
                   <div style={{ fontWeight: 600 }}>{row.title === '' ? '（无标题）' : row.title}</div>
                   <div style={{ opacity: 0.75, fontSize: 12 }}>
                     {row.workspacePath === '' ? '（未归组）' : row.workspacePath} · {formatActivityTime(row.activityTime)} · 置信度 {Math.round(row.confidence * 100)}%

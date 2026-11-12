@@ -57,10 +57,11 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     environmentMatchGlobs: [
-      // client 半 DOM 行为测试（注入/弹窗/跳转兜底）需要 jsdom。
+      // client 半 DOM 行为测试（注入/弹窗/跳转兜底/装配链）需要 jsdom。
       ['tests/searchButton.test.ts', 'jsdom'],
       ['tests/dialog.test.ts', 'jsdom'],
       ['tests/jump.test.ts', 'jsdom'],
+      ['tests/clientApp.test.ts', 'jsdom'],
     ],
     testTimeout: 30_000,
   },
