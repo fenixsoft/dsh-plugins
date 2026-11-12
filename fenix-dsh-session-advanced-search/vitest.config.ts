@@ -21,6 +21,9 @@ const stubDshRuntime = {
   enforce: 'pre' as const,
   resolveId(id: string) {
     if (id === '@deepseek-ai/cordis') return '\0stub-dsh-cordis'
+    // primitives 桩同理（弹窗关闭按钮 Tooltip 基元）：jsdom 测试无 dsh client
+    // 模块表，直通 children 保持元素树可断言（dashboard-bridge 先例形态）。
+    if (id === '@deepseek-ai/dsh-client-ui-primitives') return '\0stub-dsh-primitives'
     if (id === '@deepseek-ai/dsh-session-persistence') return installedLib('dsh-session-persistence')
     return undefined
   },
@@ -33,6 +36,14 @@ const stubDshRuntime = {
         '\t\tthis.ctx = ctx',
         '\t\tif (name !== undefined) this.name = name',
         '\t}',
+        '}',
+      ].join('\n')
+    }
+    if (id === '\0stub-dsh-primitives') {
+      return [
+        '// 最小 primitives 桩：Tooltip 直通 children（弹窗测试断言元素树结构）。',
+        'export function Tooltip(props) {',
+        '\treturn props?.children ?? null',
         '}',
       ].join('\n')
     }
