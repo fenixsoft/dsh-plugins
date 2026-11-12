@@ -169,10 +169,12 @@ export function SearchDialog(props: SearchDialogProps): ReactElement | null {
     return () => window.removeEventListener('keydown', onKey)
   }, [props.open, props.onClose])
 
-  // 1s 轮询（jobId 就绪后启动；终态/异常停轮）。
+  // 1s 轮询（jobId 就绪后启动；终态/异常停轮）。网络失败连续 ≤2 次容忍
+  // （宿主瞬时压力/单次抖动不断轮，host 侧任务仍在推进），连续 3 次才停轮报错。
   useEffect(() => {
     if (jobId === null) return
     let stopped = false
+    let consecutiveFailures = 0
     const stop = (): void => {
       stopped = true
     }
@@ -205,6 +207,7 @@ export function SearchDialog(props: SearchDialogProps): ReactElement | null {
             return
           }
           setStatus(parsed)
+          consecutiveFailures = 0
           if (parsed.phase === 'done' || parsed.phase === 'error' || parsed.phase === 'cancelled') {
             stop()
             setBusy(false)
@@ -213,6 +216,8 @@ export function SearchDialog(props: SearchDialogProps): ReactElement | null {
           }
         } catch {
           if (stopped) return
+          consecutiveFailures += 1
+          if (consecutiveFailures < 3) return // 单次/前两次失败：继续下一轮，不计入停轮
           stop()
           setBusy(false)
           setJobId(null)

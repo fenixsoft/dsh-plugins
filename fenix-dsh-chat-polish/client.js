@@ -168,8 +168,8 @@
 					for (var i = 0; i < content.length; i++) {
 						var block = content[i] || {}
 						if (block.type === 'text' && typeof block.text === 'string') texts.push(block.text)
-						else if (block.type === 'image' && block.attachment !== undefined) attachments.push({ type: 'image', image: { attachment: block.attachment } })
-						else if (block.type === 'file' && block.attachment !== undefined) attachments.push({ type: 'file', file: block.attachment })
+						else if (block.type === 'image' && block.attachment && typeof block.attachment === 'object') attachments.push({ type: 'image', image: { attachment: block.attachment } })
+						else if (block.type === 'file' && block.attachment && typeof block.attachment === 'object') attachments.push({ type: 'file', file: block.attachment })
 						else rest.push(block)
 					}
 				}
@@ -255,6 +255,8 @@
 							{ className: 'fdxchat-attachmentRow', key: 'attachments', 'data-message-attachments': '' },
 							parts.attachments.map(function (attachment, index) {
 								if (attachment.type === 'image') {
+									/* 宿主注入面缺失时降级跳过图片渲染，与 useInput/useChat 同口径守卫 */
+									if (typeof props.renderMessageImages !== 'function') return null
 									return react.createElement(react.Fragment, { key: 'image:' + index },
 										props.renderMessageImages({ images: [attachment.image], align: 'end', compact: compactImages }))
 								}

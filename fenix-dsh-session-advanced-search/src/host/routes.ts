@@ -25,6 +25,9 @@ import type { JobTable } from './jobs.js'
 /** POST 请求体上限（design：64KB，自然语言描述 + 时间范围余量充足）。 */
 export const MAX_BODY_BYTES = 64 * 1024
 
+/** POST 请求体读取超时（防慢速/故障流令调用方 await 悬挂；超时由调用方 400 回写）。 */
+const BODY_READ_TIMEOUT_MS = 30_000
+
 /** 动态任务端点的 id 提取（prefix 座位收到完整路径）。 */
 const JOB_ID_PATTERN = /\/api\/session-advanced-search\/jobs\/([^/?#]+)/
 
@@ -144,18 +147,25 @@ function handleJobItem(deps: RouteDeps, req: WebRequest, res: WebResponse): void
   writeJson(res, 405, { error: 'method not allowed; use GET or DELETE' })
 }
 
-/** 读取请求体（字节上限；超限抛错由调用方 400）。 */
+/** 读取请求体（字节上限；超限/流错误/读取超时抛错由调用方 400）。 */
 export function readRequestBody(req: WebRequest, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let total = 0
     let settled = false
+    // 超时兜底：慢速客户端不发完 body 也不该令调用方 await 永久悬挂。
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error(`request body read timed out after ${BODY_READ_TIMEOUT_MS}ms`))
+    }, BODY_READ_TIMEOUT_MS)
     const onData = (chunk: Buffer | string) => {
       if (settled) return
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
       total += buffer.length
       if (total > maxBytes) {
         settled = true
+        clearTimeout(timer)
         req.removeListener('data', onData)
         reject(new Error(`request body exceeds ${maxBytes} bytes`))
         return
@@ -166,7 +176,15 @@ export function readRequestBody(req: WebRequest, maxBytes: number): Promise<stri
     req.on('end', () => {
       if (settled) return
       settled = true
+      clearTimeout(timer)
       resolve(Buffer.concat(chunks).toString('utf8'))
+    })
+    // 流故障（连接异常断开/底层 I/O 错误）必须 settle，否则响应永不回写。
+    req.on('error', (error: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(error)
     })
   })
 }

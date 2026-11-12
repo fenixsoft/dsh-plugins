@@ -12,7 +12,8 @@ import type { WebRequest, WebResponse } from '../src/types/dsh-runtime.js'
 
 /** 最小事件发射器（data/end 记账）。 */
 class FakeReq implements WebRequest {
-  private readonly listeners = new Map<string, ((chunk: Buffer | string) => void)[]>()
+  // 实现签名用 any 入参收编三种事件监听形态，保证与 WebRequest 各重载双向兼容。
+  private readonly listeners = new Map<string, ((chunk: any) => void)[]>()
   readonly headers: Record<string, string> = {}
   ended = false
 
@@ -21,7 +22,10 @@ class FakeReq implements WebRequest {
     readonly url: string,
   ) {}
 
-  on(event: 'data' | 'end', listener: (chunk: Buffer | string) => void): this {
+  on(event: 'data', listener: (chunk: Buffer | string) => void): this
+  on(event: 'end', listener: () => void): this
+  on(event: 'error', listener: (error: Error) => void): this
+  on(event: string, listener: (chunk: any) => void): this {
     const list = this.listeners.get(event) ?? []
     list.push(listener)
     this.listeners.set(event, list)

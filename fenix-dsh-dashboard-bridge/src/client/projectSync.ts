@@ -366,12 +366,20 @@ export interface ProjectSyncOptions {
  * 非空快照——曾非空后转空 = 宿主重载空窗（判定面不可信），本轮不判差
  * 不建区（只增不删，瞬窗误建无法回收），等下一轮快照恢复再对齐；从未非
  * 空过的首启真真空才放行创建。
+ *
+ * 重复创建防重闸门（跨轮持久 `initiatedPaths`，归一化 path）：快照滞后窗口
+ * （工作区已建成但快照行尚未同步到位）内，缺失判定会连续误报同一项目——
+ * createWorkspace 成功后把 path 记入集合，后续轮次命中即跳过，不再重复发起
+ * `workspaces.create`（dsh 侧 create 对同 path 重复调用的幂等性仓库内不可核
+ * 实，插件侧自行设闸）；快照行到位后由 matchWorkspaceForProject 命中自然
+ * 接管，集合行保守保留不移除。失败不记入，保持「下轮重试」语义。
  */
 async function alignWorkspaces(
   options: ProjectSyncOptions,
   names: readonly string[],
   isStopped: () => boolean,
   seen: { hasNonEmptyItems: boolean },
+  initiatedPaths: Set<string>,
 ): Promise<void> {
   const fetchRows = options.fetchProjectRows
   const listItems = options.workspaceItems
@@ -416,8 +424,13 @@ async function alignWorkspaces(
     if (isStopped()) return
     if (row.path === null) continue // 目录不可达项目不对齐（D3：exists 判据前置）
     if (matchWorkspaceForProject(items, row.path, row.name) !== null) continue
+    // 防重闸门：已成功创建过的 path（归一化，与快照匹配判据同口径）不再发起
+    // 创建——覆盖快照滞后窗口（快照行未到位前缺失判定会连续误报）。
+    if (initiatedPaths.has(normalizeWorkspacePath(row.path))) continue
     try {
       await createWorkspace({ path: row.path })
+      // 成功才记入防重集合（失败保持既有「下轮重试」语义，等快照恢复）。
+      initiatedPaths.add(normalizeWorkspacePath(row.path))
     } catch (error) {
       console.warn(
         `[fenix-dsh-dashboard-bridge] 工作区对齐注册失败（项目 ${row.name}，跳过等下轮重试）：${
@@ -440,6 +453,11 @@ export function startProjectSync(options: ProjectSyncOptions): () => void {
   let inFlight = false
   // 对齐步快照形态记忆（跨轮持久、每循环实例独立）：见过非空快照后，空快照按瞬窗处理。
   const alignSeen = { hasNonEmptyItems: false }
+  // 对齐步防重记忆（跨轮持久、每循环实例独立）：已成功创建的工作区归一化
+  // path 集合——快照滞后窗口（已建工作区行未同步进快照）内不再重复发起
+  // workspaces.create（dsh 侧 create 同 path 重复调用的幂等性仓库内不可核实，
+  // 插件侧自行设闸）；快照行到位后由快照匹配自然接管，集合行保守保留。
+  const alignCreatedPaths = new Set<string>()
 
   const pull = async (): Promise<void> => {
     if (stopped || inFlight) return
@@ -449,7 +467,7 @@ export function startProjectSync(options: ProjectSyncOptions): () => void {
       if (!stopped) {
         current = reconcileProjects(current, names, options.sink)
         options.sink.setProjects(names)
-        await alignWorkspaces(options, names, () => stopped, alignSeen)
+        await alignWorkspaces(options, names, () => stopped, alignSeen, alignCreatedPaths)
       }
     } catch (error) {
       // 拉取失败：仅保留既有状态（面板与数据源原样），无未处理异常，

@@ -83,7 +83,11 @@ export async function rankCandidates(
   signal.addEventListener('abort', onOuterAbort, { once: true })
   let raw: string
   try {
-    raw = await streamText(deps.llm, { provider: route.provider, model: route.model, system, user }, deadline.signal)
+    raw = await streamText(
+      deps.llm,
+      { provider: route.provider, model: route.model, system, user, maxTokens: resolveMaxTokens(candidates.length) },
+      deadline.signal,
+    )
   } catch (error) {
     if (signal.aborted) {
       // 任务被取消（而非超时）：直接中断，机械回退无意义。
@@ -162,10 +166,20 @@ function resolveRoute(deps: AnalyzerDeps): { provider: string; model: string } |
   }
 }
 
+/**
+ * 排名输出 token 预算随本次候选数伸缩（LLM 每候选输出一行 id+reason+confidence）：
+ * 每候选行预算 200 token（含中文 reason 与候选 id）+ 基础余量 256（JSON 包裹/开场），
+ * 下限 2048（小候选集不低于既有值），上限 8192（主流模型输出上限内、防预算失控）。
+ * 避免固定上限在大候选集（maxCandidates 配置放大）下截断 JSON → 整轮 parse-failed 降级。
+ */
+function resolveMaxTokens(candidateCount: number): number {
+  return Math.min(8192, Math.max(2048, 256 + candidateCount * 200))
+}
+
 /** 流式调用并拼接 text-delta 文本。 */
 async function streamText(
   llm: DshLlmRuntime,
-  input: { provider: string; model: string; system: string; user: string },
+  input: { provider: string; model: string; system: string; user: string; maxTokens: number },
   signal: AbortSignal,
 ): Promise<string> {
   let text = ''
@@ -173,7 +187,7 @@ async function streamText(
     provider: input.provider,
     model: input.model,
     system: input.system,
-    maxTokens: 2048,
+    maxTokens: input.maxTokens,
     signal,
     messages: [
       {

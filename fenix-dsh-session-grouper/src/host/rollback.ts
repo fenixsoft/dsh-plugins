@@ -6,7 +6,10 @@
  *   - fromCwd 与 toCwd 同位（逐字相同，或尾随斜杠/符号链接归一后同位）的条目零文件
  *     操作：仅注册表索引撤销 + 台账标记（迁移本就零重写零归位，防陈旧备份覆盖现位
  *     产物）；
- *   - 其余：目标会话目录（mangled(toCwd)）删除；备份产物（`<DSH_HOME>/session-grouper-backups/<id>/`，
+ *   - 其余：先按封存清单核验备份完整性（不可信即拒绝还原，保留现场）；目标会话
+ *     目录（mangled(toCwd)）rename 挪入 trash 残目录保留（迁移后目标位可能已被
+ *     继续追加事件，递归删除会静默吞掉增量；无迁移时点 revision 可自动比对，残余
+ *     风险由 trash 保留兜底 + 人工核对）；备份产物（`<DSH_HOME>/session-grouper-backups/<id>/`，
  *     即迁移前原目录的全量副本，header.cwd 仍为原值）经 staging 中转 + rename 原子
  *     还原回 `mangled(fromCwd)` 会话目录；
  *   - 注册表实例索引撤销（headers/sessionPaths 删除该 id → readSessionHeader
@@ -21,7 +24,7 @@ import { realpath } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { targetSessionDirKey } from '../shared/rules.js'
 import type { DshSessionPersistence, DshWorkspaceRegistry, SessionId } from '../types/seam.js'
-import { appendLedger, backupDirFor, parseLedger, resolveDshHome, type MigrationLedgerEntry, type MigrateLogger } from './migrator.js'
+import { appendLedger, backupDirFor, backupIntact, backupManifestPath, parseLedger, resolveDshHome, type MigrationLedgerEntry, type MigrateLogger } from './migrator.js'
 import { errorMessage } from './sessionScan.js'
 
 /** 单会话回滚结果。 */
@@ -76,9 +79,10 @@ async function sameLocation(a: string, b: string): Promise<boolean> {
  * 就位之后，不再拉长窗口）：窗口内进程被杀时会话目录暂缺，但数据完整滞留于
  * staging 残目录（`${originalDir}.rollback-<时间戳>`），人工挪回即恢复——
  * 不存在半还原态。备份挪出主备份区之后的失败以抛错注明滞留位置（staging），
- * 供外层 failed detail 呈现人工恢复路径。
+ * 供外层 failed detail 呈现人工恢复路径。就位成功后同步清退备份同级完整性
+ * 清单文件（残留会在下轮被误当在册核验基准），清理失败仅告警不影响还原结果。
  */
-function restoreFromBackup(backupDir: string, originalDir: string): void {
+function restoreFromBackup(backupDir: string, originalDir: string, log?: MigrateLogger): void {
   const stagingDir = `${originalDir}.rollback-${Date.now().toString(36)}`
   const trashDir = `${originalDir}.trash-${Date.now().toString(36)}`
   mkdirSync(dirname(originalDir), { recursive: true })
@@ -88,6 +92,13 @@ function restoreFromBackup(backupDir: string, originalDir: string): void {
     renameSync(stagingDir, originalDir)
   } catch (error) {
     throw new Error(`备份还原中断，备份滞留于 ${stagingDir}（主备份区已空；人工恢复请将其挪回 ${originalDir}）：${errorMessage(error)}`)
+  }
+  // 备份已就位：清退完整性清单文件（残留会在下轮被误当在册核验基准，与
+  // rollbackPartialMigration 的清理口径一致）；失败仅告警，不影响还原结果。
+  try {
+    rmSync(backupManifestPath(backupDir), { force: true })
+  } catch (error) {
+    log?.warn(`fenix-dsh-session-grouper: 备份完整性清单清理失败（${backupManifestPath(backupDir)} 残留会误导下轮核验，请人工删除）：${errorMessage(error)}`)
   }
   // 就位已完成：trash 残迹清理失败不影响还原结果（残留仅是垃圾），忽略。
   try {
@@ -131,7 +142,10 @@ export async function rollbackSession(
     //    覆盖现位产物），仅做注册表索引撤销与台账 rolled-back 标记。
     if (await sameLocation(latest.fromCwd, latest.toCwd)) {
       undoRegistryIndex(registry, sessionId)
-      appendLedger(dshHome, { sessionId, fromCwd: latest.fromCwd, toCwd: latest.toCwd, at: new Date().toISOString(), status: 'rolled-back', backupDir })
+      // 台账行不带 backupDir（与 migrator「不消费备份不写该字段」口径一致）：
+      // 本分支零文件操作、未消费备份，写入的只能是既往周期遗留的陈旧备份目录，
+      // 会误导排障者当作「本次回滚面对的迁移前状态」。
+      appendLedger(dshHome, { sessionId, fromCwd: latest.fromCwd, toCwd: latest.toCwd, at: new Date().toISOString(), status: 'rolled-back' })
       log.info?.(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚：${latest.toCwd} 与 ${latest.fromCwd} 同位（零文件操作，仅索引撤销与台账标记）`)
       return { status: 'rolled-back', sessionId, fromCwd: latest.fromCwd }
     }
@@ -148,9 +162,37 @@ export async function rollbackSession(
         detail: `备份目录缺失：${backupDir}（若上次回滚在还原中途失败，备份可能滞留于 ${originalDir}.rollback-<时间戳> 残目录或已实际还原至 ${originalDir}；人工核对后处理台账，勿盲目重试）`,
       }
     }
-    // 1) 目标目录清理（迁移落位的半/全产物）；目标 project 目录清空则一并移除。
+    // 1) 备份完整性核验（与 rollbackPartialMigration 同口径，且 MUST 先于任何对
+    //    targetDir/originalDir 的删除或挪动）：清单缺失/损坏/内容不符 ⇒ 备份不可信，
+    //    拒绝还原以保留现场，绝不以残缺副本覆盖现位产物。
+    if (!backupIntact(backupDir)) {
+      const detail = `备份完整性核验未通过（${backupDir}），拒绝还原以保留现场，请人工核查后处置`
+      log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} ${detail}`)
+      return { status: 'failed', sessionId, detail }
+    }
+    // 2) 目标目录清理（迁移落位的半/全产物）：rename 挪入 trash 残目录保留（与
+    //    restoreFromBackup 对 originalDir 残迹同口径），不做递归删除——迁移后会话
+    //    通常已在目标位继续追加事件，rmSync 会静默吞掉这部分增量。残余风险：台账
+    //    未封存迁移时点的 revision/事件规模，现位产物是否已被改写无现成数据可自动
+    //    比对拒绝；trash 保留把静默丢失变为可恢复，若有增量丢失请从 trash 残目录
+    //    （`${targetDir}.trash-<时间戳>`）人工核对找回。
+    let targetTrashDir: string | undefined
+    if (targetDir !== originalDir && existsSync(targetDir)) {
+      targetTrashDir = `${targetDir}.trash-${Date.now().toString(36)}`
+      renameSync(targetDir, targetTrashDir)
+    }
+    // 3) 备份还原到原目录（备份即原物，含原 header cwd；staging 中转 + rename 原子就位）。
+    restoreFromBackup(backupDir, originalDir, log)
+    //    还原已成事实后清退目标位 trash 残迹（失败不影响回滚结果，留待人工）。
+    if (targetTrashDir !== undefined) {
+      try {
+        rmSync(targetTrashDir, { recursive: true, force: true })
+      } catch {
+        // 残迹留待人工清理。
+      }
+    }
+    //    目标 project 目录清空则一并移除（避免 mangled 目录残留噪音）。
     if (targetDir !== originalDir) {
-      rmSync(targetDir, { recursive: true, force: true })
       try {
         const targetProjectDir = dirname(targetDir)
         if (existsSync(targetProjectDir) && readdirSync(targetProjectDir).length === 0) rmSync(targetProjectDir, { recursive: true, force: true })
@@ -158,9 +200,7 @@ export async function rollbackSession(
         // 目录已不存在/不可枚举：忽略。
       }
     }
-    // 2) 备份还原到原目录（备份即原物，含原 header cwd；staging 中转 + rename 原子就位）。
-    restoreFromBackup(backupDir, originalDir)
-    // 3) 注册表实例索引撤销（下一轮 readSessionHeader 全量重索引读回旧 header）。
+    // 4) 注册表实例索引撤销（下一轮 readSessionHeader 全量重索引读回旧 header）。
     //    还原已成事实：撤销失败不外抛（否则备份已消费而台账无从标记，重试将永远
     //    卡在「备份目录缺失」），留痕告警即继续收尾，索引不一致由下次全量重索引自愈。
     try {
@@ -168,7 +208,7 @@ export async function rollbackSession(
     } catch (error) {
       log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 注册表索引撤销失败（继续台账标记，待下次重索引自愈）：${errorMessage(error)}`)
     }
-    // 4) 台账标记回滚（收尾最后一步）：落盘失败时磁盘已还原、备份已消费，detail
+    // 5) 台账标记回滚（收尾最后一步）：落盘失败时磁盘已还原、备份已消费，detail
     //    注明实况，避免被 rollbackableSessionIds 误导为可原样重试。
     try {
       appendLedger(dshHome, { sessionId, fromCwd: latest.fromCwd, toCwd: latest.toCwd, at: new Date().toISOString(), status: 'rolled-back', backupDir })

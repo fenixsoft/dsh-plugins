@@ -99,6 +99,8 @@ export interface WebRequest {
   readonly headers: Record<string, string | string[] | undefined>
   on(event: 'data', listener: (chunk: Buffer | string) => void): void
   on(event: 'end', listener: () => void): void
+  /** 请求流故障（连接异常断开/底层 I/O 错误）；handler 可据此 reject 并回写错误响应。 */
+  on(event: 'error', listener: (error: Error) => void): void
   removeListener(event: 'data', listener: (chunk: Buffer | string) => void): void
 }
 
