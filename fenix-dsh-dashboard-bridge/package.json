@@ -1,7 +1,7 @@
 {
   "name": "fenix-dsh-dashboard-bridge",
   "version": "0.1.0",
-  "description": "dsh web 侧栏 Fenix Dashboard 菜单集成与同源反代：Host 半把 /fenix-dashboard/ 前缀路由流式反代到本机 dashboard（SSE 不缓冲、上游故障 502），Client 半注册侧栏固定/动态条目与主面板 iframe 深链",
+  "description": "dsh web 侧栏 Fenix Dashboard 菜单集成与同源反代：Host 半把 /fenix-dashboard/ 前缀路由流式反代到本机 dashboard（SSE 不缓冲、上游故障 502），Client 半注册侧栏固定/动态条目、右侧边栏「Fenix 项目」页签（右缘 dock）与主面板 iframe 深链",
   "type": "module",
   "private": true,
   "license": "MIT",
@@ -25,7 +25,10 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-ui-layout",
-        "@deepseek-ai/dsh-client-ui-sidebar"
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-context-menu",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
       ]
     }
   },

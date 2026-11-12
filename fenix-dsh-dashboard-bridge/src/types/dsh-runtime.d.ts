@@ -102,8 +102,16 @@ declare module '@deepseek-ai/cordis' {
        * 新建（或复用空白）会话并切主面板到该会话（原生 startSession 同名）。
        * workspaceId 缺省 = 原生侧栏 New Session 按钮逐键路径（target 回落
        * currentWorkspaceId ?? recent；无任何工作区时 clearMain 落无会话态）。
+       *
+       * draftOptions（2026-11-11「新会话」按钮批新增消费面）：原生支持会话框
+       * 预填——dsh-client-ui-workspace lib/client.js:1502 起 `initializeDraft =
+       * draftOptions!==undefined && (prompt!==undefined || …)`，经
+       * prepareDraft → conversation.input.requestDraftInitialization 应用；
+       * 新会话空白 draft 恒空，`{ prompt }` 必 setDraft 落输入框首行（缺省
+       * whenDraftExists='keep'，非破坏）。dashboard 内嵌页「对于 XXXX SPEC：」
+       * 前缀即走此参数。
        */
-      startSession(workspaceId?: string): void
+      startSession(workspaceId?: string, draftOptions?: { readonly prompt?: string }): void
     }
     /**
      * 工作区控制器服务（@deepseek-ai/dsh-api-workspace-controller 提供，键
@@ -114,6 +122,85 @@ declare module '@deepseek-ai/cordis' {
     readonly workspaces?: {
       /** 按目录路径注册工作区；失败 reject（原生 WorkspaceCreateError 同语义）。 */
       create(input: { readonly path: string }): Promise<{ readonly workspaceId: string }>
+    }
+    /**
+     * 会话列表服务（@deepseek-ai/dsh-client-ui-session 提供，服务键
+     * "sessions"，0.2.2-rc.1 lib/client.js:1109）。文件右键「在 Fenix 项目中
+     * 定位」（2026-11-11）消费面：由菜单 target.sessionId 取所属会话的
+     * workspace 根目录（cwd），把相对 target.path 解析为绝对路径——与
+     * open-in-app directory 菜单的绝对路径解法（轻量字符串拼，无 RPC）同形。
+     * 声明可选：测试桩上下文不提供，运行时守卫缺失即降级。
+     */
+    readonly sessions?: {
+      readonly list: {
+        getSnapshot(): {
+          readonly byId: Record<string, { readonly cwd?: string } | undefined>
+        }
+      }
+    }
+    /**
+     * 右键菜单服务（@deepseek-ai/dsh-client-ui-context-menu 提供，0.2.2-rc.1
+     * lib/types 钉死）。最小消费面：register 贡献 file 菜单项，resolve 按
+     * target 返回动作数组，返回 unregister。file target = {sessionId, path,
+     * line?, paneId?}（path 相对会话 cwd）。声明可选理由同上。
+     */
+    readonly contextMenus?: {
+      register(contribution: {
+        readonly id: string
+        readonly target: 'file'
+        readonly order: number
+        resolve(
+          target: { readonly sessionId: string; readonly path: string; readonly line?: number },
+          signal: AbortSignal,
+        ):
+          | readonly {
+              readonly id: string
+              readonly label: string
+              readonly failureLabel?: string
+              run(): void | Promise<void>
+            }[]
+          | Promise<
+              readonly {
+                readonly id: string
+                readonly label: string
+                readonly failureLabel?: string
+                run(): void | Promise<void>
+              }[]
+            >
+      }): () => void
+    }
+    /**
+     * 右侧边栏页签注册表（@deepseek-ai/dsh-client-ui-sidebar-right 提供，
+     * 0.2.2-rc.1 lib 源码钉死；服务键 "sidebarRightTabs"）。最小消费面：
+     * register 页签 definition——page 类型按 kind 打开（无 patterns），guide
+     * 条目出现在右缘「+」菜单；body 组件经 slots 以 `sidebar.right.pane.tab`
+     * 槽、definition id 为 key 注册。声明可选：测试桩上下文不提供，缺失即
+     * 降级 no-op（rightTab.tsx）。
+     */
+    readonly sidebarRightTabs?: {
+      register(definition: {
+        readonly id: string
+        readonly kind: string
+        readonly keepMounted?: boolean
+        readonly priority?: string
+        readonly title: (address: string) => string
+        readonly guide?: readonly {
+          readonly id: string
+          readonly order: number
+          readonly title: () => string
+          readonly description?: () => string
+          readonly icon?: (props?: { readonly size?: number }) => unknown
+        }[]
+      }): () => void
+    }
+    /**
+     * 右侧边栏控制器（@deepseek-ai/dsh-client-ui-sidebar-right 提供，服务键
+     * "sidebarRight"）。最小消费面：openTab 按 kind 打开/页内 reveal 页签并
+     * 送达 params（navigation.revision++）；文件右键定位（2026-11-11 m02220
+     * 语义纠正）经此把项目页签开进右缘 dock。声明可选理由同上。
+     */
+    readonly sidebarRight?: {
+      openTab(kind: string, options?: { readonly params?: unknown }): void
     }
   }
 

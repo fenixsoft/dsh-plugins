@@ -1,16 +1,21 @@
 /**
  * fenix-dsh-dashboard-bridge Client 半（dsh.client, platform web）：
- * 向 `sidebar.panellist` 列表插槽注册 6 个固定菜单条目（概览/指挥中心/项目/
- * 配置/运维/帮助，order 10–18，2026-11-05 用户指令重排后段位）并以 priority -10
- * 遮蔽重排官方 Plugins/自动化任务 条目（reorderOfficialPanels，零改 dist）；在
- * layout `main` keyed 插槽以相同 id 挂对应 iframe
- * 面板（hash 深链直达）；启动时拉取 `<prefix>/api/projects`，项目不再逐个
- * 注册顶层侧栏条目，而是驱动「项目」条目（order 12）的 Portal 内嵌分区
- * （条目列表 nav 与工作区之间的常驻分区；「项目」菜单行自带整行折叠开关
- * 拦截层，点击仅切换分区展开/折叠、不切换主面板——2026-11-05 用户指令；
- * 锚点漂移自动降级浮层分组）数据源与每项目 main keyed 面板（深链
- * `#/projects/<name>` 契约不变），60s 周期 + window focus 重拉并幂等同步
- * （见 projectSync.ts）。boot 后等工作区列表就绪调 startSession() 落新会话
+ * 向 `sidebar.panellist` 列表插槽注册 5 个固定菜单条目（概览/指挥中心/配置/
+ * 运维/帮助，order 10–18；「Fenix 项目」曾于 2026-11-11 上午挂上左侧 rail，
+ * 同日 m02220 用户纠正「侧边栏」语义——指对话界面右上角的面板列（右缘
+ * dock，工作区文件/代码审查变更所在），非左侧菜单栏——遂移除 rail 条目，
+ * 改由 rightTab.tsx 在右侧边栏注册「Fenix 项目」页签）并以 priority -10
+ * 遮蔽重排官方 Plugins/自动化任务 条目（reorderOfficialPanels，零改 dist）；
+ * 在 layout `main` keyed 插槽挂对应 iframe
+ * 面板（hash 深链直达）；启动时拉取 `<prefix>/api/projects` 驱动每项目 main
+ * keyed 面板（深链 `#/projects/<name>` 契约不变）与官方工作区行「名称导航」
+ * （installWorkspaceNav：fenix 项目工作区行名称点击 = 打开该项目详情，
+ * 行首图标维持原生展开/收缩），60s 周期 + window focus 重拉并幂等同步
+ * （含工作区自动对齐：新项目经 workspaces.create 自动注册，见 projectSync.ts）。
+ * 另注册 dsh 文件右键菜单「在 <项目名> 项目定位」（registerFileContextMenu，
+ * 2026-11-11 用户需求：文件路径 → 项目前缀匹配 → 优先右侧边栏「Fenix 项目」
+ * 页签 openTab 深链直达该文件，sidebarRight 缺席回退 main 面板路径）。
+ * boot 后等工作区列表就绪调 startSession() 落新会话
  * 界面（bootToNewSession，进入/刷新不再落入上次会话视图，2026-11-05 二次
  * 定调覆盖同日「落概览」先行指令）。
  *
@@ -19,20 +24,54 @@
  * 侧栏条目组件为图标组件（props {size, active}），main 条目以 `key` 注册。
  * 程序化面板切换入口 = `ctx.layout.selectPanel(id)`（见 src/types/dsh-runtime.d.ts
  * 类型缝注释）。插件卸载时：固定条目由 inject 工厂返回的 disposer 注销；项目
- * main 面板由同步停止函数统一 dispose。
+ * main 面板由同步停止函数统一 dispose；名称导航拦截层由其停止函数移除；右键
+ * 菜单贡献由其 unregister 注销；右侧边栏页签由 registerFenixRightTab 的组合
+ * disposer 注销。
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { buildPanelSrc, resolveBridgeConfig } from '../shared/config.js'
 import type { BridgeConfigInput } from '../shared/config.js'
-import { DashboardPanel, fixedIconComponent, projectSectionComponent, projectGroupStore } from './panels.js'
+import { DashboardPanel, fixedIconComponent, installWorkspaceNav, projectGroupStore } from './panels.js'
 import type { FixedEntryId } from './panels.js'
-import { DEFAULT_POLL_INTERVAL_MS, parseProjectNames, parseProjectPath, startProjectSync } from './projectSync.js'
-import type { ProjectEntrySink, ProjectListFetcher, SyncTimer } from './projectSync.js'
+import { registerFileContextMenu } from './locate.js'
+import {
+  createSidebarProjectOpener,
+  LOCATE_ICON_KEY,
+  registerFenixRightTab,
+  registerLocateMenuIcon,
+} from './rightTab.js'
+import {
+  DEFAULT_POLL_INTERVAL_MS,
+  parseProjectNames,
+  parseProjectPath,
+  startProjectSync,
+} from './projectSync.js'
+import type {
+  ProjectEntrySink,
+  ProjectListFetcher,
+  ProjectRowsFetcher,
+  SyncTimer,
+  WorkspaceItemLike,
+} from './projectSync.js'
 
-/** 本插件消费的 client 服务键（无 RPC 需求，不引 api-remotes）。 */
-export const inject = ['slots', 'layout', 'uiWorkspace', 'workspaces']
+/** 本插件消费的 client 服务键（无 RPC 需求，不引 api-remotes）：sessions
+ * （文件右键解析会话 workspace 根，dsh-client-ui-session）、contextMenus
+ * （文件右键菜单贡献，dsh-client-ui-context-menu）2026-11-11 追加；
+ * sidebarRight/sidebarRightTabs（右侧边栏页签，dsh-client-ui-sidebar-right）
+ * 同日 m02220 语义纠正后追加——「Fenix 项目」落对话界面右缘 dock。 */
+export const inject = [
+  'slots',
+  'layout',
+  'uiWorkspace',
+  'workspaces',
+  'sessions',
+  'contextMenus',
+  'sidebarRight',
+  'sidebarRightTabs',
+]
 
-/** 6 个固定条目：id 与深链一一对应，order 10–15（位于 dsh web 既有条目之后）。 */
+/** 5 个固定条目：id 与深链一一对应，order 10–18（「Fenix 项目」已移入右侧
+ * 边栏页签，见 rightTab.tsx）。 */
 export interface FixedEntry {
   readonly id: FixedEntryId
   readonly label: string
@@ -41,14 +80,13 @@ export interface FixedEntry {
 }
 
 export const FIXED_ENTRIES: readonly FixedEntry[] = [
-  // order 段位（2026-11-05 用户指令重排）：概览 10 / 项目 12 / 配置 13 为桥接
-  // 原段位；运维 14→15、指挥中心 11→16、帮助 15→18 为重排腾位——插件菜单
-  // （官方 order 0，经下方 OFFICIAL_PANEL_REORDER 遮蔽改写为 14）落到配置之后，
-  // 指挥中心(16)与自动化任务（官方 order 10，遮蔽改写为 17）落到运维之后。
+  // order 段位（2026-11-05 用户指令重排）：概览 10 / 配置 13 为桥接原段位；
+  // 运维 15、指挥中心 16、帮助 18——插件菜单（官方 order 0，经下方
+  // OFFICIAL_PANEL_REORDER 遮蔽改写为 14）落到配置之后，指挥中心(16)与自动
+  // 化任务（官方 order 10，遮蔽改写为 17）落到运维之后。
   // 设置条目名「配置」（2026-11-05 用户指令）：避让 dsh web 既有「设置」官方菜单。
   { id: 'fenix-overview', label: '概览', route: '#/overview', order: 10 },
   { id: 'fenix-command-center', label: '指挥中心', route: '#/command-center', order: 16 },
-  { id: 'fenix-projects', label: '项目', route: '#/projects', order: 12 },
   { id: 'fenix-settings', label: '配置', route: '#/settings', order: 13 },
   { id: 'fenix-activities', label: '运维', route: '#/activities', order: 15 },
   { id: 'fenix-help', label: '帮助', route: '#/help', order: 18 },
@@ -222,15 +260,15 @@ export function defaultFetchProjects(prefix: string): ProjectListFetcher {
 }
 
 /**
- * 项目行点击 → 激活该项目 main keyed 面板并更新分组高亮：
- * `ctx.layout.selectPanel(projectId)`（未注册面板会抛错——吞掉并 warn，不产生
- * 未处理异常）；layout 服务缺失（异常环境）时保持静默降级，仅更新高亮。
+ * 项目名称点击 → 激活该项目 main keyed 面板（工作区行名称导航的落点，
+ * move-project-nav-to-workspace-rows）：`ctx.layout.selectPanel(projectId)`
+ * （未注册面板会抛错——吞掉并 warn，不产生未处理异常）；layout 服务缺失
+ * （异常环境）时保持静默降级。
  */
 export function projectPanelSelector(ctx: Context): (name: string) => void {
   return (name: string) => {
     try {
       ctx.layout?.selectPanel?.(projectIdFor(name))
-      projectGroupStore.setActiveProject(name)
     } catch (error) {
       console.warn(
         `[fenix-dsh-dashboard-bridge] 切换项目面板失败：${
@@ -268,11 +306,16 @@ export function projectSessionStarter(
   }
 }
 
-/** 新建会话主流程（全量错误路径 warn 落日志，不外溢）。 */
+/** 新建会话主流程（全量错误路径 warn 落日志，不外溢）。`prompt` 缺省为无
+ * draft options（原生空白新会话）；非空时经 `startSession(ws, { prompt })`
+ * 预填新会话输入框首行（新会话 draft 恒空必 applied）——dashboard 内嵌页
+ * 「新会话」按钮（installDashboardSessionRequests）的「对于 XXXX SPEC：」
+ * 前缀即走此参数。 */
 async function startProjectSessionInner(
   ctx: Context,
   fetchPath: (name: string) => Promise<string | null>,
   name: string,
+  prompt?: string,
 ): Promise<void> {
   try {
     const ui = ctx.uiWorkspace
@@ -280,9 +323,11 @@ async function startProjectSessionInner(
       console.warn('[fenix-dsh-dashboard-bridge] uiWorkspace 服务不可用，无法新建会话')
       return
     }
+    // 空串/纯空白 prompt 视同未携带（不产生空 draft options）。
+    const draftOptions = prompt !== undefined && prompt.trim() !== '' ? { prompt } : undefined
     const existing = resolveWorkspaceIdForProject(ui.workspaces.list.getSnapshot().items, name)
     if (existing !== null) {
-      ui.startSession(existing)
+      ui.startSession(existing, draftOptions)
       return
     }
     const workspaces = ctx.workspaces
@@ -298,7 +343,7 @@ async function startProjectSessionInner(
       return
     }
     const created = await workspaces.create({ path })
-    ui.startSession(created.workspaceId)
+    ui.startSession(created.workspaceId, draftOptions)
   } catch (error) {
     console.warn(
       `[fenix-dsh-dashboard-bridge] 新建会话失败：${
@@ -347,21 +392,145 @@ export function resolveWorkspaceIdForProject(
   return byBasename?.workspaceId ?? null
 }
 
+/* ============ dashboard 内嵌页「新会话」请求通道（add-dsh-new-session-button） ============ */
+
+/** iframe → 宿主「新建会话」消息 kind 常量（dashboard 侧镜像值：fenixd
+ *  core/dashboard/static/src/utils/embedBridge.ts HOST_NEW_SESSION_KIND——
+ *  双仓字面量必须逐字节一致，任一侧改动必改另一侧，两侧单测各自钉值）。 */
+export const HOST_NEW_SESSION_KIND = 'fenix-dashboard:new-session'
+
+/** 解析通过的请求载荷（project 必填非空；prompt 可选任意非受限字符串）。 */
+export interface HostNewSessionRequest {
+  readonly project: string
+  readonly prompt?: string
+}
+
+/**
+ * 消息形状校验（纯函数，独立单测）：非对象/kind 不符/project 非空串/
+ * prompt 非串（含 undefined 合法）→ null（吞）。kind 常量单点鉴别——宿主
+ * window 上可能并存其它插件的 message 监听，本桥只认自己的信封。
+ */
+export function parseHostNewSessionMessage(data: unknown): HostNewSessionRequest | null {
+  if (typeof data !== 'object' || data === null) return null
+  const record = data as Record<string, unknown>
+  if (record.kind !== HOST_NEW_SESSION_KIND) return null
+  if (typeof record.project !== 'string' || record.project === '') return null
+  if (record.prompt !== undefined && typeof record.prompt !== 'string') return null
+  return record.prompt === undefined
+    ? { project: record.project }
+    : { project: record.project, prompt: record.prompt }
+}
+
+/**
+ * dashboard 内嵌页「新会话」按钮宿主半（2026-11-11 用户需求）：监听同源
+ * dashboard iframe 的 postMessage（`{ kind, project, prompt? }`，形状见
+ * parseHostNewSessionMessage；kind 与载荷契约在 dashboard 侧 embedBridge.ts
+ * 双仓镜像），命中后走 startProjectSessionInner——以 project 定位/自动建
+ * 工作区并原生新建会话，prompt 预填输入框首行（SPEC 详情页「对于 XXXX
+ * SPEC：」前缀）。
+ *
+ * 安全口径：iframe 经 `/fenix-dashboard/` 同源前缀反代嵌入，event.origin
+ * 必须等于宿主 origin（跨源一律忽略）；载荷形状校验兜底；执行结果不经
+ * 通道回传，主面板视图切换本身即用户可见反馈（fire-and-forget，与按钮
+ * 侧口径一致）。window 缺席（node 环境/异常宿主）→ no-op 降级注册。
+ *
+ * @returns 注销函数（幂等安全：removeEventListener 重复调用零副作用）。
+ */
+export function installDashboardSessionRequests(
+  ctx: Context,
+  prefix: string,
+  deps?: SessionStarterDeps,
+): () => void {
+  if (typeof window === 'undefined') {
+    console.warn('[fenix-dsh-dashboard-bridge] window 不可用，dashboard 新会话请求通道降级 no-op')
+    return () => {}
+  }
+  const fetchPath = deps?.fetchProjectPath ?? defaultFetchProjectPath(prefix)
+  const onMessage = (event: MessageEvent): void => {
+    if (event.origin !== window.location.origin) return
+    const request = parseHostNewSessionMessage(event.data)
+    if (request === null) return
+    void startProjectSessionInner(ctx, fetchPath, request.project, request.prompt)
+  }
+  window.addEventListener('message', onMessage)
+  return () => {
+    window.removeEventListener('message', onMessage)
+  }
+}
+
+/** 默认项目行拉取：GET `<prefix>api/projects` → 原始应答（工作区对齐步逐行
+ * 解析用；10s 超时同主链路口径）。 */
+export function defaultFetchProjectRows(prefix: string): ProjectRowsFetcher {
+  return async () => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), FETCH_PROJECTS_TIMEOUT_MS)
+    try {
+      const response = await fetch(`${prefix}api/projects`, {
+        headers: { accept: 'application/json' },
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        throw new Error(`fenix-dsh-dashboard-bridge: 拉取项目列表失败 HTTP ${response.status}`)
+      }
+      return await response.json()
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+}
+
+/**
+ * ctx → 工作区快照枚举（对齐步输入；uiWorkspace 服务缺席返回 undefined 禁用
+ * 对齐）。items 形状漂移（非数组/快照抛错）按空表处理，不产生未处理异常。
+ */
+function workspaceItemsFrom(ctx: Context): (() => readonly WorkspaceItemLike[]) | undefined {
+  const list = ctx.uiWorkspace?.workspaces?.list
+  if (list === undefined) return undefined
+  return () => {
+    try {
+      const items = list.getSnapshot().items
+      return Array.isArray(items) ? items : []
+    } catch {
+      return []
+    }
+  }
+}
+
+/** ctx → 工作区注册（workspaces 服务缺席返回 undefined 禁用对齐）。注意
+ * MUST 以「workspaces.create(...)」方法形态调用（receiver = 服务实例）：
+ * 摘引用散调用会丢 this（WorkspaceController.create 内读 this.model 抛
+ * TypeError——真实环境已踩）。 */
+function createWorkspaceFrom(
+  ctx: Context,
+): ((input: { readonly path: string }) => Promise<{ readonly workspaceId: string }>) | undefined {
+  const workspaces = ctx.workspaces
+  if (workspaces === undefined) return undefined
+  return (input) => workspaces.create(input)
+}
+
 /**
  * 项目 main 面板汇：ctx.slots 上 keyed 注册/注销，支持整体清理。
  * （spec 2026-10 分组化：侧栏不再逐项目注册 panellist 条目。）
  */
 export function projectEntrySink(ctx: Context, prefix: string): ProjectEntrySink & { disposeAll(): void } {
   const disposers = new Map<string, () => void>()
+  const registerProjectPanel = (name: string, route: string): void => {
+    // 防御自守：重名重复 add 先注销旧注册，避免旧 disposer 被覆盖后无法注销（泄漏）。
+    disposers.get(name)?.()
+    const src = buildPanelSrc(prefix, route)
+    const disposePanel = ctx.slots.register({ name: 'main', key: projectIdFor(name) }, () =>
+      DashboardPanel({ src }),
+    )
+    disposers.set(name, disposePanel)
+  }
   return {
     addProject(name) {
-      // 防御自守：重名重复 add 先注销旧注册，避免旧 disposer 被覆盖后无法注销（泄漏）。
-      disposers.get(name)?.()
-      const src = buildPanelSrc(prefix, projectRouteFor(name))
-      const disposePanel = ctx.slots.register({ name: 'main', key: projectIdFor(name) }, () =>
-        DashboardPanel({ src }),
-      )
-      disposers.set(name, disposePanel)
+      registerProjectPanel(name, projectRouteFor(name))
+    },
+    openProjectAt(name, route) {
+      // 文件右键「在 Fenix 项目中定位」落点：dispose 旧 + 以深链 src 重注册
+      // （面板无 keep-alive，重注册是唯一让 iframe 载入新 hash 的途径）。
+      registerProjectPanel(name, route)
     },
     removeProject(name) {
       const dispose = disposers.get(name)
@@ -369,13 +538,21 @@ export function projectEntrySink(ctx: Context, prefix: string): ProjectEntrySink
         dispose()
         disposers.delete(name)
       }
-      // 分组残留态清理：移除的项目若正被高亮，归空。
-      if (projectGroupStore.getSnapshot().activeProject === name) {
-        projectGroupStore.setActiveProject(null)
-      }
+      // 名称导航映射随 projectGroupStore.setProjects 收敛（删除项目行失去
+      // 拦截层回退原生），此处无残留态。
     },
     setProjects(names) {
       projectGroupStore.setProjects(names)
+    },
+    setProjectRows(rows) {
+      // 2026-11-11 修复：此前 sink 漏实现本方法——alignWorkspaces 的可选调用
+      // `options.sink.setProjectRows?.(rows)` 被静默跳过，projectGroupStore 的
+      // projectRows 恒为空，文件右键「在 Fenix 项目中定位」与名称导航路径判据
+      // 全部失效（类型面可选方法逃过了 tsc，桩齐活的全量测试也未暴露）。
+      projectGroupStore.setProjectRows(rows)
+    },
+    setProjectSummaries(summaries) {
+      projectGroupStore.setSummaries(summaries)
     },
     disposeAll() {
       for (const dispose of disposers.values()) dispose()
@@ -455,28 +632,24 @@ export function deepLinkPanels(ctx: Context): () => void {
 }
 
 /**
- * Client 插件体：注册 6 固定条目与 main 面板，启动项目列表同步。
- * slot 形状漂移（dsh 升级改名）时注册不生效、页面不崩（design Risks）。
+ * Client 插件体：注册固定条目与 main 面板，启动项目列表同步（含工作区自动
+ * 对齐）与工作区行名称导航。slot 形状漂移（dsh 升级改名）时注册不生效、
+ * 页面不崩（design Risks）。
  *
- * @returns 停止函数：停同步循环并 dispose 全部项目 main 面板（固定条目由
- * inject 工厂 disposer 随插件卸载注销）。
+ * @returns 停止函数：撤名称导航拦截层、停同步循环并 dispose 全部项目 main
+ * 面板（固定条目由 inject 工厂 disposer 随插件卸载注销）。
  */
 export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   const resolved = resolveBridgeConfig(options)
   const prefix = resolved.prefix
 
-  // 6 固定侧栏条目（order 10–15）；「项目」条目组件为 Portal 内嵌分区 + 菜单行
-  // 折叠开关（行点击仅切换展开/折叠，不切换主面板——2026-11-05 用户指令；锚点
-  // 漂移自动降级浮层分组，见 panels.tsx projectSectionComponent），其余为线性图标。
+  // 固定侧栏条目（order 10–18，线性图标）；「Fenix 项目」总览入口在右侧
+  // 边栏页签（m02220 语义纠正，见 rightTab.tsx），不在左侧 rail。
   ctx.slots.inject('sidebar.panellist', () => {
-    const selectProject = projectPanelSelector(ctx)
-    const startProjectSession = projectSessionStarter(ctx, prefix)
     const disposers = FIXED_ENTRIES.map((entry) =>
       ctx.slots.register(
         { name: 'sidebar.panellist', id: entry.id, order: entry.order, label: entry.label },
-        entry.id === 'fenix-projects'
-          ? projectSectionComponent({ selectProject, startProjectSession })
-          : fixedIconComponent(entry.id),
+        fixedIconComponent(entry.id),
       ),
     )
     return () => {
@@ -484,9 +657,9 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     }
   })
 
-  // main keyed 插槽：与侧栏条目同 id 的 iframe 面板（深链直达）。「项目」面板
-  // 保留注册：菜单行点击已被拦截层改道为折叠开关，键盘 Enter（浏览器对行按钮
-  // 合成的 click 不经拦截层）仍深链 #/projects，面板缺席会抛未注册错误。
+  // main keyed 插槽：与侧栏条目同 id 的 iframe 面板（深链直达）。每项目面板
+  // `fenix-project-<name>` 由项目同步注册（名称导航目标，契约不变）。
+  // 「Fenix 项目」总览入口在右侧边栏页签（registerFenixRightTab），不在 main。
   ctx.slots.inject('main', () => {
     const disposers = FIXED_ENTRIES.map((entry) =>
       ctx.slots.register({ name: 'main', key: entry.id }, () =>
@@ -498,23 +671,61 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     }
   })
 
-  // 官方面板遮蔽重排 + boot 落新会话 + 面板深链双向桥（2026-11-05 用户指令，
-  // 见各函数注释）。
+  // 官方面板遮蔽重排 + boot 落新会话 + 面板深链双向桥 + 工作区行名称导航
+  // （2026-11-05 / 2026-11-09 用户指令，见各函数注释）。
   const stopReorder = reorderOfficialPanels(ctx)
   const stopBootSwitch = bootToNewSession(ctx)
   const stopDeepLink = deepLinkPanels(ctx)
+  const stopWorkspaceNav = installWorkspaceNav(ctx, { selectProject: projectPanelSelector(ctx) })
+  // dashboard 内嵌页「新会话」按钮宿主半（2026-11-11 用户需求）：SPEC 列表/
+  // 详情页 filters 槽位按钮（仅 embed 态渲染）postMessage → 本监听新建会话
+  // （prompt 前缀预填），见 installDashboardSessionRequests 注释。
+  const stopHostSessionRequests = installDashboardSessionRequests(ctx, prefix)
 
-  // 项目数据同步：main keyed 面板差异注册 + 分组数据源整体替换。
-  // 60s 周期 + window focus 幂等同步。
+  // 项目数据同步：main keyed 面板差异注册 + 名称导航数据源整体替换 + 工作区
+  // 自动对齐（60s 周期 + window focus 幂等同步）。对齐依赖（uiWorkspace/
+  // workspaces 服务）在 ctx 上装配，服务缺席整段禁用（测试桩零动作零网络）。
   const sink = projectEntrySink(ctx, prefix)
   const stopSync = startProjectSync({
     fetchProjects: options?.fetchProjects ?? defaultFetchProjects(prefix),
     sink,
     intervalMs: options?.intervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     timer: options?.timer,
+    fetchProjectRows: defaultFetchProjectRows(prefix),
+    workspaceItems: workspaceItemsFrom(ctx),
+    createWorkspace: createWorkspaceFrom(ctx),
   })
 
+  // 右侧边栏「Fenix 项目」页签（2026-11-11 用户需求 + m02220 语义纠正：
+  // 「侧边栏」指对话界面右上角的面板列，非左侧菜单栏）：guide 菜单落项目
+  // 总览，body iframe 承载 dashboard；服务缺席注册 no-op（rightTab.tsx）。
+  const stopRightTab = registerFenixRightTab(ctx, prefix)
+
+  // 文件右键「在 Fenix 项目中定位」（2026-11-11 用户需求）：resolve 期按
+  // projectGroupStore 快照做路径前缀匹配（60s 同步滞后容忍——未同步到路径行
+  // 时菜单项不出现，零污染）；命中后优先右侧边栏页签 openTab 深链
+  // （createSidebarProjectOpener），sidebarRight 缺席回退 main 面板路径；
+  // 服务缺失 registerFileContextMenu 内部降级 no-op。
+  // 定位菜单图标（contextMenu.icon keyed slot，2026-11-11 用户需求：菜单项
+  // 与原生项一致带图标）；服务缺失内部降级 no-op。
+  const stopLocateIcon = registerLocateMenuIcon(ctx)
+  const stopLocateMenu = registerFileContextMenu(
+    ctx,
+    {
+      getProjectRows: () => projectGroupStore.getSnapshot().projectRows,
+      openSidebarProjectTab: createSidebarProjectOpener(ctx),
+      openProjectAt: sink.openProjectAt ?? (() => {}),
+      selectProject: projectPanelSelector(ctx),
+      iconKey: LOCATE_ICON_KEY,
+    },
+  )
+
   return () => {
+    stopLocateIcon()
+    stopLocateMenu()
+    stopRightTab()
+    stopWorkspaceNav()
+    stopHostSessionRequests()
     stopDeepLink()
     stopBootSwitch()
     stopReorder()

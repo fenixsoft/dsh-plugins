@@ -1,46 +1,43 @@
 /**
- * Client 半单测（2026-10 分组化数据流）：reconcile 三态与幂等、失败兜底、
- * 同步循环（假定时器/焦点桩）、项目列表解析、分组数据源（store）契约。
+ * Client 半单测（2026-10 分组化数据流 + move-project-nav-to-workspace-rows
+ * 工作区自动对齐步）：reconcile 三态与幂等、失败兜底、同步循环（假定时器/
+ * 焦点桩）、项目列表解析、数据源（store）契约、工作区对齐四态（新建/已存在
+ * 跳过/删除项目不删工作区/拉取失败整轮跳过）。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   DEFAULT_POLL_INTERVAL_MS,
   MIN_POLL_INTERVAL_MS,
   compareNames,
   parseProjectNames,
+  parseProjectSummaries,
   reconcileProjects,
   startProjectSync,
 } from '../src/client/projectSync.js'
-import type { ProjectEntrySink, SyncTimer } from '../src/client/projectSync.js'
-import { projectGroupStore, renderProjectSection } from '../src/client/panels.js'
+import { projectEntrySink } from '../src/client/index.js'
+import type {
+  ProjectEntrySink,
+  ProjectRowInfo,
+  ProjectSummaryProjection,
+  SyncTimer,
+  WorkspaceItemLike,
+} from '../src/client/projectSync.js'
+import { projectGroupStore } from '../src/client/panels.js'
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-/** 按 data-testid 收集元素树命中的 React 元素（与 srcContract 同款最小实现）。 */
-function collectByTestId(node: unknown, testId: string, acc: ElementLike[] = []): ElementLike[] {
-  if (node === null || node === undefined) return acc
-  if (typeof node === 'string' || typeof node === 'number' || typeof node === 'boolean') return acc
-  if (Array.isArray(node)) {
-    for (const child of node) collectByTestId(child, testId, acc)
-    return acc
-  }
-  if (typeof node === 'object' && 'type' in node && 'props' in node) {
-    const element = node as ElementLike
-    if (element.props?.['data-testid'] === testId) acc.push(element)
-    collectByTestId(element.props?.children, testId, acc)
-  }
-  return acc
-}
-
-interface ElementLike {
-  readonly type?: unknown
-  readonly props?: { readonly children?: unknown; readonly [key: string]: unknown }
+/** 等待启动拉取 + 对齐步整链落定（pull → reconcile → setProjects → align）。 */
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 6; i += 1) await tick()
 }
 
 interface RecordingSink extends ProjectEntrySink {
   readonly added: string[]
   readonly removed: string[]
   readonly projectSets: readonly (readonly string[])[]
+  readonly rowSets: readonly (readonly ProjectRowInfo[])[]
+  readonly summarySets: readonly (readonly ProjectSummaryProjection[])[]
   calls(): number
 }
 
@@ -48,10 +45,14 @@ function recordingSink(): RecordingSink {
   const added: string[] = []
   const removed: string[] = []
   const projectSets: (readonly string[])[] = []
+  const rowSets: (readonly ProjectRowInfo[])[] = []
+  const summarySets: (readonly ProjectSummaryProjection[])[] = []
   return {
     added,
     removed,
     projectSets,
+    rowSets,
+    summarySets,
     addProject(name) {
       added.push(name)
     },
@@ -60,6 +61,12 @@ function recordingSink(): RecordingSink {
     },
     setProjects(names) {
       projectSets.push([...names])
+    },
+    setProjectRows(rows) {
+      rowSets.push([...rows])
+    },
+    setProjectSummaries(summaries) {
+      summarySets.push([...summaries])
     },
     calls: () => added.length + removed.length,
   }
@@ -110,6 +117,25 @@ function fakeTimer(): SyncTimer & {
       return () => {
         state.focusUnsubscribed = true
       }
+    },
+  }
+}
+
+/** 工作区快照行构造（WorkspaceItemLike）。 */
+const wsItem = (workspaceId: string, path: string, title: string): WorkspaceItemLike => ({ workspaceId, path, title })
+
+/** 对齐步依赖装配：固定 payload + 工作区快照 + create 调用迹。 */
+function alignFixture(items: readonly WorkspaceItemLike[], payload: unknown) {
+  const created: string[] = []
+  return {
+    created,
+    deps: {
+      fetchProjectRows: async () => payload,
+      workspaceItems: () => items,
+      createWorkspace: async (input: { readonly path: string }) => {
+        created.push(input.path)
+        return { workspaceId: `w-${created.length}` }
+      },
     },
   }
 }
@@ -353,11 +379,368 @@ describe('startProjectSync intervalMs 规整（下界钳制防御）', () => {
   })
 })
 
-describe('projectGroupStore（分组数据源契约）', () => {
-  beforeEach(() => {
-    projectGroupStore.reset()
+describe('工作区自动对齐（alignWorkspaces 四态 + 降级路径）', () => {
+  it('①新建：exists 可达项目无命中工作区 → workspaces.create({path}) 注册（不开会话）', async () => {
+    const sink = recordingSink()
+    const timer = fakeTimer()
+    const { created, deps } = alignFixture([wsItem('w-other', '/r/other', 'other')], {
+      projects: [{ name: 'newproj', path: '/r/newproj', exists: true }],
+    })
+    const stop = startProjectSync({
+      fetchProjects: async () => ['newproj'],
+      sink,
+      intervalMs: 5_000,
+      timer,
+      ...deps,
+    })
+    await settle()
+    expect(created).toEqual(['/r/newproj'])
+    // 行信息沉淀（名称导航路径判据消费）：names 序，path 来自 payload。
+    expect(sink.rowSets.at(-1)).toEqual([{ name: 'newproj', path: '/r/newproj' }])
+    stop()
   })
 
+  it('②已存在跳过：归一化路径命中（尾斜杠差异）→ 零 create', async () => {
+    const sink = recordingSink()
+    const timer = fakeTimer()
+    const { created, deps } = alignFixture([wsItem('w-a', '/r/a', 'a')], {
+      projects: [{ name: 'a', path: '/r/a/', exists: true }],
+    })
+    const stop = startProjectSync({
+      fetchProjects: async () => ['a'],
+      sink,
+      intervalMs: 5_000,
+      timer,
+      ...deps,
+    })
+    await settle()
+    expect(created).toEqual([])
+    expect(sink.rowSets.at(-1)).toEqual([{ name: 'a', path: '/r/a/' }])
+    stop()
+  })
+
+  it('③删除项目不删工作区：项目从列表消失后其工作区保留（只增不改不删，无删除通道）', async () => {
+    const sink = recordingSink()
+    const timer = fakeTimer()
+    const { created, deps } = alignFixture([wsItem('w-gone', '/r/gone', 'gone')], { projects: [] })
+    const stop = startProjectSync({
+      fetchProjects: async () => [], // 项目已全部删除
+      sink,
+      intervalMs: 5_000,
+      timer,
+      ...deps,
+    })
+    await settle()
+    expect(created).toEqual([]) // 无对齐动作
+    expect(sink.rowSets.at(-1)).toEqual([]) // 行表为空，快照不动工作区
+    stop()
+  })
+
+  it('④拉取失败整轮跳过：warn 落日志、不建不删、无未处理异常', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const sink = recordingSink()
+      const timer = fakeTimer()
+      const { created } = alignFixture([], { projects: [] })
+      const stop = startProjectSync({
+        fetchProjects: async () => ['a'],
+        sink,
+        intervalMs: 5_000,
+        timer,
+        fetchProjectRows: async () => {
+          throw new Error('align fetch down')
+        },
+        workspaceItems: () => [],
+        createWorkspace: async () => {
+          throw new Error('should not be called')
+        },
+      })
+      await settle()
+      expect(created).toEqual([])
+      const messages = warn.mock.calls.map((call) => String(call[0]))
+      expect(messages.some((message) => message.includes('对齐拉取项目列表失败') && message.includes('本轮跳过'))).toBe(
+        true,
+      )
+      stop()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('exists=false（目录不可达）不对齐：path null → continue，不 create', async () => {
+    const sink = recordingSink()
+    const timer = fakeTimer()
+    const { created, deps } = alignFixture([], {
+      projects: [{ name: 'ghost', path: '/no/such/dir', exists: false }],
+    })
+    const stop = startProjectSync({
+      fetchProjects: async () => ['ghost'],
+      sink,
+      intervalMs: 5_000,
+      timer,
+      ...deps,
+    })
+    await settle()
+    expect(created).toEqual([])
+    // 不可达行仍沉淀（path null → 名称导航走 title 兜底）。
+    expect(sink.rowSets.at(-1)).toEqual([{ name: 'ghost', path: null }])
+    stop()
+  })
+
+  it('依赖三缺一整段禁用：fetchProjectRows 不被消费（测试桩零动作零网络）', async () => {
+    const fetchRows = vi.fn(async () => ({ projects: [] }))
+    const timer = fakeTimer()
+    const sink = recordingSink()
+    const stop = startProjectSync({
+      fetchProjects: async () => ['a'],
+      sink,
+      intervalMs: 5_000,
+      timer,
+      fetchProjectRows: fetchRows,
+      // workspaceItems / createWorkspace 缺席 → 整段禁用。
+    })
+    await settle()
+    expect(fetchRows).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('单项目注册失败：warn 跳过，下一项目继续（下轮重试缺失者）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const sink = recordingSink()
+      const timer = fakeTimer()
+      const created: string[] = []
+      const stop = startProjectSync({
+        fetchProjects: async () => ['bad', 'good'],
+        sink,
+        intervalMs: 5_000,
+        timer,
+        fetchProjectRows: async () => ({
+          projects: [
+            { name: 'bad', path: '/r/bad', exists: true },
+            { name: 'good', path: '/r/good', exists: true },
+          ],
+        }),
+        workspaceItems: () => [],
+        createWorkspace: async (input) => {
+          created.push(input.path)
+          if (input.path === '/r/bad') throw new Error('create boom')
+          return { workspaceId: 'w-good' }
+        },
+      })
+      await settle()
+      // 首项目失败不阻断后续项目。
+      expect(created).toEqual(['/r/bad', '/r/good'])
+      const messages = warn.mock.calls.map((call) => String(call[0]))
+      expect(messages.some((message) => message.includes('对齐注册失败') && message.includes('bad'))).toBe(true)
+      stop()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})
+
+describe('parseProjectSummaries（tooltip 投影数据面，四类 fixture）', () => {
+  it('① 正常摘要：全字段投影（path 判据与 parseProjectPath 同源）', () => {
+    expect(
+      parseProjectSummaries(
+        {
+          projects: [
+            {
+              name: 'fenixd',
+              path: '/root/fenixd',
+              description: 'Fenix 主仓',
+              daemon: 'running',
+              hosting: 'managed',
+              exists: true,
+              discovered: true,
+              status_counts: { implementing: 2, blocked: 1 },
+              task_done: 27,
+              task_total: 31,
+              active_runs: 2,
+              spec_count: 40,
+              problems: 0,
+              scenario_count: 90,
+              updated: 1_700_000_000,
+            },
+          ],
+        },
+        ['fenixd'],
+      ),
+    ).toEqual([
+      {
+        name: 'fenixd',
+        path: '/root/fenixd',
+        description: 'Fenix 主仓',
+        daemon: 'running',
+        hosting: 'managed',
+        exists: true,
+        discovered: true,
+        error: null,
+        status_counts: { implementing: 2, blocked: 1 },
+        task_done: 27,
+        task_total: 31,
+        active_runs: 2,
+      },
+    ])
+  })
+
+  it('② 缺失 description：null 口径（tooltip 显示「暂无简介」不伪装）', () => {
+    const [row] = parseProjectSummaries({ projects: [{ name: 'x', exists: true }] }, ['x'])
+    expect(row?.description).toBeNull()
+  })
+
+  it('③ exists:false 降级项：path null + exists false（tooltip 回退判定的降级标记）', () => {
+    expect(
+      parseProjectSummaries({ projects: [{ name: 'ghost', path: '/no/such/dir', exists: false }] }, ['ghost']),
+    ).toEqual([
+      {
+        name: 'ghost',
+        path: null,
+        description: null,
+        daemon: null,
+        hosting: null,
+        exists: false,
+        discovered: false,
+        error: null,
+        status_counts: null,
+        task_done: null,
+        task_total: null,
+        active_runs: null,
+      },
+    ])
+  })
+
+  it('④ 字段全缺（null 口径）：裸 name 行投影 12 键齐、值域 null/false', () => {
+    const rows = parseProjectSummaries({ projects: [{ name: 'bare' }] }, ['bare'])
+    expect(rows).toHaveLength(1)
+    const row = rows[0]
+    if (!row) throw new Error('行缺失')
+    expect(Object.keys(row).sort()).toEqual([
+      'active_runs',
+      'daemon',
+      'description',
+      'discovered',
+      'error',
+      'exists',
+      'hosting',
+      'name',
+      'path',
+      'status_counts',
+      'task_done',
+      'task_total',
+    ])
+    expect(row.name).toBe('bare')
+    expect(row.path).toBeNull()
+    expect(row.exists).toBe(false)
+    expect(row.status_counts).toBeNull()
+    expect(row.task_done).toBeNull()
+    expect(row.task_total).toBeNull()
+    expect(row.active_runs).toBeNull()
+  })
+
+  it('names 序为准；payload 缺行跳过（投影缺失回退判定），行级缺失不 warn（防 60s 刷屏）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const rows = parseProjectSummaries({ projects: [{ name: 'a', exists: true }] }, ['a', 'ghost', 'b'])
+      expect(rows.map((row) => row.name)).toEqual(['a'])
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('error 非空行保留降级标记；status_counts 非对象/非数值键 → null 口径', () => {
+    const rows = parseProjectSummaries(
+      { projects: [{ name: 'err', exists: true, error: 'describe failed', status_counts: 'bad' }] },
+      ['err'],
+    )
+    expect(rows[0]?.error).toBe('describe failed')
+    expect(rows[0]?.status_counts).toBeNull()
+    // 空对象 counts → null（全零口径：胶囊组不渲染，与字段缺失同归 null，渲染面等价）。
+    expect(parseProjectSummaries({ projects: [{ name: 'a', status_counts: {} }] }, ['a'])[0]?.status_counts).toBeNull()
+    expect(
+      parseProjectSummaries({ projects: [{ name: 'a', status_counts: { done: 3, bad: 'x' } }] }, ['a'])[0]
+        ?.status_counts,
+    ).toEqual({ done: 3 })
+  })
+
+  it('projects 非数组抛形状异常（按拉取失败处理，保留既有投影）', () => {
+    expect(() => parseProjectSummaries({ items: [] }, ['a'])).toThrow(/projects 非数组/)
+    expect(() => parseProjectSummaries(null, ['a'])).toThrow(/projects 非数组/)
+  })
+})
+
+describe('startProjectSync 投影沉淀链路（tooltip 数据源）', () => {
+  it('对齐拉取成功：sink.setProjectSummaries 以 names 序沉淀（与 rows 同 payload 零额外请求）', async () => {
+    const sink = recordingSink()
+    const timer = fakeTimer()
+    const stop = startProjectSync({
+      fetchProjects: async () => ['fenixd'],
+      sink,
+      intervalMs: 5_000,
+      timer,
+      fetchProjectRows: async () => ({
+        projects: [{ name: 'fenixd', path: '/r/fenixd', exists: true, task_done: 1, task_total: 2, active_runs: 0 }],
+      }),
+      workspaceItems: () => [],
+      createWorkspace: async () => ({ workspaceId: 'w' }),
+    })
+    await settle()
+    expect(sink.summarySets.at(-1)).toEqual([
+      {
+        name: 'fenixd',
+        path: '/r/fenixd',
+        description: null,
+        daemon: null,
+        hosting: null,
+        exists: true,
+        discovered: false,
+        error: null,
+        status_counts: null,
+        task_done: 1,
+        task_total: 2,
+        active_runs: 0,
+      },
+    ])
+    stop()
+  })
+
+  it('投影拉取失败/形状漂移：warn 保留既有投影，无未处理异常', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const sink = recordingSink()
+      const timer = fakeTimer()
+      let fail = true
+      const stop = startProjectSync({
+        fetchProjects: async () => ['a'],
+        sink,
+        intervalMs: 5_000,
+        timer,
+        fetchProjectRows: async () => {
+          if (fail) return { projects: 'drifted' }
+          return { projects: [{ name: 'a', exists: true }] }
+        },
+        workspaceItems: () => [],
+        createWorkspace: async () => ({ workspaceId: 'w' }),
+      })
+      await settle()
+      expect(sink.summarySets).toHaveLength(0)
+      expect(warn.mock.calls.some((call) => String(call[0]).includes('项目投影解析失败'))).toBe(true)
+
+      fail = false
+      timer.triggerInterval()
+      await settle()
+      expect(sink.summarySets).toHaveLength(1)
+      expect(sink.summarySets.at(-1)?.[0]?.name).toBe('a')
+      stop()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})
+
+describe('projectGroupStore（名称导航数据源契约）', () => {
   it('setProjects 去重 + 码点序排序；无变化零通知', () => {
     const seen: string[][] = []
     const unsubscribe = projectGroupStore.subscribe(() => {
@@ -370,25 +753,71 @@ describe('projectGroupStore（分组数据源契约）', () => {
     unsubscribe()
   })
 
-  it('展开/折叠与高亮切换；高亮项目从列表消失时归空', () => {
-    projectGroupStore.setProjects(['a', 'b'])
-    projectGroupStore.setActiveProject('a')
-    expect(projectGroupStore.getSnapshot().activeProject).toBe('a')
-    projectGroupStore.toggleExpanded()
-    expect(projectGroupStore.getSnapshot().expanded).toBe(false)
-    projectGroupStore.setProjects(['b'])
-    expect(projectGroupStore.getSnapshot().activeProject).toBeNull()
-    expect(projectGroupStore.getSnapshot().expanded).toBe(false)
-    projectGroupStore.toggleExpanded()
-    expect(projectGroupStore.getSnapshot().expanded).toBe(true)
+  it('setProjectRows 整体替换 + 幂等（无变化零通知）；setProjects 不动 rows 段', () => {
+    projectGroupStore.reset() // reset 先于订阅（reset 自身也 emit）
+    const seen: number[] = []
+    const unsubscribe = projectGroupStore.subscribe(() => {
+      seen.push(1)
+    })
+    projectGroupStore.setProjects(['a']) // 通知 1
+    projectGroupStore.setProjectRows([{ name: 'a', path: '/r/a' }]) // 通知 2
+    expect(projectGroupStore.getSnapshot().projectRows).toEqual([{ name: 'a', path: '/r/a' }])
+    projectGroupStore.setProjectRows([{ name: 'a', path: '/r/a' }]) // 同 rows：零通知
+    expect(seen).toHaveLength(2)
+    projectGroupStore.setProjectRows([{ name: 'a', path: '/r/a2' }]) // 通知 3
+    expect(seen).toHaveLength(3)
+    expect(projectGroupStore.getSnapshot().projectRows).toEqual([{ name: 'a', path: '/r/a2' }])
+    // setProjects 只换 projects 段，rows 保留（滞后容忍）。
+    projectGroupStore.setProjects(['b']) // 通知 4
+    expect(seen).toHaveLength(4)
+    expect(projectGroupStore.getSnapshot().projectRows).toEqual([{ name: 'a', path: '/r/a2' }])
+    expect(projectGroupStore.getSnapshot().projects).toEqual(['b'])
+    unsubscribe()
   })
 
-  it('同步驱动共享数据源：setProjects 后 Portal 分区纯渲染面直接可见（分区/降级浮层同源）', async () => {
+  it('setSummaries 整体替换 + 幂等（无变化零通知）；投影行含 counts 深比较', () => {
+    projectGroupStore.reset() // reset 先于订阅（reset 自身也 emit）
+    const seen: number[] = []
+    const unsubscribe = projectGroupStore.subscribe(() => {
+      seen.push(1)
+    })
+    const row = {
+      name: 'a',
+      path: '/r/a',
+      description: null,
+      daemon: null,
+      hosting: null,
+      exists: true,
+      discovered: false,
+      error: null,
+      status_counts: null,
+      task_done: null,
+      task_total: null,
+      active_runs: null,
+    }
+    projectGroupStore.setSummaries([row]) // 通知 1
+    expect(projectGroupStore.getSnapshot().summaries).toEqual([row])
+    projectGroupStore.setSummaries([{ ...row }]) // 同值：零通知
+    expect(seen).toHaveLength(1)
+    projectGroupStore.setSummaries([{ ...row, status_counts: { done: 2 } }]) // counts 变化：通知 2
+    expect(seen).toHaveLength(2)
+    projectGroupStore.setSummaries([{ ...row, status_counts: { done: 2 } }]) // 同 counts：零通知
+    expect(seen).toHaveLength(2)
+    projectGroupStore.setSummaries([{ ...row, status_counts: { done: 3 } }]) // 通知 3
+    expect(seen).toHaveLength(3)
+    unsubscribe()
+  })
+
+  it('同步驱动共享数据源：sink 落 store（projects 排序 + rows 按 names 序沉淀）', async () => {
+    projectGroupStore.reset()
     const sink: ProjectEntrySink = {
       addProject() {},
       removeProject() {},
       setProjects(names) {
         projectGroupStore.setProjects(names)
+      },
+      setProjectRows(rows) {
+        projectGroupStore.setProjectRows(rows)
       },
     }
     const timer = fakeTimer()
@@ -397,18 +826,63 @@ describe('projectGroupStore（分组数据源契约）', () => {
       sink,
       intervalMs: 5_000,
       timer,
+      fetchProjectRows: async () => ({
+        projects: [
+          { name: 'fenixd', path: '/r/fenixd', exists: true },
+          { name: 'dsh-plugins', path: '/r/dsh-plugins', exists: true },
+        ],
+      }),
+      workspaceItems: () => [],
+      createWorkspace: async ({ path }) => ({ workspaceId: `w-${path}` }),
     })
-    await tick()
-    const snapshot = projectGroupStore.getSnapshot()
-    expect(snapshot.projects).toEqual(['dsh-plugins', 'fenixd'])
-    // Portal 分区纯渲染面（renderProjectSection）从同一快照渲染项目行。
-    const tree = renderProjectSection(
-      { projects: snapshot.projects, expanded: true, activeProject: null, wide: true, rowWidth: 260 },
-      { toggleHeader() {}, selectProject() {}, startProjectSession() {} },
-    )
-    expect(collectByTestId(tree, 'fenix-projects-section')).toHaveLength(1)
-    expect(collectByTestId(tree, 'fenix-project-row-fenixd')).toHaveLength(1)
-    expect(collectByTestId(tree, 'fenix-project-row-dsh-plugins')).toHaveLength(1)
+    await settle()
+    expect(projectGroupStore.getSnapshot().projects).toEqual(['dsh-plugins', 'fenixd'])
+    // rows 保持 names 序（消费方 buildProjectRowMap 自行按名查路径，序无关紧要，
+    // 但 store 幂等判据按逐位比较——序稳定是零通知的前提）。
+    expect(projectGroupStore.getSnapshot().projectRows).toEqual([
+      { name: 'fenixd', path: '/r/fenixd' },
+      { name: 'dsh-plugins', path: '/r/dsh-plugins' },
+    ])
     stop()
+  })
+})
+
+describe('sink 行沉淀回归（2026-11-11 projectEntrySink 漏实现 setProjectRows）', () => {
+  it('真 sink（projectEntrySink）+ 对齐步 → store.projectRows 落地（此前漏实现致右键定位/名称导航恒无匹配）', async () => {
+    projectGroupStore.reset()
+    const ctx = {
+      slots: {
+        inject() {},
+        register(_options: Record<string, unknown>, _component: unknown) {
+          return () => {}
+        },
+      },
+    }
+    const sink = projectEntrySink(ctx as never, '/fenix-dashboard/')
+    // 类型面 setProjectRows 可选——漏实现时这里是 undefined，运行时被 `?.` 静默吞掉。
+    expect(typeof sink.setProjectRows).toBe('function')
+    const timer = fakeTimer()
+    const stop = startProjectSync({
+      fetchProjects: async () => ['fenixd'],
+      sink,
+      intervalMs: 5_000,
+      timer,
+      fetchProjectRows: async () => ({
+        projects: [{ name: 'fenixd', path: '/root/fenixd', exists: true }],
+      }),
+      workspaceItems: () => [],
+      createWorkspace: async ({ path }) => ({ workspaceId: `w-${path}` }),
+    })
+    await settle()
+    expect(projectGroupStore.getSnapshot().projectRows).toEqual([
+      { name: 'fenixd', path: '/root/fenixd' },
+    ])
+    stop()
+  })
+
+  it('源码钉：projectEntrySink 必须转发 setProjectRows → projectGroupStore.setProjectRows', () => {
+    const src = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
+    expect(src).toContain('setProjectRows(rows)')
+    expect(src).toContain('projectGroupStore.setProjectRows(rows)')
   })
 })

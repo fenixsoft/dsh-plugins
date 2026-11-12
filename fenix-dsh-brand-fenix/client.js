@@ -8,10 +8,16 @@
  *   1. sidebar.brand.mark（size 24）——左上角图标：官方鲸鱼剪影 → Fenix 环结
  *      （取自 dashboard 顶栏 logo-64.png，data URI 内联，明暗主题同素材）。
  *   2. sidebar.brand.name（24px 高容器）——官方矢量 wordmark「deepseek harness」
- *      → 复刻 dashboard 顶栏 HeaderTitle 排版：「Fenix」16px/700/字距 .3px +
- *      「Harness」400/左距 6px/灰字（dsh 别名 --dsw-alias-label-tertiary，暗色
- *      自动翻转）。字体栈 dsh --dsw-font-family 与 dashboard DSH_FONT_FAMILY
- *      逐字一致。
+ *      → 自绘 SVG lockup（2026-11-07 用户从 4 概念稿中选定 A·House Caps 紧凑版
+ *      并指定文案 WEB DASHBOARD；2026-11-10 用户指令副标改文 THE AI-NATIVE
+ *      SDLC）：主行「FENIX HARNESS」Montserrat 600/12.5px/
+ *      字距 1px 大写（对齐 dsh 官方 boot 屏 wordmark 语言），HARNESS 用 500 权重
+ *      灰字弱化；副标行「THE AI-NATIVE SDLC」Montserrat 500/9px/字距 2.2px，基线
+ *      y=30.5（与主行视觉空隙 ≈7.2px，用户校准值）。实测主行宽 117.3px、副标
+ *      115.5px，SVG 定宽 124px + overflow visible。颜色全部走 dsh 别名
+ *      --dsw-alias-label-primary/secondary/tertiary（暗色自动翻转），字体为
+ *      dsh-web-frontend 全局 @font-face Montserrat（300/400/500，600 为合成，
+ *      与官方 boot 屏同做法）。
  *   3. conversation.hero.brand.mark（size 34）——新建会话界面的空会话品牌标：
  *      官方动画鱼 fallback → 同款 Fenix 环结。不透传宿主 className（fish 类在
  *      hover 时对 mark 施加游动动画，不适用位图）。
@@ -151,38 +157,69 @@
 				})
 			}
 
-			/* 名称文字：复刻 dashboard 顶栏 HeaderTitle 排版（app.tsx）——
-			 * 「Fenix」16px/700/letterSpacing .3px + 「Harness」400/左距 6px/灰字。
-			 * 字体栈用 dsh 自身 --dsw-font-family（与 dashboard DSH_FONT_FAMILY 逐字
-			 * 一致）；灰字用 dsh 别名 --dsw-alias-label-tertiary（浅色 = antd
-			 * colorTextTertiary 同值 rgba(0,0,0,0.45)，暗色自动翻转）。
-			 * 官方 sidebar 名称容器自带 height:24px + letter-spacing:.04em + 居中，
-			 * 0.3px 字距须压过容器 .04em，故显式覆写 letterSpacing。 */
+			/* 名称：自绘 SVG lockup（概念稿 A·House Caps 紧凑版，2026-11-07 用户选定）。
+			 * 主行 FENIX HARNESS：12.5px/600/字距 1px 大写，HARNESS 500 灰；
+			 * 副标 THE AI-NATIVE SDLC（2026-11-10 改文）：9px/500/字距 2.2px，基线 y=30.5（视觉空隙 ≈7.2px，
+			 * 用户校准值）。两行 textLength 锁同宽 117.3px（lengthAdjust=spacing 均
+			 * 分字间空隙，2026-11-07 用户要求副标与主行等宽；主行实测自然宽即
+			 * 117.3px，锁定后字体回退时两行仍等宽）。颜色走 dsh 别名变量明暗自适应；
+			 * Montserrat 为页面全局 @font-face；SVG 定宽 124px + overflow visible
+			 * 兜字体回退时的轻微超宽。 */
 			var FenixName = function () {
 				return react.createElement(
 					'span',
 					{
 						className: 'fdxbrand-name',
-						style: {
-							fontFamily: 'var(--dsw-font-family, sans-serif)',
-							fontSize: '16px',
-							fontWeight: 700,
-							letterSpacing: '0.3px',
-							whiteSpace: 'nowrap',
-							lineHeight: '24px',
-						},
+						style: { display: 'inline-flex', alignItems: 'center' },
 					},
-					'Fenix',
 					react.createElement(
-						'span',
+						'svg',
 						{
-							style: {
-								fontWeight: 400,
-								marginLeft: '6px',
-								color: 'var(--dsw-alias-label-tertiary, rgba(0,0,0,0.45))',
-							},
+							width: 124,
+							height: 38,
+							viewBox: '0 0 124 38',
+							role: 'img',
+							ariaLabel: 'Fenix Harness — The AI-Native SDLC',
+							style: { display: 'block', overflow: 'visible' },
 						},
-						'Harness',
+						react.createElement(
+							'text',
+							{
+								x: 0,
+								y: 17,
+								textLength: 117.3,
+								lengthAdjust: 'spacing',
+								fontFamily: 'Montserrat, var(--dsw-font-family, sans-serif)',
+								fontSize: '12.5px',
+								fontWeight: 600,
+								letterSpacing: '1px',
+								fill: 'var(--dsw-alias-label-primary, #0f1115)',
+							},
+							'FENIX ',
+							react.createElement(
+								'tspan',
+								{
+									fontWeight: 500,
+									fill: 'var(--dsw-alias-label-secondary, #61666b)',
+								},
+								'HARNESS',
+							),
+						),
+						react.createElement(
+							'text',
+							{
+								x: 0,
+								y: 30.5,
+								textLength: 117.3,
+								lengthAdjust: 'spacing',
+								fontFamily: 'Montserrat, var(--dsw-font-family, sans-serif)',
+								fontSize: '9px',
+								fontWeight: 500,
+								letterSpacing: '2.2px',
+								fill: 'var(--dsw-alias-label-tertiary, #81858c)',
+							},
+							'THE AI-NATIVE SDLC',
+						),
 					),
 				)
 			}
