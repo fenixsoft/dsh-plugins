@@ -1,4 +1,6 @@
 /**
+ * @vitest-environment jsdom
+ *
  * client/jump 跳转测试（jsdom）：服务缝优先（openSession 参数原样透传=
  * 跨工作区语义、不被兜底干扰）、缝缺失/形态不符走侧栏 click 兜底（标题
  * 文本匹配）、跳转前先关弹窗（onClose 顺序）、兜底未命中 warn 不抛错。

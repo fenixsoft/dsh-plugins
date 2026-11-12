@@ -1,4 +1,6 @@
 /**
+ * @vitest-environment jsdom
+ *
  * client/searchDialog 弹窗测试（jsdom）：open 门控、空/空白禁提交、可选日期
  * （合法/非法）、Esc 与关闭按钮、提交流程（POST 载荷 trim + timeRange）、
  * 1s 轮询（阶段文案→终态）、结果列表（标题/工作区/时间/理由/置信度）、

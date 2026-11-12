@@ -92,7 +92,7 @@ export default class FenixSessionAdvancedSearch extends Service {
       runJob: (jobId) => this.runJob(jobId),
       log: { warn: (m) => this.logWarn(m) },
     }).dispose
-    this.logInfo(`${SERVICE_NAME}: 已注册 ${'/api/session-advanced-search'} 三端点（maxCandidates=${this.settings.maxCandidates}, topN=${this.settings.topN}, llmTimeoutMs=${this.settings.llmTimeoutMs}）`)
+    this.logInfo(`${SERVICE_NAME}: 已注册 /api/session-advanced-search 三端点（maxCandidates=${this.settings.maxCandidates}, topN=${this.settings.topN}, llmTimeoutMs=${this.settings.llmTimeoutMs}）`)
   }
 
   /** 必选缝存在性与形态校验（error 级显式停用路径）。 */

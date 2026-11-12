@@ -12,7 +12,7 @@ import type { WebRequest, WebResponse } from '../src/types/dsh-runtime.js'
 
 /** 最小事件发射器（data/end 记账）。 */
 class FakeReq implements WebRequest {
-  private readonly listeners = new Map<string, ((chunk: Buffer | string) => void)[]>()
+  private readonly listeners = new Map<string, ((chunk: Buffer | string | Error) => void)[]>()
   readonly headers: Record<string, string> = {}
   ended = false
 
@@ -21,7 +21,7 @@ class FakeReq implements WebRequest {
     readonly url: string,
   ) {}
 
-  on(event: 'data' | 'end', listener: (chunk: Buffer | string) => void): this {
+  on(event: 'data' | 'end' | 'error', listener: (chunk: Buffer | string | Error) => void): this {
     const list = this.listeners.get(event) ?? []
     list.push(listener)
     this.listeners.set(event, list)

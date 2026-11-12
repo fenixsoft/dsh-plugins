@@ -1,4 +1,6 @@
 /**
+ * @vitest-environment jsdom
+ *
  * client/index 装配测试（jsdom，端到端装配链）：注入按钮 → 点击开弹窗 →
  * 提交/轮询（stub 全局 fetch）→ 候选点击 jump（uiWorkspace 服务缝）+ 弹窗
  * 关闭 → 卸载清理对称（按钮移除 + React root 容器移除）；uiWorkspace 缺失

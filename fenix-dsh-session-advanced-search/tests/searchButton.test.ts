@@ -1,4 +1,6 @@
 /**
+ * @vitest-environment jsdom
+ *
  * client/searchButton 注入测试（jsdom）：注入成功位置（input 之后、
  * clearButton 左侧）、hover 提示（title）、失配降级（warn 限流不抛错）、
  * 官方重渲染移除后自动补插、卸载清理（observer 断开 + 按钮移除）。

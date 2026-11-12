@@ -9,11 +9,20 @@
  *   no-op，轮询端可见状态恒定。
  * - 不跨重启持久：弹窗内等待语义，重启丢任务可接受（client 轮询 404 即按
  *   error 收尾）。
+ * - 终态回收：client 轮询到终态即停（不 DELETE），终态任务（含 results）会
+ *   滞留表内——在写入/读取路径惰性回收超龄（TTL）终态任务并设容量上限，
+ *   常驻进程下任务表不无界增长（在途任务不受影响）。
  */
 import type { SearchCandidate, SearchJobStatus, SearchPhase, SearchRequest } from '../shared/protocol.js'
 
 /** 终态集合（状态机迁移门）。 */
 const TERMINAL_PHASES: readonly SearchPhase[] = ['done', 'error', 'cancelled']
+
+/** 终态任务滞留 TTL（ms）：超龄惰性回收，防常驻进程任务表无界增长。 */
+const TERMINAL_TTL_MS = 60 * 60 * 1000
+
+/** 终态任务容量上限：超限淘汰最老终态任务（在途任务不参与淘汰）。 */
+const MAX_TERMINAL_JOBS = 64
 
 /** 单条分析任务记录。 */
 export interface SearchJob {
@@ -25,6 +34,8 @@ export interface SearchJob {
   /** 取消通道（collector/analyzer 全程监听）。 */
   readonly controller: AbortController
   phase: SearchPhase
+  /** 终态打点时刻（epoch ms；写入终态时设置，回收据此判超龄）。 */
+  completedAt?: number
   results?: readonly SearchCandidate[]
   degraded?: boolean
   message?: string
@@ -53,6 +64,7 @@ export class JobTable {
    * @param request - 规范化后的搜索请求。
    */
   create(request: SearchRequest): SearchJob {
+    this.reclaimTerminalJobs()
     const job: SearchJob = {
       id: this.nextId(),
       request,
@@ -96,9 +108,11 @@ export class JobTable {
    * @returns true = 本次生效；false = 任务缺失或已终态。
    */
   complete(id: string, results: readonly SearchCandidate[], degraded: boolean): boolean {
+    this.reclaimTerminalJobs()
     const job = this.jobs.get(id)
     if (job === undefined || TERMINAL_PHASES.includes(job.phase)) return false
     job.phase = 'done'
+    job.completedAt = Date.now()
     job.results = results
     job.degraded = degraded
     return true
@@ -109,9 +123,11 @@ export class JobTable {
    * （例：DELETE 先到 → cancelled 不被 error 覆盖）。
    */
   fail(id: string, message: string): boolean {
+    this.reclaimTerminalJobs()
     const job = this.jobs.get(id)
     if (job === undefined || TERMINAL_PHASES.includes(job.phase)) return false
     job.phase = 'error'
+    job.completedAt = Date.now()
     job.message = message
     return true
   }
@@ -125,12 +141,14 @@ export class JobTable {
     if (job === undefined) return 'missing'
     if (TERMINAL_PHASES.includes(job.phase)) return 'noop'
     job.phase = 'cancelled'
+    job.completedAt = Date.now()
     job.controller.abort()
     return 'cancelled'
   }
 
   /** 任务轮询快照（SearchJobStatus 载荷形状）。 */
   status(id: string): SearchJobStatus | undefined {
+    this.reclaimTerminalJobs()
     const job = this.jobs.get(id)
     if (job === undefined) return undefined
     return {
@@ -139,6 +157,26 @@ export class JobTable {
       results: job.results,
       degraded: job.degraded,
       message: job.message,
+    }
+  }
+
+  /**
+   * 惰性回收终态任务（写入/读取路径进入时调用）：清超龄（TTL）终态任务，
+   * 容量超限再淘汰最老终态任务；在途（非终态）任务一律不动。client 轮询到
+   * 终态即停（不 DELETE），无此回收则常驻进程任务表随搜索次数无界增长。
+   */
+  private reclaimTerminalJobs(now: number = Date.now()): void {
+    const terminal: { id: string; at: number }[] = []
+    for (const [id, job] of this.jobs) {
+      if (!TERMINAL_PHASES.includes(job.phase)) continue
+      const at = job.completedAt ?? job.createdAt
+      if (now - at >= TERMINAL_TTL_MS) this.jobs.delete(id)
+      else terminal.push({ id, at })
+    }
+    const overflow = terminal.length - MAX_TERMINAL_JOBS
+    if (overflow > 0) {
+      terminal.sort((a, b) => a.at - b.at)
+      for (const entry of terminal.slice(0, overflow)) this.jobs.delete(entry.id)
     }
   }
 

@@ -215,7 +215,7 @@ export function normalizeLoginError(rawError) {
  * 渲染登录页（design D7：单文件 HTML，无外部资源、无模板引擎；静态渲染，
  * 禁 CSS animation/transition；页面不含 token/凭据/哈希，错误文案仅来自
  * 白名单并经 escapeHtml）。
- * @param errorCode - '' | 'invalid' | 'locked' | 'unconfigured'。
+ * @param errorCode - '' | 'invalid' | 'locked' | 'unconfigured' | 'untrusted'。
  */
 export function renderLoginPage(errorCode = '') {
 	const code = normalizeLoginError(errorCode)

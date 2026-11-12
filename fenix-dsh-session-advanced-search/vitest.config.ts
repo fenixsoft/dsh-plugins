@@ -4,8 +4,8 @@ import { defineConfig } from 'vitest/config'
 // 双通道解析（对齐 fenix-dsh-session-grouper 先例）：
 // 1) @deepseek-ai/cordis → 最小桩：host/client 代码对它是构建期类型缝 + 运行时
 //    external；插件体测试用假 ctx 鸭子类型驱动，不依赖真实 cordis 生命周期。
-// 2) client 半测试（searchButton/dialog/jump）跑 jsdom 环境（environmentMatchGlobs
-//    按文件映射）；host 侧测试保持 node 环境。
+// 2) client 半测试（searchButton/dialog/jump/clientApp）跑 jsdom 环境（各测试
+//    文件头 `@vitest-environment jsdom` 指令按文件声明）；host 侧测试保持 node 环境。
 const dshInstallRoot =
   process.env.DSH_INSTALL_ROOT ??
   '/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai'
@@ -56,13 +56,6 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'node',
-    environmentMatchGlobs: [
-      // client 半 DOM 行为测试（注入/弹窗/跳转兜底/装配链）需要 jsdom。
-      ['tests/searchButton.test.ts', 'jsdom'],
-      ['tests/dialog.test.ts', 'jsdom'],
-      ['tests/jump.test.ts', 'jsdom'],
-      ['tests/clientApp.test.ts', 'jsdom'],
-    ],
     testTimeout: 30_000,
   },
 })

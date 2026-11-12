@@ -18,9 +18,6 @@ export const API_PREFIX = '/api/session-advanced-search'
 /** 发起分析任务端点。 */
 export const JOBS_PATH = `${API_PREFIX}/jobs`
 
-/** 单任务端点模板（`:id` 为 jobId）。 */
-export const JOB_PATH = `${API_PREFIX}/jobs`
-
 /** 任务阶段枚举（design D2）。collecting/filtering 为机械管线，analyzing 为 LLM 单调用。 */
 export type SearchPhase = 'collecting' | 'filtering' | 'analyzing' | 'done' | 'error' | 'cancelled'
 

@@ -116,9 +116,14 @@ async function loadEnrichment(deps: CollectorDeps, signal: AbortSignal): Promise
     const value = await controller.list({}, signal)
     const byId = new Map<string, { title: string; updatedAt: number }>()
     for (const item of value.items ?? []) {
+      // updatedAt 数值守卫（与 title 守卫同口径）：缝漂移返回非有限数值时
+      // 跳过该条，该会话回退 header-only（活动时间用 header.createdAt），
+      // 避免时间过滤比较失真与下游 toISOString() 对 Invalid Date 抛错。
+      const updatedAt: unknown = item.updatedAt
+      if (typeof updatedAt !== 'number' || !Number.isFinite(updatedAt)) continue
       byId.set(item.sessionId, {
         title: readProjectionTitle(item),
-        updatedAt: item.updatedAt,
+        updatedAt,
       })
     }
     return { byId }
@@ -217,6 +222,10 @@ async function readFirstUserMessage(
   try {
     const handle = await persistence.open(sessionId, 'read', { signal })
     try {
+      // 成本假设：handle.read() 为缝当前唯一形态（一次性全量载入事件流；
+      // 类型面 read(offset?, length?) 的偏移语义未钉死、返回仍是全量
+      // events 数组，故不走分页）。长会话事件流可达数 MB，串行读取
+      // maxCandidates 个候选的瞬时内存峰值与耗时在此接受。
       const { events } = await handle.read()
       const text = extractFirstUserText(events)
       return byteTruncate(text, EXCERPT_MAX_BYTES)

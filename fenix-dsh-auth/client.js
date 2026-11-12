@@ -70,9 +70,32 @@
 				return { margin: '12px 0 0', fontSize: 13, color: color }
 			}
 
+			/* fetch 超时兜底（毫秒）：服务挂起（重启窗口、代理 hang、半开连接）
+			 * 时请求可能长期不 settle，导致按钮永久 disabled / 状态行无限停留。 */
+			var FETCH_TIMEOUT_MS = 10000
+
+			/** 带超时的 fetch：AbortController + setTimeout，超时 abort（调用方
+			 * catch 收到 AbortError，按「请求超时」提示并复位 busy/loading）。 */
+			function fetchWithTimeout(url, options, timeoutMs) {
+				var controller = new AbortController()
+				var timer = setTimeout(function () {
+					controller.abort()
+				}, timeoutMs === undefined ? FETCH_TIMEOUT_MS : timeoutMs)
+				var init = options ? Object.assign({}, options) : {}
+				init.signal = controller.signal
+				return fetch(url, init).finally(function () {
+					clearTimeout(timer)
+				})
+			}
+
+			/** 识别超时 abort 抛出的 AbortError。 */
+			function isAbortError(err) {
+				return Boolean(err) && err.name === 'AbortError'
+			}
+
 			/** 读取凭据状态；非 2xx 返回 null（由调用方按错误提示）。 */
 			function fetchCredentials() {
-				return fetch('/auth/credentials', { method: 'GET' }).then(function (response) {
+				return fetchWithTimeout('/auth/credentials', { method: 'GET' }).then(function (response) {
 					if (!response.ok) return { response: response, data: null }
 					return response.json().then(function (data) {
 						return { response: response, data: data }
@@ -124,9 +147,9 @@
 							setMessage({ kind: 'error', text: '读取登录凭据失败（HTTP ' + result.response.status + '）' })
 							setLoading('ready')
 						}
-					}).catch(function () {
+					}).catch(function (err) {
 						if (cancelled) return
-						setMessage({ kind: 'error', text: '登录插件服务不可达（宿主半可能已降级）' })
+						setMessage({ kind: 'error', text: isAbortError(err) ? '读取登录凭据请求超时' : '登录插件服务不可达（宿主半可能已降级）' })
 						setLoading('ready')
 					})
 					return function () {
@@ -151,7 +174,7 @@
 					}
 					setBusy(true)
 					setMessage(null)
-					fetch('/auth/credentials', {
+					fetchWithTimeout('/auth/credentials', {
 						method: 'POST',
 						headers: { 'content-type': 'application/json' },
 						/* confirm 仅用于客户端一致性校验，不随请求体发送（服务端该
@@ -186,9 +209,9 @@
 						} else {
 							setMessage({ kind: 'error', text: '保存失败（HTTP ' + response.status + '）' })
 						}
-					}).catch(function () {
+					}).catch(function (err) {
 						if (unmountedRef.current) return
-						setMessage({ kind: 'error', text: '保存失败：服务不可达' })
+						setMessage({ kind: 'error', text: isAbortError(err) ? '保存失败：请求超时' : '保存失败：服务不可达' })
 					}).finally(function () {
 						if (unmountedRef.current) return
 						setBusy(false)
@@ -200,7 +223,7 @@
 					if (!window.confirm('确定移除账号密码？移除后 dsh web 将回退为仅 token 登录。')) return
 					setBusy(true)
 					setMessage(null)
-					fetch('/auth/credentials', { method: 'DELETE' }).then(function (response) {
+					fetchWithTimeout('/auth/credentials', { method: 'DELETE' }).then(function (response) {
 						if (unmountedRef.current) return
 						if (response.ok) {
 							setStatus({ configured: false, username: null })
@@ -212,9 +235,9 @@
 						} else {
 							setMessage({ kind: 'error', text: '移除失败（HTTP ' + response.status + '）' })
 						}
-					}).catch(function () {
+					}).catch(function (err) {
 						if (unmountedRef.current) return
-						setMessage({ kind: 'error', text: '移除失败：服务不可达' })
+						setMessage({ kind: 'error', text: isAbortError(err) ? '移除失败：请求超时' : '移除失败：服务不可达' })
 					}).finally(function () {
 						if (unmountedRef.current) return
 						setBusy(false)

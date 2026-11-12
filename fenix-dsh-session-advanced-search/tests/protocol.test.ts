@@ -8,7 +8,6 @@ import {
   isSearchCandidate,
   isSearchPhase,
   isValidTimeRange,
-  JOB_PATH,
   JOBS_PATH,
   parseJobStatus,
   parseSearchRequest,
@@ -20,7 +19,6 @@ describe('API 路径常量', () => {
   it('三端点都落在插件命名空间前缀下', () => {
     expect(API_PREFIX).toBe('/api/session-advanced-search')
     expect(JOBS_PATH).toBe('/api/session-advanced-search/jobs')
-    expect(JOB_PATH).toBe('/api/session-advanced-search/jobs')
   })
 })
 
