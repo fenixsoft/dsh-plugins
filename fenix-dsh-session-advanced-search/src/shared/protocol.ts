@@ -1,7 +1,7 @@
 /**
  * fenix-dsh-session-advanced-search 双半协议（shared 契约面）。
  *
- * client 半（弹窗）与 host 半（路由）经同源 HTTP API 通信（design D2）：
+ * client 半（内容区搜索视图）与 host 半（路由）经同源 HTTP API 通信（design D2）：
  *   POST /api/session-advanced-search/jobs        发起分析任务 → {jobId}
  *   GET  /api/session-advanced-search/jobs/:id    轮询 phase/results/degraded
  *   DELETE /api/session-advanced-search/jobs/:id  取消在途任务
@@ -57,6 +57,25 @@ export interface SearchCandidate {
   readonly degraded?: boolean
 }
 
+/** 降级原因分类（LLM 排序回退机械评分时的机器可读根因；optimize-session-advanced-search 起贯通）。 */
+export type SearchDegradedReason = 'llm-missing' | 'credential-missing' | 'timeout' | 'call-failed' | 'parse-failed'
+
+/** 全部合法降级原因（守卫白名单）。 */
+export const SEARCH_DEGRADED_REASONS: readonly SearchDegradedReason[] = ['llm-missing', 'credential-missing', 'timeout', 'call-failed', 'parse-failed'] as const
+
+/** 单条分析过程步骤（host 推进点写入；client 步骤流按序渲染）。 */
+export interface SearchProgressStep {
+  /** 步骤键（管线推进点标识：collecting/filtering/analyzing/done）。 */
+  readonly step: string
+  /** 步骤明细（关键词/候选数变化/provider·model/置信度摘要等；可省）。 */
+  readonly detail?: string
+  /** 写入时刻（epoch ms；client 展示用，不参与排序）。 */
+  readonly at: number
+}
+
+/** host 侧单任务进度步骤有界保留条数（超出淘汰最旧；防长任务无界增长）。 */
+export const PROGRESS_MAX_STEPS = 50
+
 /** GET 任务轮询响应载荷。 */
 export interface SearchJobStatus {
   readonly jobId: string
@@ -64,6 +83,10 @@ export interface SearchJobStatus {
   /** 终态（done/error）时的结果；degraded=true 表示 LLM 排序回退为机械评分。 */
   readonly results?: readonly SearchCandidate[]
   readonly degraded?: boolean
+  /** degraded=true 时的原因分类（degradedReasonText 映射中文横幅）。 */
+  readonly degradedReason?: SearchDegradedReason
+  /** 分析过程步骤流（可选字段，向后兼容；host 有界保留最近 50 条）。 */
+  readonly progress?: readonly SearchProgressStep[]
   /** error/cancelled 时的简短中文原因（展示层直接呈现）。 */
   readonly message?: string
 }
@@ -107,6 +130,21 @@ export function isSearchPhase(value: unknown): value is SearchPhase {
   return typeof value === 'string' && (SEARCH_PHASES as readonly string[]).includes(value)
 }
 
+/** 降级原因守卫（白名单枚举）。 */
+export function isSearchDegradedReason(value: unknown): value is SearchDegradedReason {
+  return typeof value === 'string' && (SEARCH_DEGRADED_REASONS as readonly string[]).includes(value)
+}
+
+/** 进度步骤守卫（step 非空串、at 有限数、detail 可选串）。 */
+export function isSearchProgressStep(value: unknown): value is SearchProgressStep {
+  if (value === null || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  if (typeof record.step !== 'string' || record.step.length === 0) return false
+  if (record.detail !== undefined && typeof record.detail !== 'string') return false
+  if (typeof record.at !== 'number' || !Number.isFinite(record.at)) return false
+  return true
+}
+
 /**
  * 校验轮询响应载荷（client 半消费前的形状守卫）。
  * @returns 合法时原值；非法时 undefined。
@@ -118,6 +156,11 @@ export function parseJobStatus(value: unknown): SearchJobStatus | undefined {
   if (!isSearchPhase(record.phase)) return undefined
   if (record.results !== undefined && !Array.isArray(record.results)) return undefined
   if (record.results !== undefined && !(record.results as unknown[]).every(isSearchCandidate)) return undefined
+  if (record.degradedReason !== undefined && !isSearchDegradedReason(record.degradedReason)) return undefined
+  if (record.progress !== undefined) {
+    if (!Array.isArray(record.progress)) return undefined
+    if (!(record.progress as unknown[]).every(isSearchProgressStep)) return undefined
+  }
   if (record.message !== undefined && typeof record.message !== 'string') return undefined
   return value as SearchJobStatus
 }
@@ -147,14 +190,28 @@ export const UI_TEXT = {
   queryPlaceholder: '描述你想找的会话内容，例如「上周调试登录超时的会话」',
   /** 提交按钮。 */
   submit: '开始搜索',
-  /** 进度阶段文案（phase → 文案）。 */
+  /** 进度阶段文案（phase → 文案；progress 缺失时的向后兼容提示）。 */
   phaseText: {
     collecting: '正在收集会话…',
     filtering: '正在预筛候选…',
-    analyzing: 'agent 分析中…',
+    analyzing: '调用 AI 语义分析…',
   } as Record<SearchPhase, string | undefined>,
   /** 降级标注。 */
   degradedBadge: 'LLM 分析不可用，已按机械匹配排序',
+  /** 降级原因 → 中文横幅文案（degradedReason 精确映射；缺项回退 degradedBadge）。 */
+  degradedReasonText: {
+    'llm-missing': 'LLM 分析服务不可用，已按机械匹配排序',
+    'credential-missing': '分析模型路由缺少凭证，已按机械匹配排序',
+    timeout: '分析超时，守卫已中断等待，已按机械匹配排序',
+    'call-failed': '模型调用失败，已按机械匹配排序',
+    'parse-failed': '分析输出解析失败，已按机械匹配排序',
+  } as Record<SearchDegradedReason, string>,
+  /** 凭证缺失横幅动作：前往模型设置配置凭证。 */
+  actionGoCredential: '前往模型设置配置凭证',
+  /** 凭证缺失横幅动作：仅重试 AI 分析（重新 POST 同 query）。 */
+  actionRetryAiOnly: '仅重试 AI 分析',
+  /** 凭证缺失横幅动作降级提示（设置导航缝不可用时的提示文案）。 */
+  credentialHint: '请在「设置 → 模型」为分析模型路由的 provider 配置凭证后重试',
   /** 空态文案。 */
   empty: '未找到匹配的会话',
   /** 任务失败文案前缀（message 拼接在其后）。 */
