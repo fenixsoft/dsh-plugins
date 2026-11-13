@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { byteTruncate, collectCandidates, extractFirstUserText, tokenize } from '../src/host/collector.js'
+import { byteTruncate, collectCandidates, extractFirstUserText, foldTitleFromEvents, TITLE_FOLD_MAX_SESSIONS, tokenize } from '../src/host/collector.js'
 import type { CollectorLog } from '../src/host/collector.js'
 import type { DshSessionController, DshSessionEvent, DshSessionHandle, DshSessionHeader, DshSessionPersistence, DshSessionSnapshot } from '../src/types/dsh-runtime.js'
 
@@ -21,6 +21,7 @@ class FakePersistence implements DshSessionPersistence {
   constructor(
     private readonly snapshots: readonly DshSessionSnapshot[],
     private readonly excerptById: ReadonlyMap<string, string>,
+    private readonly eventsById: ReadonlyMap<string, readonly DshSessionEvent[]> = new Map(),
   ) {}
 
   list(options?: { signal?: AbortSignal }): Promise<readonly DshSessionSnapshot[]> {
@@ -37,8 +38,9 @@ class FakePersistence implements DshSessionPersistence {
     this.calls.push({ method: 'open', args: [id, access, options] })
     if (access !== 'read') throw new Error(`fixture: write access must never happen (got ${access})`)
     const header: DshSessionHeader = { version: 1, id, createdAt: 0, isSeeded: false }
+    const custom = this.eventsById.get(id)
     const text = this.excerptById.get(id) ?? ''
-    const events = text.length > 0 ? [{ seq: 1, type: 'user/message', content: [{ type: 'text', text }] }] : []
+    const events = custom ?? (text.length > 0 ? [{ seq: 1, type: 'user/message', content: [{ type: 'text', text }] }] : [])
     return Promise.resolve({
       id,
       header,
@@ -357,5 +359,116 @@ describe('tokenize 与节选纯函数', () => {
       { seq: 2, type: 'user/message', content: [{ type: 'text', text: '第二条' }] },
     ]
     expect(extractFirstUserText(events)).toBe('第一条\n续行')
+  })
+
+  it('foldTitleFromEvents last-wins：取最后一条 session/title 的 data.title（镜像官方 foldSessionTitle）', () => {
+    expect(foldTitleFromEvents([
+      titleEvent(1, '旧标题'),
+      { seq: 2, type: 'user/message', content: [{ type: 'text', text: '正文' }] },
+      titleEvent(3, '新标题'),
+    ])).toBe('新标题')
+  })
+
+  it('foldTitleFromEvents 无 title 事件 / 缺 data / title 非字符串 → 空标题', () => {
+    expect(foldTitleFromEvents([])).toBe('')
+    expect(foldTitleFromEvents([{ seq: 1, type: 'user/message' }])).toBe('')
+    expect(foldTitleFromEvents([{ seq: 2, type: 'session/title' }])).toBe('')
+    expect(foldTitleFromEvents([{ seq: 3, type: 'session/title', data: { title: 42 } }])).toBe('')
+  })
+})
+
+/** 夹具 session/title 事件（镜像生产行形态：data 嵌套 title/messageSeqs/source）。 */
+function titleEvent(seq: number, title: string): DshSessionEvent {
+  return { seq, type: 'session/title', data: { title, messageSeqs: [seq - 1], source: { kind: 'fallback' } } }
+}
+
+describe('collectCandidates cold 会话 title 折叠回退（BUG-01 回归）', () => {
+  it('投影 title 空的 cold 会话经事件流折叠标题参与计分——双词命中且最近活跃者居首', async () => {
+    // 复刻 BUG-01 失败形态：controller.list 全 cold 行（projections undefined
+    // → 投影缓存无 title），实例自有空标题会话 createdAt 最新；修复前 title
+    // 恒空 → 全零分 → 纯 recency，空会话压过 F1。修复后 F1/F3 折叠出标题
+    // 各得 4 分（「登录」「修复」双词命中），同分取最近活跃 F1 居首。
+    const now = Date.now()
+    const day = 86_400_000
+    const f3Created = Date.parse('2020-01-01T00:00:00Z')
+    const persistence = new FakePersistence(
+      [
+        snapshot('f1', now - 2 * day, '/tmp/sas-ws-alpha'),
+        snapshot('f3', f3Created, '/tmp/sas-ws-alpha'),
+        snapshot('empty', now, '/root/fenix-server'),
+      ],
+      new Map(),
+      new Map<string, readonly DshSessionEvent[]>([
+        ['f1', [titleEvent(2, '修复登录页 500 报错'), { seq: 3, type: 'user/message', content: [{ type: 'text', text: '验证标记·甲' }] }]],
+        ['f3', [titleEvent(2, '修复登录 token 过期逻辑')]],
+        ['empty', []],
+      ]),
+    )
+    const controller: DshSessionController = {
+      list: () =>
+        Promise.resolve({
+          items: [
+            summary('f1', now - 2 * day),
+            summary('f3', f3Created),
+            summary('empty', now),
+          ],
+        }),
+    }
+    const log = makeLog()
+    const outcome = await collectCandidates(
+      { persistence, sessionController: controller, log },
+      { query: '登录 修复' },
+      30,
+      new AbortController().signal,
+    )
+    expect(outcome.candidates.map((row) => row.sessionId)).toEqual(['f1', 'f3', 'empty'])
+    expect(outcome.candidates[0]).toMatchObject({ sessionId: 'f1', title: '修复登录页 500 报错' })
+    // f1 的节选复用折叠阶段的读取（同会话至多 open 一次事件流）。
+    const f1Opens = persistence.calls.filter((call) => call.method === 'open' && call.args[0] === 'f1')
+    expect(f1Opens.length).toBe(1)
+    expect(outcome.candidates.find((row) => row.sessionId === 'f1')?.excerpt).toBe('验证标记·甲')
+  })
+
+  it('折叠读取失败 warn 隔离：title 保持空、不中断整轮', async () => {
+    const persistence = new FakePersistence([snapshot('bad', 200, '/w'), snapshot('good', 100, '/w')], new Map())
+    persistence.open = (id: string, access: 'read') => {
+      persistence.calls.push({ method: 'open', args: [id, access] })
+      if (id === 'bad') return Promise.reject(new Error('fold boom'))
+      return Promise.resolve({
+        id,
+        header: { version: 1, id, createdAt: 0, isSeeded: false },
+        access,
+        read: () =>
+          Promise.resolve({ events: [titleEvent(2, '可折叠标题'), { seq: 3, type: 'user/message', content: [{ type: 'text', text: '正文' }] }] as DshSessionEvent[] }),
+        close: () => Promise.resolve(),
+      })
+    }
+    const log = makeLog()
+    const outcome = await collectCandidates({ persistence, log }, { query: '可折叠' }, 30, new AbortController().signal)
+    const byId = new Map(outcome.candidates.map((row) => [row.sessionId, row]))
+    expect(byId.get('bad')?.title).toBe('')
+    expect(byId.get('good')?.title).toBe('可折叠标题')
+    // good 折叠出标题命中查询词 → 居首；bad 保持空标题仍以 header 路径在场。
+    expect(outcome.candidates[0]?.sessionId).toBe('good')
+    expect(log.warns.some((m) => m.includes('bad') && m.includes('折叠读取失败'))).toBe(true)
+  })
+
+  it(`折叠读取达上限 ${TITLE_FOLD_MAX_SESSIONS}：最近活跃优先，超限更早会话不读`, async () => {
+    const total = TITLE_FOLD_MAX_SESSIONS + 5
+    const snapshots = Array.from({ length: total }, (_, i) => snapshot(`s-${String(i).padStart(3, '0')}`, 1_000 + i, '/w'))
+    const persistence = new FakePersistence(snapshots, new Map())
+    const log = makeLog()
+    // maxCandidates=30：截断集（全零分 → 最近活跃前 30）全部落在折叠缓存内，
+    // 节选阶段零新读取 → open 总数恰为折叠上限。
+    const outcome = await collectCandidates({ persistence, log }, { query: '无命中词' }, 30, new AbortController().signal)
+    expect(outcome.candidates.length).toBe(30)
+    const opened = new Set(persistence.calls.filter((call) => call.method === 'open').map((call) => call.args[0]))
+    expect(opened.size).toBe(TITLE_FOLD_MAX_SESSIONS)
+    // 最近活跃（createdAt 最大）者优先折叠；最老 5 个（createdAt 最小，
+    // 数组前 5 个）不在读取集。
+    for (const id of snapshots.slice(0, 5).map((row) => row.header.id)) {
+      expect(opened.has(id)).toBe(false)
+    }
+    expect(log.debugs.some((m) => m.includes('cold title 折叠达上限'))).toBe(true)
   })
 })
