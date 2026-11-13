@@ -203,7 +203,7 @@ describe('JobTable GET 载荷新字段（optimize 轮 2.5）', () => {
     const jobs = new JobTable(seqIds())
     const job = jobs.create(REQUEST)
     jobs.appendProgress(job.id, 'collecting', '关键词：登录')
-    const first = jobs.status(job.id)?.progress ?? []
+    const first = [...(jobs.status(job.id)?.progress ?? [])]
     first.push({ step: 'hacked', at: 0 })
     const second = jobs.status(job.id)?.progress ?? []
     expect(second).toHaveLength(1)

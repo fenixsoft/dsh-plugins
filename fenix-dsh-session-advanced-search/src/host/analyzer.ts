@@ -120,7 +120,6 @@ export async function rankCandidates(
   //   cancelPromise  外部取消（任务 DELETE）→ resolve 哨兵（优先于超时，不降级）
   const deadline = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
-  let onOuterAbort: (() => void) | undefined
   const timeoutPromise = new Promise<never>((_, reject) => {
     const onDeadlineAbort = () => reject(new TimeoutMarker())
     if (deadline.signal.aborted) {
@@ -132,13 +131,15 @@ export async function rankCandidates(
   // 超时 marker 的拒绝吸收为哨兵：race 以值结算（胜者判定集中在 race 之后），
   // 败者的迟到 reject 也被本 catch 消费，无 unhandled rejection。
   const timeoutSentinel = timeoutPromise.catch(() => 'timeout' as const)
+  let resolveCancel: (() => void) | undefined
+  // 外部取消：置取消哨兵并同步 abort deadline（真实流据此停止底层 HTTP
+  // 调用；挂起 stub 不观察也无妨——取消哨兵已让 race 立即结算）。
+  const onOuterAbort = (): void => {
+    deadline.abort()
+    resolveCancel?.()
+  }
   const cancelPromise = new Promise<'cancelled'>((resolve) => {
-    // 外部取消：置取消哨兵并同步 abort deadline（真实流据此停止底层 HTTP
-    // 调用；挂起 stub 不观察也无妨——取消哨兵已让 race 立即结算）。
-    onOuterAbort = () => {
-      deadline.abort()
-      resolve('cancelled')
-    }
+    resolveCancel = () => resolve('cancelled')
     if (signal.aborted) resolve('cancelled')
   })
   timer = setTimeout(() => deadline.abort(), Math.max(1, deps.timeoutMs))
@@ -160,7 +161,7 @@ export async function rankCandidates(
     settled = await Promise.race([streamPromise.then((raw) => ({ raw })), timeoutSentinel, cancelPromise])
   } finally {
     if (timer !== undefined) clearTimeout(timer)
-    if (onOuterAbort !== undefined) signal.removeEventListener('abort', onOuterAbort)
+    signal.removeEventListener('abort', onOuterAbort)
   }
 
   // 外部取消优先（不降级不产出——取消语义由任务层收尾）；超时次之
