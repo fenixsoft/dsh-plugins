@@ -540,6 +540,7 @@
   - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
   - 建议：计数器区分「产出判定的实派」与「中断/跳过实派」，后者不计入重跑上限；或中断轮随补派合并计数；冻结告警附双口径（判定数/实派数，_judge_real_dispatches 已在盘）。
 - **[arbiter:add-sess] verify-web-bridge 壳层首启引导 ack 预注入**
+  - 自进化：问题部分成立 / 建议部分合理 / — 不需要
   - 影响：本 spec 及一切以 web 真机为验收面的后续 spec：每轮验证引擎新上下文确定性复现首启引导 → 入口场景 env fail + 依赖传播整面 blocked（本轮 7/22），验证指纹与逐轮失败面被环境噪声污染、verify/judge 轮次空烧；该面无法以单测或 mock 替代（spec 铁律禁 mock 交付物），不修则此类 spec 的 web 验收永不收敛。
   - 证据：本轮终裁报告（verification-report.md@2026-11-13T01:50:33Z）断言级豁免清单：sas-web-entry-injection env fail 归因「官方壳层首启引导 Dialog 拦截点击，ack 为浏览器会话侧 cookie，每次握手新铸，引擎新上下文每轮复现引导属确定性环境态，持久修复在 harness 层预注 ack」；fail_history.json 轮 3/4/5 web 面 7 场景同面受阻（entry-injection fail + 6 场景依赖传播 blocked）；judge r9→r10 场景层关闭步已被证伪并在场景注记终局裁定「不以硬编码关闭步制造假失败，遮罩拦截显性失败交裁决处置」；.fenix/verify-web-bridge.sh:12「profile 跨 prepare/serve 持久存续」前提对验证引擎新开浏览器上下文不成立。；触发 run_id=arbiter-add-session-advanced-search-1794534633（签名 add-session-advanced-search::verify_repeat_failure，来源 chain-handoff:verify-repeat-failure）
   - 调查评估：触发信号 verify_repeat_failure（spec=add-session-advanced-search）：'add-session-advanced-search' 连续 2 轮同失败签名（早期介入路由），Arbiter 早期调查介入。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
@@ -549,6 +550,7 @@
 
 ### 浪费
 - **单 spec token 预算烧至 99.9%，近满无熔断**
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
   - 影响：add-session-advanced-search（会话高级搜索 SPEC）全程累计消耗 input token 99,914,746，达 100M 预算的 99.9%，输出另计约 125 万；对照同域后继的 optimize-session-advanced-search（优化轮）全流程仅耗 27.2M、judge 实派 2 次，同量级工作的循环空烧差额约 3.7 倍。
   - 证据：STATE.md 该 spec 字段 _tokens_in=99,914,746、_judge_real_dispatches=20、total_duration=38889 秒（我读核实）；告警 a70edecf42b2（token_budget 80% 预算提醒，01:50Z）自述 81.86M/82% 且「本告警不自动冻结 spec」（我读 admin_alerts.json 核实）；对照条目 optimize-session-advanced-search _tokens_in=27,233,689、_judge_real_dispatches=2（同一 STATE.md 核实）；数据摘要第 6 节 6 个离群 run 中 5 个属该 spec 家族（admin 208/104 turns、judge 119 turns 等）。
   - 调查评估：问题源是 add-session-advanced-search 的验证-修复循环（judge 重跑 6/5 触顶三度冻结、impl 修复三轮、20 次 judge 实派）。已核实：99.9M 是 20 次实派判定加多轮重验的合法叠加，但预算治理仅有一档 80% warning（告警明言不自动处置），95% 近满无升级档、无收敛模式，judge_rerun_cap（判定次数硬上限）只封次数不封 token。根因归属系统性缺口：预算面无断路，与 judge 机制缺口相互独立。与存量工作关系：judge 计数口径（d8f7851）、冻结点后移（d787ecc）、infra 轮计入（20ba848）、修复缺真机探针（49f8f80）均已由 11-12/11-13 arbiter 条目立项，token 预算阶梯未被任何既有条目覆盖，属互补不重复。结论：99.9M 已成事实，复发敞口是下一个重型 spec 直接击穿 100M 预算且无任何熔断动作。
@@ -556,6 +558,7 @@
 
 ### 失误
 - **推送 refspec 失配第二日再烧 6 次重试，人工改名才收口**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：两个已完成 SPEC（add-dsh-ops-alert-badge、add-session-advanced-search）的发布推送窗口内 6 连败（各 3 次），触发 2 条 major push_failed 信号；add-dsh-ops-alert-badge 从合并入 main 到标记 pushed 滞留 5.1 小时、add-session-advanced-search 滞留 3.4 小时，最终靠人工把本地分支 master 改名 main 才打通。
   - 证据：fenixd.log 04:02:10Z/04:32:11Z/05:10:09Z（alert-badge）与 05:10:09Z/05:40:09Z/06:10:10Z（add-session）六条「Pushing main」全败，错误统一为「src refspec main does not match any」；reflog「2026-11-13 14:50:34 +0800: Branch: renamed refs/heads/master to refs/heads/main」（git reflog 核实）；两 spec STATE 于 07:05:01Z 转 pushed，其间无任何引擎「Main push succeeded」日志；推送成功通道旁证：10:40:16Z optimize-session-advanced-search 经引擎「Main push succeeded」。两条 push_failed 告警 61931b5ae41c（alert-badge 推送 3/3 耗尽，05:10Z）与 53087e07ae87（add-session 同因，06:10Z）在 admin store 至今 handled=false（我读核实）。
   - 调查评估：问题源是两个收工 spec 的发布推送步骤，属既有配置债的第二日延续。已核实事实链：origin 远端已在窗口前配置（错误形态已从 11-12 的「无推送目的地」变为「refspec 失配」），但本地分支仍名 master，与引擎硬编码的 git push origin main 结构性必败；06:50:34Z 人工改名后通道即通。收口三步（06:40:52-55Z 三条升级告警批量核销并清 error、06:50Z 改名、07:05:01Z 双 spec 标 pushed）fenixd.log 均无操作者留痕，处置者身份未核实。根因归属：一次性配置失误（分支命名 master 与推送 refspec main 失配）叠加框架预检缺位（系统性）。与存量工作关系：根因与预检建议已由 11-12 既有条目「4 个 done spec 续推全败，无远程推送必败循环」立项，本条是其第二日延续与收口核实，不重复立项；但该条目建议的「无 remote/无目标分支预检短路」与「补 pm.push.retry_backoff_seconds 配置」窗口内均未落地（06:10:10Z 仍有配置缺失回退告警）。结论：命名失误已人工修正，框架预检缺口仍在，且收口无留痕、两条告警未核销。
@@ -563,12 +566,14 @@
 
 ### 可改进
 - **升级告警等待期每分钟空转扫描约 403 次，无快照必空转**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：3 条升级告警在等待处置的整个生命周期内被裁决自动执行引擎（admin_auto_exec，每 60 秒扫描未核销告警并尝试按推荐自动处置）每分钟重复评估一轮，仅 11-13 一天产生 443 行「推荐不明确，跳过等人工」空转日志（窗口内约 403 行），最长一条（27ab42c2e601）评估 4.5 小时无一次可执行。
   - 证据：fenixd.log 11-13 当日「告警 27ab42c2e601 推荐不明确（告警无 choices 快照）」235 行、「告警 b802fddf48c4 推荐不明确（推荐文本对全部选项零正向提及）」168 行、「告警 c7b3568df695」同族 40 行（grep 计数核实，235+168+40=443）；27ab42c2e601（verify_repeat_failure 升级，02:07Z 创建）在 admin store 中无 choices 快照，b802fddf48c4（judge_rerun_cap 冻结升级，03:22Z）与 c7b3568df695（前日同签名冻结升级）分别于 06:40:52Z、00:39:13Z 才核销；核销后即出扫描面（06:40:09 后无新行）。
   - 调查评估：问题源是升级告警的自动执行扫描面。已核实：27ab42c2e601 创建时即无 choices 快照（可选项清单），结构上 100% 必空转；另两条推荐文本无法对齐到唯一选项，同样每轮重评；评估期间无退避、无静默，逐分钟打行。根因两层：创建侧允许无快照/歧义推荐的升级告警入库，扫描侧对连续空转的同一告警无退避机制。与存量工作关系：11-03 既有条目「升级告警条件消失后不核销」是消费闭环的核销侧形态，本条是扫描侧姊妹形态，互补不重复；spec/changes 活跃区无相关立项。结论：空转直接代价小（日志噪声与每分钟空扫），但「无快照告警必空转」是确定性缺陷，够格小改立项。
   - 建议：升级类告警入库强制附 choices 快照（缺快照时创建侧 fail-fast 或自动补推荐）；admin_auto_exec 对同一告警连续 N 次推荐不明确后指数退避（60 秒→15 分钟），并把逐分钟日志收敛为单行状态汇总。
 
 - **API 停滞单日累计约 101 分钟，判定车道墙钟无记账**
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
   - 影响：窗口内 21 个 run 的 API 停滞（单次往返超 60 秒的等待）合计约 6088 秒（约 101 分钟），其中 planner-judge（planner 判定车道）10 个 run 占约 50 分钟，最长单次停滞 332.9 秒；全部 run 最终成功，代价是判定与出题车道墙钟被外因延迟拉长，现有机制只做单 run 分级、无累计视角。
   - 证据：数据摘要第 6 节停滞聚合 21 条合计 6087.6 秒（逐行加总）；归档 run planner-judge-add-session-advanced-search-1794538139-a1 事件间隔回算最大 gap 332.908 秒，与聚合行 max=332.9s 一致（回源核实）；离群 run planner-plan-optimize-session-advanced-search-1794561267-a1 停滞 5 次合计 708.3 秒、最长 266.4 秒；停滞 run 的模型集中在 bigmodel.cn glm-5.3-flash。
   - 调查评估：问题源横跨判定/出题/处置车道，provider 集中于 bigmodel.cn，属上游网关延迟（外因）而非工程缺陷。已核实：停滞全部被编排层吸收（31/31 run 成功、0 超时、0 秒挂），框架已有 evo-api-stall-signal-grading（停滞信号分级机制）做单 run 粒度分级。根因归属：外因主导，缺口在机制面——无车道级日累计阈值告警，run 墙钟预算不区分停滞等待与有效工作。与存量工作关系：10-16 既有条目「上游限流与瞬断风暴」覆盖失败与全局熔断形态，本条覆盖成功 run 内的隐性墙钟税，互补不重复；无既有立项。结论：judge 车道日均 50 分钟的判定延迟会直接拉长验证收敛周期，值得轻量记账机制而非重试改造。
