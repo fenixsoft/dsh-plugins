@@ -97,6 +97,8 @@ function makeCtx(overrides: {
   sessionController?: unknown
   llm?: unknown
   agentDefaultModel?: unknown
+  /** ctx.credentials 可选缝桩（默认已配置凭证 → 凭证预检放行；omit 可移除）。 */
+  credentials?: unknown
   omit?: readonly string[]
 }): {
   ctx: import('@deepseek-ai/cordis').Context
@@ -119,6 +121,8 @@ function makeCtx(overrides: {
     sessionController: overrides.sessionController ?? { list: () => Promise.resolve({ items: [{ sessionId: 's1', updatedAt: 1, running: false, blank: false, projections: { values: { title: '标题' } } }] }) },
     llm: overrides.llm ?? stubLlm({ results: [{ id: 's1', reason: '命中', confidence: 0.9 }] }),
     agentDefaultModel: overrides.agentDefaultModel ?? { currentSelection: () => ({ provider: 'p', model: 'm' }) },
+    // 凭证预检（design D2）：默认桩按任意 ref 放行（凭据库已配置语义）。
+    credentials: overrides.credentials ?? { resolve: () => Promise.resolve({ value: 'sk-stub' }) },
     logger: {
       error: (...args: unknown[]) => logs.error.push(printf(args)),
       warn: (...args: unknown[]) => logs.warn.push(printf(args)),
@@ -223,6 +227,18 @@ describe('装配：runJob 管线端到端', () => {
     expect(status.results?.[0]).toMatchObject({ sessionId: 's1', degraded: true })
   })
 
+  it('凭证缺失（凭据库 resolve 空值且 env 无配置）→ 快速失败降级 credential-missing（design D2）', async () => {
+    const { ctx, webServer, logs } = makeCtx({ credentials: { resolve: () => Promise.resolve({ value: '' }) } })
+    makePlugin(ctx, undefined)
+    const created = await webServer.post(JSON.stringify({ query: '标题' }))
+    const status = await pollViaRoute(webServer, created.jobId as string)
+    expect(status.phase).toBe('done')
+    expect(status.degraded).toBe(true)
+    expect(status.degradedReason).toBe('credential-missing')
+    // 预检快速失败：LLM 桩不该被调用（warn 分类日志可定位）。
+    expect(logs.warn.some((m) => m.includes('凭证缺失'))).toBe(true)
+  })
+
   it('BUG-01 回归：可选缝探测走 ctx.get——缝在场即增强（镜像桩属性访问抛错下 title 仍落地）', async () => {
     const { ctx, webServer, logs } = makeCtx({})
     // 镜像桩保真自检：未声明 inject 的服务键属性访问必须抛（cordis get 陷阱形态）。
@@ -261,7 +277,7 @@ describe('装配：runJob 管线端到端', () => {
 })
 
 /** 经 prefix 座位轮询至终态并返回最终 SearchJobStatus。 */
-async function pollViaRoute(webServer: StubWebServer, jobId: string, timeoutMs = 2000): Promise<{ phase: string; degraded?: boolean; message?: string; results?: { sessionId: string; reason: string; confidence: number; degraded?: boolean }[] }> {
+async function pollViaRoute(webServer: StubWebServer, jobId: string, timeoutMs = 2000): Promise<{ phase: string; degraded?: boolean; degradedReason?: string; message?: string; results?: { sessionId: string; reason: string; confidence: number; degraded?: boolean }[] }> {
   const seat = webServer.seats.get(`prefix:${JOBS_PATH}`)
   if (seat === undefined) throw new Error('prefix seat missing')
   const deadline = Date.now() + timeoutMs

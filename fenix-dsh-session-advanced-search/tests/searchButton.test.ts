@@ -156,3 +156,32 @@ describe('ANCHOR 签名导出', () => {
     expect(ANCHOR.inputSelector).toBe('input[class*="searchInput"]')
   })
 })
+
+describe('入口按钮官方图标几何（optimize 轮 3.3）', () => {
+  it('内联 SVG = 官方 IconSearchOutlineMedium：viewBox 0 0 16 16、stroke 1.3、无星标 fill 路径', async () => {
+    mountSearchBox(document)
+    const handle = injectSearchButton({ document, log: makeLog(), onClick: () => {} })
+    await flush()
+    const svg = document.querySelector('button.fenix-sas-entry svg')
+    expect(svg).not.toBeNull()
+    expect(svg?.getAttribute('viewBox')).toBe('0 0 16 16')
+    expect(svg?.getAttribute('stroke')).toBe('currentColor')
+    expect(svg?.getAttribute('stroke-width')).toBe('1.3')
+    // 无星标：不存在 fill=currentColor 的实心路径（旧星标图标形态）。
+    const starPaths = svg?.querySelectorAll('path[fill="currentColor"]') ?? []
+    expect(starPaths).toHaveLength(0)
+    handle.dispose()
+  })
+
+  it('按钮座 28×28 color inherit，无 opacity 降透明', async () => {
+    mountSearchBox(document)
+    const handle = injectSearchButton({ document, log: makeLog(), onClick: () => {} })
+    await flush()
+    const button = document.querySelector('button.fenix-sas-entry') as HTMLButtonElement
+    expect(button.style.width).toBe('28px')
+    expect(button.style.height).toBe('28px')
+    expect(button.style.color).toBe('inherit')
+    expect(button.style.cssText.includes('opacity')).toBe(false)
+    handle.dispose()
+  })
+})
