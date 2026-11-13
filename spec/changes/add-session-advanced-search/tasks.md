@@ -100,8 +100,8 @@
 
 ### 上轮实现结论（自动携带，来自上一轮 implementer 收工结论）
 
-验证修复（原地打回第 1 轮）完成：复核 verification-report 失败场景确认唯一真实产品 Bug BUG-01——src/host/routes.ts prefix 座位以 JOBS_PATH 加尾斜杠注册，违反 dsh-host-webserver match() 规则 pathname===prefix 或 startsWith(prefix 加斜杠)（exact 命中优先、最长前缀胜出；已读实机 /usr/lib/node_modules/@deepseek-ai/dsh 下 dsh-host-webserver/lib/index.js 实源坐实），深层路径 GET/DELETE jobs/:id 永落网关 404；场景断言与契约一致，零场景文件缺陷。产品修复：prefix 座位 path 去尾斜杠（与 exact 座位同 path 不冲突，exact 优先分发）并钉契约注释；tests/routes.test.ts 分发桩由宽松 startsWith 改为忠实镜像 match() 语义（该宽松桩正是 BUG-01 漏网缺口），新增「prefix 座位无尾斜杠」与「深层路径 404 出自 handler 而非分发兜底」两回归用例；tests/host.test.ts 三处座位键同步修正。重跑验证：tsc --noEmit 零错误、vitest 119/119 零跳过全绿（10 文件，较上轮 +2 回归用例）、tsdown 构建三产物成功且产物内 prefix 座位 path 核验无尾斜杠（真机实例加载形态）；live 场景链由框架验证链重跑，run 内未重复执行全量回归（add-impl-selfcheck-model-probe 3.1 默认）
+验证修复（原地打回第 1 轮·重修）完成：复核 verification-report（judge r3）失败场景确认唯一真实产品缺陷 BUG-01——src/host/index.ts safeSeam 以属性访问探测可选服务缝（sessionController/llm/agentDefaultModel），cordis get 陷阱对未声明 inject 的服务抛 cannot get property without inject（实机 cordis 4.1.0 实源 + loader 隔离语境实证），safeSeam 恒 undefined → collector 标题增强整体失效（title 恒空串、计分退化为纯最近活跃排序，F1 双词命中被壳层无标题会话压过）；场景断言与 spec 契约一致，零场景文件缺陷。产品修复：safeSeam 改走 ctx.get(name)（cordis ReflectService.get 免 inject 读取，缺失返回 undefined 不抛；官方 dsh-schedule 同缝消费姿势 + 安装版 4.0.5 运行时探针双重坐实），移除吞错 try/catch，契约钉入 JSDoc 与 dsh-runtime.d.ts Context 增补（cordis 主入口类型不导出该 augmentation）；tests/host.test.ts 桩忠实镜像 get 陷阱形态并新增 BUG-01 回归用例。重跑验证：tsc --noEmit 零错误、vitest 120/120 零跳过全绿（10 文件）、tsdown 三产物构建成功且产物内核验 ctx.get(key) 在场/属性访问形态绝迹/cordis 保持 external。6 个 blocked-env web 场景系依赖传播（跨轮裁决原样写回），随本修复复验解除；liv
 
-- [x] 先复核失败有效性：逐条核对 `spec/changes/add-session-advanced-search/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码（复核完成：degraded-fallback 断言与 spec 一致、属真实产品缺陷——safeSeam 属性访问探测被 cordis get 陷阱拦截恒 undefined（已读实机 cordis 4.1.0 与官方 dsh-schedule 消费姿势坐实）；6 个 blocked-env web 场景系依赖传播按跨轮裁决原样写回；sas-web-entry-injection 场景缺陷已由 judge r9 原地修复，零新增场景缺陷）
-- [x] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码（产品修复：safeSeam 改走 ctx.get 免 inject 读取（缺失 undefined 不抛，官方消费姿势），契约钉入 JSDoc 与 dsh-runtime.d.ts；tests/host.test.ts 桩忠实镜像 get 陷阱 + BUG-01 回归用例，commit f57e523）
-- [x] 修复后重跑验证确认通过（tsc --noEmit 零错误、vitest 120/120 零跳过全绿、tsdown 三产物构建成功且产物内 ctx.get(key) 在场/属性访问形态绝迹/cordis 保持 external、安装版 4.0.5 运行时探针确认 ctx.get 混入在场且缺失返回 undefined；live 场景链由框架验证链重跑）
+- [ ] 先复核失败有效性：逐条核对 `spec/changes/add-session-advanced-search/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码
+- [ ] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码
+- [ ] 修复后重跑验证确认通过
