@@ -87,13 +87,16 @@ const FIXED_GLYPHS: Record<FixedEntryId, readonly string[]> = {
 
 /**
  * 徽标圆几何（viewBox 24×24 坐标系钉值）：右上角落位，圆域
- * [cx±r, cy±r] = [12.75,23.75]×[0.25,11.25] 完全落于 viewBox 之内
+ * [cx±r, cy±r] = [12,24]×[0,12] 完全落于 viewBox 之内（闭边界包含）
  * （tests/opsBadge.test.ts 元素树断言钉值；svg 内绘制天然落在图标盒内，
  * 免疫宿主侧栏条目容器 overflow:hidden 裁剪——fenixd dashboard 侧栏徽标
  * 「绝对定位角标悬出文本盒被裁成红弧」同型缺陷的根因规避，spec 防裁剪条款）。
- * viewBox 坐标随 size 渲染尺寸等比缩放，窄态侧栏（仅显图标）同样完整。
+ * 圆径 12 单位覆盖 `99+` 三字符 em-box 全宽（真实浏览器度量，含系统字体
+ * advance），文字 em-box 亦全落于圆内/svg 内（r=5.5 档实测 99+ em 右缘溢出
+ * svg 0.09px 被边缘裁剪，本档位修复）。viewBox 坐标随 size 渲染尺寸等比
+ * 缩放，窄态侧栏（仅显图标）同样完整。
  */
-export const OPS_BADGE_CIRCLE = { cx: 18.25, cy: 5.75, r: 5.5 } as const
+export const OPS_BADGE_CIRCLE = { cx: 18, cy: 6, r: 6 } as const
 
 /** 徽标红底色钉值（红底白字角标，spec「徽标渲染与零值隐匿」）。 */
 export const OPS_BADGE_RED = '#e5484d'
@@ -109,11 +112,12 @@ export function opsBadgeLabel(count: number): string {
   return count > OPS_BADGE_MAX ? '99+' : String(count)
 }
 
-/** 徽标字号（viewBox 单位）：随字符数收缩，单字符大字、`99+` 三字符最小可读。 */
+/** 徽标字号（viewBox 单位）：随字符数收缩，单字符大字、`99+` 三字符最小
+ * 可读（4.8 档 em 宽 ≈11 单位 < 圆径 12，em-box 全落于圆内/svg 内）。 */
 function opsBadgeFontSize(label: string): number {
   if (label.length <= 1) return 8
   if (label.length === 2) return 6.2
-  return 5
+  return 4.8
 }
 
 /**

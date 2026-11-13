@@ -249,8 +249,8 @@ describe('防裁剪形态断言（spec 防裁剪条款：svg 内绘制，元素�
       expect(y).toBeGreaterThanOrEqual(0)
       expect(y).toBeLessThanOrEqual(24)
     }
-    // 几何钉值单源：常量表与元素树一致（右上角落位）。
-    expect(OPS_BADGE_CIRCLE).toEqual({ cx: 18.25, cy: 5.75, r: 5.5 })
+    // 几何钉值单源：常量表与元素树一致（右上角落位；圆径覆盖 99+ em-box）。
+    expect(OPS_BADGE_CIRCLE).toEqual({ cx: 18, cy: 6, r: 6 })
   })
 
   it('角标位于 svg（图标盒）内部：g 是 svg 直接子元素，无 svg 外定位 DOM', () => {
