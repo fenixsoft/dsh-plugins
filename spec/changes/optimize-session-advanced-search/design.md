@@ -34,7 +34,7 @@ raw = await Promise.race([
 
 - `AnalyzerDeps` 新增可选缝 `credentialProbe?: (provider: string) => boolean`（true=有凭证/未知）。`rankCandidates` 在发起调用前：`credentialProbe` 在位且返回 false → `mechanicalFallback('credential-missing')`，不发起调用。缝缺失（undefined）→ 跳过预检（D1 race 兜底）。
 - `AnalysisOutcome['degradedReason']` 扩充 `'credential-missing'`。
-- host 装配注入 `credentialProbe`：从 ctx.llm 侧 provider 配置读取该 provider 的 credential-ref（`apiKeyEnv`），校验 `process.env[apiKeyEnv]` 非空；读不到 provider 配置时返回 true（不误杀）。实现按 dsh 0.2.2-rc.1 实测缝自守（形状漂移 → 跳过预检 + warn 一次）。
+- host 装配注入 `credentialProbe`：从 provider 配置读取该 provider 的 credential-ref（`apiKeyEnv`），校验 `process.env[apiKeyEnv]` 非空；读不到 provider 配置时返回 true（不误杀）。实现按 dsh 0.2.2-rc.1 实测缝自守（形状漂移 → 跳过预检 + warn 一次）。**缝位置（评审核实）**：`apiKeyEnv` 配置面在 provider 插件 config（先例：`@deepseek-ai/dsh-llm-deepseek-api-key` 的 `config: { apiKeyEnv: DEEPSEEK_API_KEY }`，见 dsh-llm README），`ctx.llm` 服务面（`DshLlmRuntime`，插件 dsh-runtime.d.ts:211-213）仅暴露 `stream()`、不含 provider 配置——实现须经 provider 插件缝/宿主配置读取，读不到即按既定自守返回 true（预检失效由 D1 超时兜底）。
 - 插件配置（shared/config.schema.ts）新增可选 `analyzeRoute: { provider: string; model: string }`；`AnalyzerDeps.routeOverride` 装配透传，`resolveRoute` 优先级：`routeOverride` > `agentDefaultModel.currentSelection()`。用户可将分析路由指到有凭证 provider（如 deepseek）。
 - 降级横幅文案按原因分类映射（client，UI_TEXT.degradedReasonText）：`credential-missing` →「分析模型路由 <provider/model> 缺少凭据（环境变量 <apiKeyEnv> 未配置）」+ 动作「前往模型设置配置凭证」（`uiWorkspace`/设置导航缝，不可用时降级为提示文案）+「仅重试 AI 分析」（重新 POST 同 query）；`timeout` →「60s 超时守卫已中断等待」；其余沿用简短说明。
 

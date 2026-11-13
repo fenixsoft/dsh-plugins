@@ -31,6 +31,6 @@
 
 ## Impact
 
-- 插件 `fenix-dsh-session-advanced-search`：client 4 文件重排（searchDialog.tsx → searchView.tsx）、host 4 文件、shared 2 文件、tests 6 文件、README。
+- 插件 `fenix-dsh-session-advanced-search`：client 4 文件重排（searchDialog.tsx → searchView.tsx）、host 4 文件、shared 2 文件、tests 7 项（5 修改 + 1 删除 dialog.test.ts + 1 新增 view.test.ts）、README。
 - 不新增/删除 API 端点；GET 载荷为向后兼容扩展（新增可选字段 `degradedReason`、`progress`）。
 - 协议新增可选字段均有守卫与测试；老客户端忽略新字段不受影响。
