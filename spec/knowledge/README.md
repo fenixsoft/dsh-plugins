@@ -7,3 +7,4 @@
 | 域名 | 业务含义 |
 | --- | --- |
 | provider-import | 把外部载体（cc-switch）托管的 provider 清单导入 dsh web 的能力聚类 |
+| session-search | 在全部工作区的历史会话中按自然语言描述定位目标会话的能力聚类 |

@@ -1,5 +1,9 @@
 # 主树散件 WIP 处置口径（maintree_stray_wip_stale）
-> 最后更新：2026-11-12 13:51 UTC
+
+<!-- knowledge: capability=stray-wip-disposal rev=1 origin=prehistoric
+     sources=git:e570dc3-..2026-11-12 -->
+
+> 最后更新：2026-11-12 13:51 UTC+8
 > 来源：admin 处置轮 c97b6ddf8a51（2026-10-16 第 1 度）、298f844aee26（2026-11-12 第 2 度）、add1bdf366c0（2026-11-12 第 3 度）实证蒸馏；落地 evo-recurring-stray-remediation（框架域规则）在本项目的口径。
 
 ## 信号形态
