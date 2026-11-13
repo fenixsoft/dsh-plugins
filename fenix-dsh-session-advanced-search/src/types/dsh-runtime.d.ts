@@ -142,6 +142,12 @@ export interface DshSessionHandle {
 export interface DshSessionEvent {
   readonly seq: number
   readonly type: string
+  /**
+   * 存储 envelope 载荷：`handle.read()` 实际返回存储行形态
+   * `{type,seq,time,data,...}`，user/message 文本在 `data.content`、
+   * 标题在 `data.title`（真机 jsonl 后端实证）。
+   */
+  readonly data?: unknown
   readonly [key: string]: unknown
 }
 

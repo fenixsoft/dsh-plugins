@@ -353,11 +353,20 @@ async function readFirstUserMessage(
   }
 }
 
-/** 扫描事件流取首条 user/message 的 text 块拼接（防御未知形状）。 */
+/**
+ * 扫描事件流取首条 user/message 的 text 块拼接（防御未知形状）。
+ *
+ * 事件形态：`handle.read()` 返回存储 envelope（`{type,seq,time,data}`，
+ * 真机 jsonl 后端实证），user/message 文本块在 `data.content`；顶层
+ * `content` 仅作运行时形态的兼容回退（BUG-02 回归：只读顶层 content
+ * 时真机节选恒空）。
+ */
 export function extractFirstUserText(events: readonly { readonly type: string; readonly [key: string]: unknown }[]): string {
   for (const event of events) {
     if (event.type !== 'user/message') continue
-    const content = event.content
+    const data = event.data
+    const envelopeContent = data !== null && typeof data === 'object' ? (data as Record<string, unknown>).content : undefined
+    const content = Array.isArray(envelopeContent) ? envelopeContent : event.content
     if (!Array.isArray(content)) continue
     const parts: string[] = []
     for (const block of content) {
