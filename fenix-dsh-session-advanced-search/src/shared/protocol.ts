@@ -212,6 +212,8 @@ export const UI_TEXT = {
   actionRetryAiOnly: '仅重试 AI 分析',
   /** 凭证缺失横幅动作降级提示（设置导航缝不可用时的提示文案）。 */
   credentialHint: '请在「设置 → 模型」为分析模型路由的 provider 配置凭证后重试',
+  /** 分析面板中断按钮（DELETE 在途任务 + 回初始态）。 */
+  actionInterrupt: '中断',
   /** 空态文案。 */
   empty: '未找到匹配的会话',
   /** 任务失败文案前缀（message 拼接在其后）。 */
