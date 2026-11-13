@@ -112,6 +112,33 @@ case "$cmd" in
     - id: fenix-dsh-dashboard-bridge
       name: fenix-dsh-dashboard-bridge
 PATCH
+    # 3b) open-in-app vscode 桌面集成夹具（admin 2026-11-13，spec=add-session-
+    #     advanced-search 验证环境阻塞根治）：官方 host 插件 open-in-app 的 vscode
+    #     目录项在 Linux 为 desktopSpec("code", cli("code"))，宿主 /root/.local/
+    #     bin/code 在 PATH → 会话视图渲染 IDE 图标并请求 /open-in-app/icon/
+    #     vscode；而官方 Linux 图标提取沿 desktopId 找 <XDG_DATA>/applications/
+    #     code.desktop 的 Icon= 再查 hicolor/pixmaps，宿主无该 desktop entry →
+    #     官方按设计答 404（dsh-host-open-in-app lib/index.js 注释自证 404=
+    #     generic glyph 兜底）→ Chromium console error → 两跳转场景 no_console_
+    #     error 断言必败（判 env 豁免 → 框架硬门拒绝 verified）。真实桌面会话
+    #     才有的 vscode 桌面集成文件在此以隔离 XDG 夹具补齐：XDG_DATA_HOME 指
+    #     $XDG（见 serve 分支），code.desktop 的 Icon=code 命中 hicolor PNG →
+    #     图标路由 200 image/png，no_console_error 真过、无需豁免。PNG 为确定性
+    #     生成物（48x48 纯色，非官方美术资产——断言只管无 console error）。
+    XDG="$VHOME/xdg-share"
+    mkdir -p "$XDG/applications" "$XDG/icons/hicolor/128x128/apps"
+    cat > "$XDG/applications/code.desktop" <<'DESKTOP'
+[Desktop Entry]
+Name=Visual Studio Code
+Comment=Code Editing. Redefined
+Exec=code %F
+Icon=code
+Type=Application
+Categories=Development;IDE;
+DESKTOP
+    base64 -d > "$XDG/icons/hicolor/128x128/apps/code.png" <<'PNG'
+iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAOklEQVR42u3OQQ0AAAgEoEtiPHMazRbOBxsBSPW8EiEhISEhISEhISEhISEhISEhISEhISEhISGhOwvb9mSmAL3aBgAAAABJRU5ErkJggg==
+PNG
     # 4) 装配自检：组合树必须含两插件条目，否则 fail-fast（不带病启动）
     TREE="$(DSH_HOME="$VHOME" dsh --profile web --dump-config 2>/dev/null)"
     if ! grep -q "id: fenix-dsh-dashboard-bridge" <<<"$TREE"; then
@@ -129,6 +156,14 @@ PATCH
       echo "[verify-web-bridge] 装配自检失败：引导态预注未并入组合树（welcomeNoticeVersion/credentialOnboarding 缺失）" >&2
       exit 1
     fi
+    # 4c) open-in-app 图标夹具自检（admin 2026-11-13）：desktop entry 与 PNG 均
+    #     在场且 PNG 魔数合法，否则图标路由 404 → no_console_error 断言必败
+    XDG="$VHOME/xdg-share"
+    if ! grep -q "^Icon=code$" "$XDG/applications/code.desktop" 2>/dev/null \
+       || [ "$(head -c 4 "$XDG/icons/hicolor/128x128/apps/code.png" 2>/dev/null)" != $'\x89PNG' ]; then
+      echo "[verify-web-bridge] 装配自检失败：open-in-app vscode 图标夹具缺失/损坏（$XDG）" >&2
+      exit 1
+    fi
     echo "[verify-web-bridge] prepare ok: 隔离 profile 双插件装配就绪（$VHOME）"
     ;;
   serve)
@@ -143,6 +178,13 @@ PATCH
     if ! grep -q "fenix-dsh-dashboard-bridge" "$VHOME/profiles/web/cordis.patch.yml" 2>/dev/null \
        || [ ! -e "$VHOME/profiles/web/node_modules/fenix-dsh-session-advanced-search" ]; then
       echo "[verify-web-bridge] 隔离 profile 未装配（先执行 $0 prepare）" >&2
+      exit 1
+    fi
+    # open-in-app 图标夹具在场守卫（同上 fail-fast 哲学）：缺失即上游图标路由
+    # 404 → web 场景 no_console_error 断言必败（admin 2026-11-13 根治项）
+    if [ ! -f "$VHOME/xdg-share/applications/code.desktop" ] \
+       || [ ! -f "$VHOME/xdg-share/icons/hicolor/128x128/apps/code.png" ]; then
+      echo "[verify-web-bridge] open-in-app 图标夹具缺失（先执行 $0 prepare）" >&2
       exit 1
     fi
     # ---------------------------------------------------------------------------
@@ -188,7 +230,11 @@ PATCH
     UP_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
     WEB_LOG="$VHOME/web-boot.log"
     : > "$WEB_LOG"
-    env DSH_HOME="$VHOME" dsh --profile web --no-open --port "$UP_PORT" >"$WEB_LOG" 2>&1 &
+    # XDG_DATA_HOME 注入（admin 2026-11-13）：open-in-app 插件按 desktopData-
+    # Directories(home,env) 取 XDG 根，注入隔离夹具目录（user 级首目录被替换，
+    # XDG_DATA_DIRS 系统目录不动）→ code.desktop/图标可解析 → 图标路由 200，
+    # 消除会话视图 IDE 图标 404 console error（两跳转场景 no_console_error 根因）
+    env DSH_HOME="$VHOME" XDG_DATA_HOME="$VHOME/xdg-share" dsh --profile web --no-open --port "$UP_PORT" >"$WEB_LOG" 2>&1 &
     WEB_PID=$!
     TOKEN=""
     for _ in $(seq 1 120); do
