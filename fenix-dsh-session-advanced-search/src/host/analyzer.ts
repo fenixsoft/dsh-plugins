@@ -175,9 +175,11 @@ export async function rankCandidates(
   }
   const raw = settled.raw
 
-  // 严格 JSON 解析 + id 白名单过滤 + topN 截取；失败回退分类『解析失败』。
+  // 宽容 JSON 解析（对象/顶层数组/备选键名/数值形态容错）+ id 白名单锚定 + topN 截取；
+  // 零有效行回退分类『解析失败』并附原始输出片段（截断 200 字符）辅助诊断。
   const rows = parseLlmRanking(raw, new Set(candidates.map((row) => row.sessionId)))
   if (rows.length === 0) {
+    deps.log.warn(`session-advanced-search: LLM 输出解析失败（零有效排名行），原始输出片段：${raw.slice(0, 200)}`)
     return { ...mechanicalFallback(deps, candidates, 'parse-failed', 'LLM 输出解析失败（零有效排名行）'), route }
   }
   const byId = new Map(candidates.map((row) => [row.sessionId, row]))
@@ -311,49 +313,82 @@ export function buildUserPrompt(query: string, candidates: readonly PrefilteredS
 }
 
 /**
- * 严格解析 LLM 输出为排名行：接受整体 JSON 或文本中的首个 JSON 对象；
- * id 必须命中候选白名单，reason 为字符串，confidence 为 [0,1] 数值；
- * 非法行丢弃，产出顺序即 LLM 排名顺序。
+ * 宽容解析 LLM 输出为排名行：接受整体 JSON 对象（results/ranking/items/data
+ * 任一数组值）或文本中的首个 JSON 对象或顶层数组；id 必须命中候选白名单
+ * （身份锚，不宽容）；confidence 容错数值形态（字符串数值、百分制 0~100 归一、
+ * 缺省 0.5），reason 非字符串按空串保留行；行序即 LLM 排名顺序，全部无效行
+ * 返回空数组由调用方落 parse-failed。
  */
 export function parseLlmRanking(raw: string, knownIds: ReadonlySet<string>): readonly LlmRankRow[] {
-  const parsed = tryParseJsonObject(raw)
-  if (parsed === undefined) return []
-  const list = parsed['results']
-  if (!Array.isArray(list)) return []
-  const rows: LlmRankRow[] = []
+  const rows = parseRankRows(raw)
+  if (rows.length === 0) return []
+  const out: LlmRankRow[] = []
   const seen = new Set<string>()
-  for (const item of list) {
+  for (const item of rows) {
     if (item === null || typeof item !== 'object') continue
     const record = item as Record<string, unknown>
     const id = record['id']
-    const reason = record['reason']
-    const confidence = record['confidence']
     if (typeof id !== 'string' || !knownIds.has(id) || seen.has(id)) continue
-    if (typeof reason !== 'string') continue
-    if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) continue
+    const reason = typeof record['reason'] === 'string' ? record['reason'] : ''
+    out.push({ id, reason, confidence: normalizeConfidence(record['confidence']) })
     seen.add(id)
-    rows.push({ id, reason, confidence })
   }
-  return rows
+  return out
 }
 
-/** 从原始输出提取首个 JSON 对象（容忍 Markdown 围栏/前后缀文本）。 */
-function tryParseJsonObject(raw: string): Record<string, unknown> | undefined {
+/** confidence 容错归一到 [0,1]：数值夹取；整数 >1 且 ≤100 按百分制除 100（避免误伤 1.5 这类轻微越域）；字符串数值可解析则同规则；其余缺省 0.5。 */
+function normalizeConfidence(value: unknown): number {
+  let n = Number.NaN
+  if (typeof value === 'number' && Number.isFinite(value)) n = value
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (trimmed.length > 0) {
+      const parsed = Number(trimmed)
+      if (Number.isFinite(parsed)) n = parsed
+    }
+  }
+  if (Number.isNaN(n)) return 0.5
+  if (n > 1 && n <= 100 && Number.isInteger(n)) n = n / 100
+  if (n < 0) return 0
+  if (n > 1) return 1
+  return n
+}
+
+/** 从原始输出提取排名行数组：对象任一数组值（优先后缀 results）或首个顶层数组。 */
+function parseRankRows(raw: string): readonly unknown[] {
   const trimmed = raw.trim()
-  const direct = tryParse(trimmed)
-  if (direct !== undefined) return direct
-  const start = trimmed.indexOf('{')
-  const end = trimmed.lastIndexOf('}')
-  if (start < 0 || end <= start) return undefined
-  return tryParse(trimmed.slice(start, end + 1))
+  const value = tryParseJson(trimmed, '{', '}') ?? tryParseJson(trimmed, '[', ']')
+  if (value === undefined) return []
+  if (Array.isArray(value)) return value
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    for (const key of ['results', 'ranking', 'items', 'data']) {
+      const candidate = record[key]
+      if (Array.isArray(candidate)) return candidate
+    }
+    for (const candidate of Object.values(record)) {
+      if (Array.isArray(candidate)) return candidate
+    }
+  }
+  return []
 }
 
-/** JSON.parse 安全封装。 */
-function tryParse(text: string): Record<string, unknown> | undefined {
+/** 从原始输出提取首个 JSON 值（容忍 Markdown 围栏/前后缀文本；指定包裹字符；接受任意 JSON 值）。 */
+function tryParseJson(raw: string, open: string, close: string): unknown {
+  const trimmed = raw.trim()
+  let parsed = tryParseAny(trimmed)
+  if (parsed !== undefined) return parsed
+  const start = trimmed.indexOf(open)
+  const end = trimmed.lastIndexOf(close)
+  if (start < 0 || end <= start) return undefined
+  parsed = tryParseAny(trimmed.slice(start, end + 1))
+  return parsed
+}
+
+/** JSON.parse 安全封装（接受任意 JSON 值）。 */
+function tryParseAny(text: string): unknown {
   try {
-    const value: unknown = JSON.parse(text)
-    if (value !== null && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
-    return undefined
+    return JSON.parse(text) as unknown
   } catch {
     return undefined
   }

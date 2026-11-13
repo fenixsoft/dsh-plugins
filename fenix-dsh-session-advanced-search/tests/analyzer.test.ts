@@ -127,7 +127,7 @@ describe('rankCandidates 命中排序', () => {
     expect(outcome.results[0]?.confidence).toBe(0.5)
   })
 
-  it('未知 id / 坏 confidence 行被丢弃；同 id 后续合法行可入榜', async () => {
+  it('未知 id 行被丢弃；同 id 后续合法行可入榜；越域 confidence 归一', async () => {
     const llm = stubLlm(
       JSON.stringify({
         results: [
@@ -140,9 +140,10 @@ describe('rankCandidates 命中排序', () => {
     )
     const deps = { llm, agentDefaultModel: ROUTE, log: makeLog(), timeoutMs: 1000, topN: 5 }
     const outcome = await rankCandidates(deps, 'q', [row('s1', 1), row('s2', 0)], SIGNAL)
-    // ghost 不在候选集、s1(1.5) 越域 → 丢弃；s1(0.4) 与 s2(0.6) 依 LLM 顺序保留。
+    // ghost 不在候选集 → 丢弃；s1(1.5) 归一夹取 1 → 先入榜；s1 重复行跳过；s2(0.6) 保留。
     expect(outcome.results.map((row) => row.sessionId)).toEqual(['s1', 's2'])
-    expect(outcome.results[0]).toMatchObject({ confidence: 0.4, reason: 'retried' })
+    expect(outcome.results[0]).toMatchObject({ confidence: 1, reason: 'ok' })
+    expect(outcome.results[1]).toMatchObject({ confidence: 0.6, reason: 'good' })
   })
 
   it('topN 截断', async () => {
@@ -368,10 +369,47 @@ describe('parseLlmRanking 纯函数', () => {
     expect(parseLlmRanking(raw, new Set(['a']))).toHaveLength(1)
   })
 
-  it('results 非数组/整体非对象 → 空行', () => {
+  it('results 非数组且无备选数组/整体无 JSON → 空行', () => {
     expect(parseLlmRanking('{"results":"nope"}', new Set(['a']))).toEqual([])
-    expect(parseLlmRanking('[]', new Set(['a']))).toEqual([])
     expect(parseLlmRanking('', new Set(['a']))).toEqual([])
+    expect(parseLlmRanking('完全不是 JSON', new Set(['a']))).toEqual([])
+  })
+
+  it('顶层数组直接作为排名行', () => {
+    const rows = parseLlmRanking('[{"id":"a","reason":"r","confidence":0.7},{"id":"ghost"}]', new Set(['a']))
+    expect(rows).toEqual([{ id: 'a', reason: 'r', confidence: 0.7 }])
+  })
+
+  it('备选键名 results/ranking/items/data/任意数组值', () => {
+    const row = '{"id":"a","reason":"r","confidence":0.5}'
+    expect(parseLlmRanking(`{"ranking":[${row}]}`, new Set(['a']))).toHaveLength(1)
+    expect(parseLlmRanking(`{"items":[${row}]}`, new Set(['a']))).toHaveLength(1)
+    expect(parseLlmRanking(`{"data":[${row}]}`, new Set(['a']))).toHaveLength(1)
+    expect(parseLlmRanking(`{"other":[${row}]}`, new Set(['a']))).toHaveLength(1)
+  })
+
+  it('confidence 形态容错：字符串数值/百分制/缺省 0.5；reason 非字符串保留空串', () => {
+    const rows = parseLlmRanking(
+      '{"results":[{"id":"a","reason":"0.25 字符串","confidence":"0.25"},{"id":"b","reason":"百分制 85","confidence":85},{"id":"c"},{"id":"d","reason":123,"confidence":0.9}]}',
+      new Set(['a', 'b', 'c', 'd']),
+    )
+    expect(rows).toEqual([
+      { id: 'a', reason: '0.25 字符串', confidence: 0.25 },
+      { id: 'b', reason: '百分制 85', confidence: 0.85 },
+      { id: 'c', reason: '', confidence: 0.5 },
+      { id: 'd', reason: '', confidence: 0.9 },
+    ])
+  })
+
+  it('负值夹取 0、越上界夹取 1', () => {
+    const rows = parseLlmRanking(
+      '{"results":[{"id":"a","confidence":-3},{"id":"b","confidence":999}]}',
+      new Set(['a', 'b']),
+    )
+    expect(rows).toEqual([
+      { id: 'a', reason: '', confidence: 0 },
+      { id: 'b', reason: '', confidence: 1 },
+    ])
   })
 })
 
