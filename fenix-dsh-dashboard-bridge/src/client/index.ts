@@ -31,6 +31,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { buildPanelSrc, resolveBridgeConfig } from '../shared/config.js'
 import type { BridgeConfigInput } from '../shared/config.js'
+import { alertCountStore, fetchAlertCount, startAlertCountSync } from './alertCount.js'
+import type { AlertCountFetcher } from './alertCount.js'
 import { DashboardPanel, fixedIconComponent, installWorkspaceNav, projectGroupStore } from './panels.js'
 import type { FixedEntryId } from './panels.js'
 import { registerFileContextMenu } from './locate.js'
@@ -242,7 +244,9 @@ export function projectRouteFor(name: string): string {
 export interface ClientPluginOptions extends BridgeConfigInput {
   /** 项目列表拉取桩（缺省 fetch `<prefix>api/projects`）。 */
   readonly fetchProjects?: ProjectListFetcher
-  /** 轮询周期（缺省 60s）。 */
+  /** 告警计数拉取桩（缺省 fetch `<prefix>api/alerts`，add-dsh-ops-alert-badge）。 */
+  readonly fetchAlertCount?: AlertCountFetcher
+  /** 轮询周期（缺省 60s；项目同步与告警计数同步共用）。 */
   readonly intervalMs?: number
   /** 计时/焦点钩子桩（缺省真实定时器 + window focus）。 */
   readonly timer?: SyncTimer
@@ -628,6 +632,77 @@ export function deepLinkPanels(ctx: Context): () => void {
 }
 
 /**
+ * 运维条目告警徽标装配（add-dsh-ops-alert-badge）：启动计数同步循环（60s +
+ * window focus，失败/超时保留现值），订阅 alertCountStore——计数变更时以
+ * priority -10 遮蔽重注册 fenix-activities 条目（reorderOfficialPanels 先例
+ * 形态：panellist 为 list 槽，同 id 更低 priority 胜出，旧注册被遮蔽而非
+ * 卸载，无闪断）。图标组件是无 hook 纯函数（不订阅 store），重注册是让宿主
+ * 重渲染图标、读入新快照的唯一触发面。
+ *
+ * 重注册纪律：
+ * - 有告警（count>0）：先 dispose 上一次遮蔽注册再注册（60s 轮询 + focus 下
+ *   计数会多次变更，不逐次 dispose 旧注册会致 slots 同 id entries 无界堆积；
+ *   尚无在册遮蔽注册则跳过 dispose）。
+ * - 零告警/尚无成功拉取（count≤0/null）：徽标隐匿——dispose 在册遮蔽注册
+ *   （若有）同样触发宿主重渲染，原注册图标重读快照同样无徽标；尚无在册则
+ *   零操作（boot 早期首轮拉取零告警时 slots 里不堆遮蔽条目）。
+ * - 注册抛错仅 console.warn 本轮放弃，不产生未处理异常（与
+ *   reorderOfficialPanels「恒定错误不重试」不同：计数是持续变化源，失败非
+ *   恒定，后续计数变更自然再试，MUST NOT 因一次失败永久禁用重注册）。
+ *
+ * @returns 停止函数：停计数同步、退订 store、dispose 在册遮蔽注册（幂等）。
+ */
+export function installOpsAlertBadge(
+  ctx: Context,
+  prefix: string,
+  options?: ClientPluginOptions,
+): () => void {
+  const entry = FIXED_ENTRIES.find((item) => item.id === 'fenix-activities')
+  if (entry === undefined) return () => {}
+  const icon = fixedIconComponent(entry.id)
+  let shadowDispose: (() => void) | undefined
+  let stopped = false
+
+  const reregister = (): void => {
+    if (stopped) return
+    const { count } = alertCountStore.getSnapshot()
+    // 先收上一次遮蔽注册（尚无在册则跳过 dispose）——两态路径共用，保证
+    // slots 同 id 遮蔽条目至多一条。
+    shadowDispose?.()
+    shadowDispose = undefined
+    if (count === null || count <= 0) return // 零告警隐匿：dispose 即触发重渲染
+    try {
+      shadowDispose = ctx.slots.register(
+        { name: 'sidebar.panellist', id: entry.id, order: entry.order, priority: -10, label: entry.label },
+        icon,
+      )
+    } catch (error) {
+      shadowDispose = undefined
+      console.warn(
+        `[fenix-dsh-dashboard-bridge] 运维徽标条目重注册失败（本轮放弃，计数变更时重试）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+  }
+
+  const unsubscribeStore = alertCountStore.subscribe(reregister)
+  const stopSync = startAlertCountSync({
+    fetchCount: options?.fetchAlertCount ?? (() => fetchAlertCount(prefix)),
+    intervalMs: options?.intervalMs,
+    timer: options?.timer,
+  })
+
+  return () => {
+    stopped = true
+    stopSync()
+    unsubscribeStore()
+    shadowDispose?.()
+    shadowDispose = undefined
+  }
+}
+
+/**
  * Client 插件体：注册固定条目与 main 面板，启动项目列表同步（含工作区自动
  * 对齐）与工作区行名称导航。slot 形状漂移（dsh 升级改名）时注册不生效、
  * 页面不崩（design Risks）。
@@ -692,6 +767,11 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     createWorkspace: createWorkspaceFrom(ctx),
   })
 
+  // 运维条目待裁决告警徽标（add-dsh-ops-alert-badge）：`GET <prefix>api/alerts`
+  // 60s + focus 轮询 → alertCountStore → 计数变更时 priority -10 遮蔽重注册
+  // fenix-activities 条目（徽标渲染于图标 svg 内，见 panels.tsx）。
+  const stopAlertBadge = installOpsAlertBadge(ctx, prefix, options)
+
   // 右侧边栏「Fenix 项目」页签（2026-11-11 用户需求 + m02220 语义纠正：
   // 「侧边栏」指对话界面右上角的面板列，非左侧菜单栏）：guide 菜单落项目
   // 总览，body iframe 承载 dashboard；服务缺席注册 no-op（rightTab.tsx）。
@@ -725,6 +805,7 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     stopDeepLink()
     stopBootSwitch()
     stopReorder()
+    stopAlertBadge()
     stopSync()
     sink.disposeAll()
   }
