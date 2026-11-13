@@ -276,6 +276,31 @@ describe('collectCandidates 首条用户消息节选', () => {
     expect(outcome.candidates[0]?.excerpt).toBe('')
   })
 
+  it('事件流为存储 envelope 形态（真机 read 形状）→ 节选取 data.content（BUG-02 回归）', async () => {
+    // 镜像真机 jsonl 后端 read 返回形态：payload 在 data 下（顶层无 content）。
+    const envelopeEvents: DshSessionEvent[] = [
+      { seq: 0, type: 'turn/start', data: { turn: 1 } },
+      {
+        seq: 1,
+        type: 'user/message',
+        data: { content: [{ type: 'text', text: '移动端登录按钮错位了。验证标记·乙' }], role: 'user', id: 'm-1' },
+        surfaceOp: 'append',
+      },
+    ]
+    const persistence = new FakePersistence(
+      [snapshot('s1', 1, '/tmp/sas-ws-beta')],
+      new Map(),
+      new Map([['s1', envelopeEvents]]),
+    )
+    const outcome = await collectCandidates(
+      { persistence, log: makeLog() },
+      { query: '登录' },
+      30,
+      new AbortController().signal,
+    )
+    expect(outcome.candidates[0]?.excerpt).toBe('移动端登录按钮错位了。验证标记·乙')
+  })
+
   it('单会话读取失败 warn 隔离，不中断整轮', async () => {
     // s1 更近活跃（同 0 分排序在前），读取失败仅其节选为空。
     const persistence = new FakePersistence([snapshot('s1', 50, '/w'), snapshot('s2', 40, '/w')], new Map([['s2', '正常节选']]))
@@ -359,6 +384,32 @@ describe('tokenize 与节选纯函数', () => {
       { seq: 2, type: 'user/message', content: [{ type: 'text', text: '第二条' }] },
     ]
     expect(extractFirstUserText(events)).toBe('第一条\n续行')
+  })
+
+  it('extractFirstUserText 读存储 envelope 形态（handle.read 实际返回 data.content；BUG-02 回归）', () => {
+    // 真机 jsonl 后端 read 返回存储行形态：payload 在 data 下；行级 surfaceOp 与
+    // data.role/id 为官方 v4 校验必需字段（真机 fail-closed 实证），此处全镜像。
+    const events: DshSessionEvent[] = [
+      { seq: 0, type: 'turn/start', data: { turn: 1 } },
+      {
+        seq: 1,
+        type: 'user/message',
+        data: {
+          content: [{ type: 'text', text: '帮我看下登录功能报 500 的错误。验证标记·甲' }],
+          source: { kind: 'user', rpcId: '00000000-0000-4000-8000-00000000dead' },
+          role: 'user',
+          id: '2161c98c-cc4a-49c7-add4-55305824f0f5',
+        },
+        surfaceOp: 'append',
+      },
+      { seq: 2, type: 'session/title', data: { title: '修复登录页 500 报错', messageSeqs: [1], source: { kind: 'fallback' } } },
+    ]
+    expect(extractFirstUserText(events)).toBe('帮我看下登录功能报 500 的错误。验证标记·甲')
+    // envelope data.content 与顶层 content 同在场时以 envelope 为准
+    expect(extractFirstUserText([{ seq: 1, type: 'user/message', data: { content: [{ type: 'text', text: '信封' }] }, content: [{ type: 'text', text: '顶层' }] }])).toBe('信封')
+    // data 非 object / content 非数组 → 回退顶层（缺省 undefined → 空节选）
+    expect(extractFirstUserText([{ seq: 1, type: 'user/message', data: 'corrupt' }])).toBe('')
+    expect(extractFirstUserText([{ seq: 1, type: 'user/message', data: { content: 'not-array' }, content: [{ type: 'text', text: '顶层回退' }] }])).toBe('顶层回退')
   })
 
   it('foldTitleFromEvents last-wins：取最后一条 session/title 的 data.title（镜像官方 foldSessionTitle）', () => {

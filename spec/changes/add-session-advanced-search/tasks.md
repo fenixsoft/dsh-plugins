@@ -102,6 +102,6 @@
 
 验证修复（原地打回第 2 轮）完成：复核 verification-report（judge r3）确认唯一真实产品缺陷 BUG-01 深层根因——sessionController.list 对 cold（未激活）会话只回投影缓存且永不折叠（官方 dsh-api-session-controller list.js projectionsFor 注释「a listing never seeds a fold」实源坐实），collector 仅消费投影 title → 无缓存行 title 恒空 → title+cwd 计分全零 → analyzer 机械回退保持 collector 序即纯 recency，实例自有空会话压过双词命中且应居首的 F1；场景断言与 spec.md:76-79/design D4 排序语义一致，零场景文件缺陷。产品修复：collector 新增 cold 会话 title 折叠回退——对时间过滤后仍无投影 title 的会话经 persistence.open(id,read) 只读事件流折叠最后一条 session/title 事件的 data.title（官方 dsh-session-title foldSessionTitle findLast last-wins 同语义，验证实例夹具行形态实源核对），最近活跃优先、上限 TITLE_FOLD_MAX_SESSIONS=200、单会话失败 warn 隔离，同会话事件流至多读一次（首条用户消息节选复用同次读取，open 计数用例钉死）；tests/collector.test.ts 桩支持自定义事件流并新增 5 个回归用例（BUG-01 复刻排序/last-wins/失败隔离/缓存复用/上限截断）；design.md D5「冷安全只读」侦察结论修正（cold 行 title 仅投影缓存行存在
 
-- [ ] 先复核失败有效性：逐条核对 `spec/changes/add-session-advanced-search/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码
-- [ ] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码
-- [ ] 修复后重跑验证确认通过
+- [x] 先复核失败有效性：逐条核对 `spec/changes/add-session-advanced-search/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码（第 3 轮复核结论：sas-live-degraded-fallback-results 断言与 spec.md:76-79/design D4 一致、非场景断言缺陷；真实根因为夹具行 schema 缺陷 + 产品节选 envelope 形态缺陷，官方 jsonl 后端在环复现坐实，证据 .fenix/verify-evidence/add-session-advanced-search/impl-repair-round3-evidence.md）
+- [x] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码（夹具 user/message 行补齐生产同款 surfaceOp/role/id/clientTimeZone——v4 fail-closed 两层实证；种子尾部新增官方读取器在环自校验根治 roundtrip 假绿类；产品 extractFirstUserText 改读存储 envelope data.content，commit 5d812c7）
+- [x] 修复后重跑验证确认通过（修复形态种子命令原样执行：FRAME_SHAPE_OK/FIXTURE_*_OK/READBACK_OK ×4 + SEED_ALL_OK exit 0；负路径旧形态夹具被在环自校验显性拦截 exit 1；真实后端 read 4 夹具 title 全部折叠命中；插件 vitest 127/127 全绿 + tsc 零错 + tsdown 构建通过）
