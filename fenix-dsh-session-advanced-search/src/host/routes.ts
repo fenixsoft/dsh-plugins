@@ -3,8 +3,13 @@
  *
  * 端点（`/api/session-advanced-search` 前缀避免与官方/其它插件路由冲突）：
  *   POST   /api/session-advanced-search/jobs        建任务，立即返回 {jobId}
- *   GET    /api/session-advanced-search/jobs/:id    轮询 {phase, results?, degraded?}
+ *   GET    /api/session-advanced-search/jobs/:id    轮询 {phase, results?, degraded?,
+ *                                                   degradedReason?, progress?}
  *   DELETE /api/session-advanced-search/jobs/:id    取消（幂等；未知 id 404）
+ *
+ * GET 轮询载荷为向后兼容扩展：`degradedReason`（降级原因分类）与 `progress`
+ * （过程步骤流，client 守卫 parseJobStatus 按形状校验后放行）均为可选字段，
+ * 老消费方忽略新字段不受影响。
  *
  * 注册形态：`POST 建任务` 走 exact 座位（无前缀冲突），`/:id` 两条动态路径共用
  * 一个 prefix 座位（auth 先例 + dsh-host-webserver kind 语义）。prefix 座位 path
