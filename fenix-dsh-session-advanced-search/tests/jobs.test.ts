@@ -131,3 +131,82 @@ describe('JobTable dispose', () => {
     expect(jobs.inFlightCount()).toBe(0)
   })
 })
+
+describe('JobTable progress 推进（optimize 轮 2.5）', () => {
+  it('appendProgress 追加步骤（at 打点、detail 可选），status 按序携带 progress', () => {
+    const jobs = new JobTable(seqIds())
+    const job = jobs.create(REQUEST)
+    jobs.appendProgress(job.id, 'collecting', '关键词：登录')
+    jobs.appendProgress(job.id, 'filtering', '候选 10→3')
+    jobs.appendProgress(job.id, 'analyzing') // 无 detail 合法
+    const progress = jobs.status(job.id)?.progress
+    expect(progress?.map((step) => step.step)).toEqual(['collecting', 'filtering', 'analyzing'])
+    expect(progress?.[0]).toMatchObject({ step: 'collecting', detail: '关键词：登录' })
+    expect(progress?.[2]).toEqual({ step: 'analyzing', at: expect.any(Number) })
+    expect(progress?.every((step) => Number.isFinite(step.at) && step.at > 0)).toBe(true)
+  })
+
+  it('有界保留最近 50 条（超限淘汰最旧）', () => {
+    const jobs = new JobTable(seqIds())
+    const job = jobs.create(REQUEST)
+    for (let i = 0; i < 55; i += 1) jobs.appendProgress(job.id, `step-${i}`)
+    const progress = jobs.status(job.id)?.progress ?? []
+    expect(progress).toHaveLength(50)
+    expect(progress[0]?.step).toBe('step-5')
+    expect(progress[49]?.step).toBe('step-54')
+  })
+
+  it('终态后 appendProgress no-op（轮询端可见状态恒定）', () => {
+    const jobs = new JobTable(seqIds())
+    const job = jobs.create(REQUEST)
+    jobs.appendProgress(job.id, 'collecting', '关键词：登录')
+    jobs.complete(job.id, RESULTS, false)
+    jobs.appendProgress(job.id, 'done', '迟到步骤')
+    const progress = jobs.status(job.id)?.progress ?? []
+    expect(progress).toHaveLength(1)
+    expect(progress[0]?.step).toBe('collecting')
+  })
+
+  it('未知 id appendProgress no-op 不抛', () => {
+    const jobs = new JobTable(seqIds())
+    expect(() => jobs.appendProgress('ghost', 'collecting')).not.toThrow()
+  })
+})
+
+describe('JobTable GET 载荷新字段（optimize 轮 2.5）', () => {
+  it('complete 带第四参 degradedReason → status 透传', () => {
+    const jobs = new JobTable(seqIds())
+    const job = jobs.create(REQUEST)
+    jobs.complete(job.id, RESULTS, true, 'credential-missing')
+    expect(jobs.status(job.id)).toMatchObject({ degraded: true, degradedReason: 'credential-missing' })
+  })
+
+  it('degraded=false 时不产出 degradedReason 键', () => {
+    const jobs = new JobTable(seqIds())
+    const job = jobs.create(REQUEST)
+    jobs.complete(job.id, RESULTS, false, 'timeout')
+    const status = jobs.status(job.id)
+    expect(status?.degraded).toBe(false)
+    expect(status?.degradedReason).toBeUndefined()
+    expect('degradedReason' in (status ?? {})).toBe(false)
+  })
+
+  it('progress 为空时 status 不含 progress 键（向后兼容可选字段）', () => {
+    const jobs = new JobTable(seqIds())
+    const job = jobs.create(REQUEST)
+    jobs.complete(job.id, RESULTS, false)
+    const status = jobs.status(job.id)
+    expect('progress' in (status ?? {})).toBe(false)
+  })
+
+  it('status 返回 progress 副本（外部改动不影响表内记录）', () => {
+    const jobs = new JobTable(seqIds())
+    const job = jobs.create(REQUEST)
+    jobs.appendProgress(job.id, 'collecting', '关键词：登录')
+    const first = jobs.status(job.id)?.progress ?? []
+    first.push({ step: 'hacked', at: 0 })
+    const second = jobs.status(job.id)?.progress ?? []
+    expect(second).toHaveLength(1)
+    expect(second[0]?.step).toBe('collecting')
+  })
+})
