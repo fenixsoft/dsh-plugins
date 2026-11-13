@@ -48,6 +48,7 @@ import type { CollectorLog, CollectStats, PrefilteredSession } from './collector
 import { rankCandidates, resolveRoute } from './analyzer.js'
 import type { AnalyzerLog, AnalyzerDeps, AnalyzerRoute, AnalysisOutcome } from './analyzer.js'
 import { registerSearchRoutes } from './routes.js'
+import { registerPageRoute, PAGE_ROUTE } from './page.js'
 import { UI_TEXT } from '../shared/protocol.js'
 
 /** 本插件注册为 cordis 服务的名字（诊断/日志定位用）。 */
@@ -92,6 +93,7 @@ export default class FenixSessionAdvancedSearch extends Service {
   private credentialShapeWarned = false
   /** 路由注销 disposer（stop 双保险：ctx.effect 与显式 stop 共用）。 */
   private routesDisposer: (() => void) | undefined
+  private pageRouteDisposer: (() => void) | undefined
   private stopped = false
 
   constructor(ctx: Context, config?: AdvancedSearchConfigInput | null) {
@@ -120,7 +122,9 @@ export default class FenixSessionAdvancedSearch extends Service {
       runJob: (jobId) => this.runJob(jobId),
       log: { warn: (m) => this.logWarn(m) },
     }).dispose
-    this.logInfo(`${SERVICE_NAME}: 已注册 /api/session-advanced-search 三端点（maxCandidates=${this.settings.maxCandidates}, topN=${this.settings.topN}, llmTimeoutMs=${this.settings.llmTimeoutMs}${this.settings.analyzeRoute !== undefined ? `, analyzeRoute=${this.settings.analyzeRoute.provider}/${this.settings.analyzeRoute.model}` : ''}）`)
+    // 独立高级搜索页（转向轮 m00937：不再注入会话界面，入口为本页 URL）。
+    this.pageRouteDisposer = registerPageRoute(this.webServer, { log: { warn: (m) => this.logWarn(m) } }).dispose
+    this.logInfo(`${SERVICE_NAME}: 已注册 /api/session-advanced-search 三端点与独立页 ${PAGE_ROUTE}（maxCandidates=${this.settings.maxCandidates}, topN=${this.settings.topN}, llmTimeoutMs=${this.settings.llmTimeoutMs}${this.settings.analyzeRoute !== undefined ? `, analyzeRoute=${this.settings.analyzeRoute.provider}/${this.settings.analyzeRoute.model}` : ''}）`)
   }
 
   /** 必选缝存在性与形态校验（error 级显式停用路径）。 */
@@ -142,6 +146,10 @@ export default class FenixSessionAdvancedSearch extends Service {
     if (this.routesDisposer !== undefined) {
       this.routesDisposer()
       this.routesDisposer = undefined
+    }
+    if (this.pageRouteDisposer !== undefined) {
+      this.pageRouteDisposer()
+      this.pageRouteDisposer = undefined
     }
     this.jobs.dispose()
   }

@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import FenixSessionAdvancedSearch from '../src/host/index.js'
+import { PAGE_ROUTE } from '../src/host/page.js'
 import { JOBS_PATH } from '../src/shared/protocol.js'
 import type { WebRequest, WebResponse } from '../src/types/dsh-runtime.js'
 
@@ -192,11 +193,11 @@ describe('装配：config 解析与缝校验', () => {
 })
 
 describe('装配：注册/卸载对称', () => {
-  it('正常装配注册两座位；effect 清理回调注销路由', () => {
+  it('正常装配注册三座位（页路由 + API 两座位）；effect 清理回调注销路由', () => {
     const { ctx, webServer, effects } = makeCtx({})
     makePlugin(ctx, undefined)
-    expect(webServer.registerCalls).toBe(2)
-    expect([...webServer.seats.keys()].sort()).toEqual([`exact:${JOBS_PATH}`, `prefix:${JOBS_PATH}`].sort())
+    expect(webServer.registerCalls).toBe(3)
+    expect([...webServer.seats.keys()].sort()).toEqual([`exact:${PAGE_ROUTE}`, `exact:${JOBS_PATH}`, `prefix:${JOBS_PATH}`].sort())
     for (const dispose of effects) dispose()
     expect(webServer.seats.size).toBe(0)
   })
