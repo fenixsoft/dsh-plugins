@@ -5,7 +5,8 @@
  * 注入按钮 → 点击在内容区开视图（侧栏相邻兄弟锚点命中）→ 提交/轮询（stub
  * 全局 fetch）→ 候选点击 jump（uiWorkspace 服务缝）+ 视图关闭 → 卸载清理对称
  * （按钮移除 + React root 容器移除）；锚点失配降级右侧抽屉（warn 限流一次）；
- * uiWorkspace 缺失装配不抛（warn 走兜底）。
+ * uiWorkspace 缺失装配不抛（warn 走兜底）；会话切换即收视图（selection 订阅
+ * 缝变化回调收视图 + 订阅对称解除；缝缺失走侧栏点击捕获兜底，非侧栏点击不误关）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/client/index.js'
@@ -13,7 +14,7 @@ import { UI_TEXT } from '../src/shared/protocol.js'
 import type { Context } from '@deepseek-ai/cordis'
 
 /** 搜索框锚点夹具（官方布局形态：侧栏面板与内容区为相邻兄弟）。 */
-function mountSidebarLayout(): { input: HTMLInputElement; content: HTMLDivElement } {
+function mountSidebarLayout(): { input: HTMLInputElement; content: HTMLDivElement; sidebar: HTMLDivElement } {
   const sidebar = document.createElement('div')
   sidebar.className = 'abc_sidebar'
   const content = document.createElement('div')
@@ -23,7 +24,7 @@ function mountSidebarLayout(): { input: HTMLInputElement; content: HTMLDivElemen
   input.type = 'text'
   sidebar.append(input)
   document.body.append(sidebar, content)
-  return { input, content }
+  return { input, content, sidebar }
 }
 
 /** uiWorkspace 在位的假 ctx。 */
@@ -33,6 +34,25 @@ function makeCtx(opened: string[]): Context {
       openSession: (target: string) => opened.push(target),
     },
   } as unknown as Context
+}
+
+/** 带 selection 快照店缝的假 ctx（会话切换即收视图主缝）。 */
+function makeCtxWithSelection(opened: string[]): { ctx: Context; fire: () => void; unsubscribed: () => boolean } {
+  let listener: (() => void) | undefined
+  const ctx = {
+    uiWorkspace: {
+      openSession: (target: string) => opened.push(target),
+      selection: {
+        subscribe: (fn: () => void) => {
+          listener = fn
+          return () => {
+            listener = undefined
+          }
+        },
+      },
+    },
+  } as unknown as Context
+  return { ctx, fire: () => listener?.(), unsubscribed: () => listener === undefined }
 }
 
 /** stub 全局 fetch：POST 建任务、GET 按脚本、DELETE 成功。 */
@@ -182,6 +202,53 @@ describe('client apply 挂载降级（optimize 轮 3.3）', () => {
     await flush()
     expect(warnSpy.mock.calls.filter((args) => String(args[0]).includes('降级右侧抽屉'))).toHaveLength(1)
     stop()
+    await flush()
+    warnSpy.mockRestore()
+  })
+})
+
+describe('client 会话切换即收视图（缺陷修复）', () => {
+  it('selection 订阅缝：视图开着时 selection 变化 → 视图收起还原会话视图', async () => {
+    mountSidebarLayout()
+    const { ctx, fire, unsubscribed } = makeCtxWithSelection([])
+    const stop = apply(ctx)
+    entryButton().click()
+    await flush()
+    expect(document.querySelector('[data-fenix-sas="view"]')).not.toBeNull()
+    // 会话切换（selection set）→ 视图收起。
+    fire()
+    await flush()
+    expect(document.querySelector('[data-fenix-sas="view"]')).toBeNull()
+    // 装配停止 → 订阅对称解除。
+    stop()
+    await flush()
+    expect(unsubscribed()).toBe(true)
+  })
+
+  it('selection 缝缺失 → 侧栏点击捕获兜底收视图；停止后监听解除', async () => {
+    const { sidebar } = mountSidebarLayout()
+    const stop = apply(makeCtx([]))
+    entryButton().click()
+    await flush()
+    expect(document.querySelector('[data-fenix-sas="view"]')).not.toBeNull()
+    // 侧栏内点击（会话列表项路径）→ 兜底收视图。
+    sidebar.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    expect(document.querySelector('[data-fenix-sas="view"]')).toBeNull()
+    // 再开一次，从内容区外非侧栏点击不误关。
+    entryButton().click()
+    await flush()
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    expect(document.querySelector('[data-fenix-sas="view"]')).not.toBeNull()
+    stop()
+    await flush()
+  })
+
+  it('selection 缝缺失且无侧栏 DOM（抽屉降级形态）→ 装配不抛，stop 对称', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stop = apply(makeCtx([]))
+    expect(() => stop()).not.toThrow()
     await flush()
     warnSpy.mockRestore()
   })

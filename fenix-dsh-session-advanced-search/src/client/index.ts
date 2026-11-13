@@ -10,7 +10,7 @@
  * → 点击在**内容区**打开 SearchView（非模态，React createRoot 挂自建容器）→
  * 提交/轮询/重复提交取消旧任务在视图组件内实现（POST jobs / GET 轮询 /
  * DELETE+新建，经注入的 fetch）→ 候选点击接 jump（uiWorkspace 服务缝优先、
- * 侧栏 click 兜底）并关闭视图 → 卸载对称（observer 断开 + root.unmount +
+ * 侧栏 click 兜底）并关闭视图 → 会话切换即收视图（selection 订阅缝优先、侧栏点击捕获兜底）→ 卸载对称（observer 断开 + root.unmount +
  * 容器移除）。
  *
  * 内容区挂载缝（design D6；optimize 轮 3.3）：点击时刻搜索框必然在位（按钮
@@ -52,13 +52,43 @@ const log: JumpLog = {
   debug: (message) => console.debug(message),
 }
 
+/** selection 快照店缝（dsh-client-store createSnapshotStore 形态子集）。 */
+interface SelectionStoreWatch {
+  subscribe(listener: () => void): () => void
+}
+
 /** uiWorkspace 安全探测（inject 保证在位；形状漂移自守降级）。 */
-function resolveUiWorkspace(ctx: Context): { openSession(target: string): void } | undefined {
+function resolveUiWorkspace(ctx: Context): {
+  openSession(target: string): void
+  /** selection 快照店订阅缝（会话切换即收视图；形状不符不挂，走侧栏点击兜底）。 */
+  watchSelectionChange?(listener: () => void): () => void
+} | undefined {
   try {
     const ui: unknown = (ctx as unknown as Record<string, unknown>).uiWorkspace
     if (ui === null || typeof ui !== 'object') return undefined
     const openSession = (ui as { openSession?: unknown }).openSession
-    return typeof openSession === 'function' ? ({ openSession: openSession.bind(ui) } as { openSession(target: string): void }) : undefined
+    if (typeof openSession !== 'function') return undefined
+    const result: {
+      openSession(target: string): void
+      watchSelectionChange?: (listener: () => void) => () => void
+    } = { openSession: openSession.bind(ui) }
+    // selection 快照店缝（UiWorkspaceService.selection：会话切换 set({sessionId})
+    // /关闭 set({})；zustand subscribe 只在后续变化回调，初始态不误关）。
+    const selection = (ui as { selection?: unknown }).selection
+    if (selection !== null && typeof selection === 'object') {
+      const subscribe = (selection as { subscribe?: unknown }).subscribe
+      if (typeof subscribe === 'function') {
+        const store = selection as SelectionStoreWatch
+        result.watchSelectionChange = (listener: () => void): (() => void) => {
+          try {
+            return subscribe.call(store, listener)
+          } catch {
+            return () => {}
+          }
+        }
+      }
+    }
+    return result
   } catch {
     return undefined
   }
@@ -156,6 +186,29 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     )
   }
 
+  // 会话切换即收视图（缺陷修复：视图开着点击其他会话时，内容区应还原该会话
+  // 视图，而非残留搜索覆盖层挡住一切）。主缝 = uiWorkspace.selection 快照店
+  // 订阅（侧栏点击/快捷键/openSession 全部导航路径全覆盖；subscribe 不立即
+  // 回调，装配时初始态不误关）；缝缺失（形状漂移/服务降级）→ document 捕获
+  // 阶段侧栏点击兜底（仅覆盖鼠标路径，入口按钮点击先于开视图回调、净效果不变）。
+  const closeView = (): void => {
+    if (!open) return
+    open = false
+    render()
+  }
+  const disposeSelectionWatch = uiWorkspace?.watchSelectionChange?.(closeView) ?? undefined
+  let disposeSidebarFallback: (() => void) | undefined
+  if (disposeSelectionWatch === undefined) {
+    const onSidebarClick = (event: MouseEvent): void => {
+      const target = event.target
+      if (target instanceof Element && target.closest(SIDEBAR_SELECTOR) !== null) closeView()
+    }
+    window.document.addEventListener('click', onSidebarClick, true)
+    disposeSidebarFallback = (): void => {
+      window.document.removeEventListener('click', onSidebarClick, true)
+    }
+  }
+
   // 搜索框入口按钮：点击在内容区开视图（MutationObserver 持续维护在位）。
   const button: SearchButtonHandle = injectSearchButton({
     document: window.document,
@@ -169,6 +222,8 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
 
   return () => {
     button.dispose()
+    disposeSelectionWatch?.()
+    disposeSidebarFallback?.()
     void Promise.resolve().then(() => {
       try {
         root?.unmount()
