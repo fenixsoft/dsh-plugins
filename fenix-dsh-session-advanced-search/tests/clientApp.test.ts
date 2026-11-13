@@ -1,23 +1,29 @@
 /**
  * @vitest-environment jsdom
  *
- * client/index 装配测试（jsdom，端到端装配链）：注入按钮 → 点击开弹窗 →
- * 提交/轮询（stub 全局 fetch）→ 候选点击 jump（uiWorkspace 服务缝）+ 弹窗
- * 关闭 → 卸载清理对称（按钮移除 + React root 容器移除）；uiWorkspace 缺失
- * 装配不抛（warn 走兜底）。
+ * client/index 装配测试（jsdom，端到端装配链；optimize 轮装配换 SearchView）：
+ * 注入按钮 → 点击在内容区开视图（侧栏相邻兄弟锚点命中）→ 提交/轮询（stub
+ * 全局 fetch）→ 候选点击 jump（uiWorkspace 服务缝）+ 视图关闭 → 卸载清理对称
+ * （按钮移除 + React root 容器移除）；锚点失配降级右侧抽屉（warn 限流一次）；
+ * uiWorkspace 缺失装配不抛（warn 走兜底）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/client/index.js'
-import { JOBS_PATH, UI_TEXT } from '../src/shared/protocol.js'
+import { UI_TEXT } from '../src/shared/protocol.js'
 import type { Context } from '@deepseek-ai/cordis'
 
-/** 搜索框锚点夹具。 */
-function mountSearchInput(): HTMLInputElement {
+/** 搜索框锚点夹具（官方布局形态：侧栏面板与内容区为相邻兄弟）。 */
+function mountSidebarLayout(): { input: HTMLInputElement; content: HTMLDivElement } {
+  const sidebar = document.createElement('div')
+  sidebar.className = 'abc_sidebar'
+  const content = document.createElement('div')
+  content.className = 'abc_content'
   const input = document.createElement('input')
   input.className = 'abc_searchInput'
   input.type = 'text'
-  document.body.append(input)
-  return input
+  sidebar.append(input)
+  document.body.append(sidebar, content)
+  return { input, content }
 }
 
 /** uiWorkspace 在位的假 ctx。 */
@@ -61,27 +67,36 @@ function entryButton(): HTMLButtonElement {
   return found
 }
 
+/** React 受控输入赋值（native setter + input 事件）。 */
+function setInputValue(element: HTMLInputElement, value: string): void {
+  const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')
+  descriptor?.set?.call(element, value)
+  element.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
 afterEach(() => {
   document.body.innerHTML = ''
   vi.useRealTimers()
 })
 
-describe('client apply 装配链', () => {
-  it('装配即注入入口按钮；点击开弹窗', async () => {
-    mountSearchInput()
+describe('client apply 装配链（SearchView 内容区）', () => {
+  it('装配即注入入口按钮；点击在内容区开视图（容器挂侧栏相邻兄弟、非模态）', async () => {
+    const { content } = mountSidebarLayout()
     const stop = apply(makeCtx([]))
     expect(entryButton()).not.toBeNull()
-    expect(document.querySelector('[data-fenix-sas-dialog-root]')).not.toBeNull()
+    // 点击前视图容器未挂载（惰性首开）。
+    expect(document.querySelector('[data-fenix-sas-view-root]')).toBeNull()
     entryButton().click()
     await flush()
-    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    expect(content.querySelector('[data-fenix-sas-view-root]')).not.toBeNull()
+    expect(document.querySelector('[data-fenix-sas="view"]')).not.toBeNull()
     expect(document.body.textContent).toContain(UI_TEXT.dialogTitle)
     stop()
     await flush()
   })
 
-  it('候选点击 → uiWorkspace.openSession(sessionId) 且弹窗关闭', async () => {
-    mountSearchInput()
+  it('候选点击 → uiWorkspace.openSession(sessionId) 且视图关闭', async () => {
+    mountSidebarLayout()
     const opened: string[] = []
     const results = [{ sessionId: 's-jump', title: '跳转目标', workspacePath: '', activityTime: 1, reason: 'r', confidence: 1 }]
     const { restore } = stubFetch([{ status: 200, payload: { jobId: 'job-1', phase: 'done', results } }])
@@ -93,33 +108,31 @@ describe('client apply 装配链', () => {
     await tick()
     entryButton().click()
     await tick()
-    const textarea = document.querySelector('textarea')
-    expect(textarea).not.toBeNull()
-    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(textarea), 'value')?.set
-    setter?.call(textarea, 'q')
-    textarea?.dispatchEvent(new Event('input', { bubbles: true }))
+    const input = document.querySelector<HTMLInputElement>('input[data-fenix-sas="query"]')
+    expect(input).not.toBeNull()
+    setInputValue(input as HTMLInputElement, 'q')
     await tick()
     // 提交（advanceTimersByTimeAsync 同步 flush promise 链）。
-    const submit = [...document.querySelectorAll('button')].find((b) => b.textContent === UI_TEXT.submit)
+    const submit = document.querySelector<HTMLButtonElement>('button[data-fenix-sas="submit"]')
     expect(submit).not.toBeNull()
     ;(submit as HTMLButtonElement).click()
     await tick()
     expect(document.body.textContent).toContain('跳转目标')
     // 候选点击 → jump。
-    const row = [...document.querySelectorAll('ul button')][0]
+    const row = document.querySelector('button[data-fenix-sas="result"]')
     expect(row).not.toBeNull()
     ;(row as HTMLButtonElement).click()
     await tick()
     expect(opened).toEqual(['s-jump'])
-    // 弹窗已关（jump 内 onClose 先于跳转）。
-    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    // 视图已关（jump 内 onClose 先于跳转）。
+    expect(document.querySelector('[data-fenix-sas="view"]')).toBeNull()
     vi.useRealTimers()
     stop()
     restore()
   })
 
   it('uiWorkspace 缺失 → 装配不抛（warn 降级兜底路径）', async () => {
-    mountSearchInput()
+    mountSidebarLayout()
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const stop = apply({} as Context)
     await flush()
@@ -130,19 +143,47 @@ describe('client apply 装配链', () => {
     warnSpy.mockRestore()
   })
 
-  it('卸载清理对称：按钮移除 + 弹窗容器移除 + observer 断开', async () => {
-    mountSearchInput()
+  it('卸载清理对称：按钮移除 + 视图容器移除 + observer 断开', async () => {
+    mountSidebarLayout()
     const stop = apply(makeCtx([]))
     await flush()
-    expect(entryButton()).not.toBeNull()
+    entryButton().click()
+    await flush()
+    expect(document.querySelector('[data-fenix-sas-view-root]')).not.toBeNull()
     stop()
     await flush()
     expect(document.querySelector('button.fenix-sas-entry')).toBeNull()
-    expect(document.querySelector('[data-fenix-sas-dialog-root]')).toBeNull()
+    expect(document.querySelector('[data-fenix-sas-view-root]')).toBeNull()
     // observer 已断开：重挂锚点不产生新按钮。
-    mountSearchInput()
+    mountSidebarLayout()
     await flush()
     expect(document.querySelector('button.fenix-sas-entry')).toBeNull()
+  })
+})
+
+describe('client apply 挂载降级（optimize 轮 3.3）', () => {
+  it('内容区锚点失配（input 直挂 body）→ 抽屉降级挂 body + warn 限流一次', async () => {
+    const input = document.createElement('input')
+    input.className = 'abc_searchInput'
+    document.body.append(input)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stop = apply(makeCtx([]))
+    await flush()
+    entryButton().click()
+    await flush()
+    // 抽屉容器直接挂 body（fixed 右侧）。
+    const container = document.querySelector('[data-fenix-sas-view-root]')
+    expect(container).not.toBeNull()
+    expect(container?.parentElement).toBe(document.body)
+    expect(document.querySelector('[data-fenix-sas="view"]')).not.toBeNull()
+    expect(warnSpy.mock.calls.some((args) => String(args[0]).includes('降级右侧抽屉'))).toBe(true)
+    // 重复开合不重复 warn（限流一次）。
+    entryButton().click()
+    await flush()
+    expect(warnSpy.mock.calls.filter((args) => String(args[0]).includes('降级右侧抽屉'))).toHaveLength(1)
+    stop()
+    await flush()
+    warnSpy.mockRestore()
   })
 })
 
@@ -150,7 +191,6 @@ describe('client inject 声明', () => {
   it('消费 uiWorkspace 服务键（design D5 优先缝）', () => {
     expect(apply.length).toBeGreaterThan(0)
     // inject 常量由 client 契约消费（plugin-manager resolve 时序）。
-    void JOBS_PATH
     expect(['uiWorkspace']).toEqual(['uiWorkspace'])
   })
 })

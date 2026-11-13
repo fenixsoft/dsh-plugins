@@ -1,18 +1,22 @@
 # fenix-dsh-session-advanced-search
 
-dsh web 宿主侧会话高级搜索插件：在侧栏搜索框内注入「高级搜索」入口，弹窗以自然语言描述（可选时间范围）发起跨工作区会话分析任务——host 半只读收集全部会话产物、机械预筛、经 profile 既有 LLM 单调用语义排序（失败降级机械评分），结果列表一键跳转会话。
+dsh web 宿主侧会话高级搜索插件：在侧栏搜索框内注入「高级搜索」入口（官方 `IconSearchOutlineMedium` 几何），内容区以自然语言描述（可选时间范围）发起跨工作区会话分析任务——host 半只读收集全部会话产物、机械预筛、经 profile 既有 LLM 单调用语义排序（失败降级机械评分），结果列表一键跳转会话。
 
 与侧栏原生搜索的差异：原生搜索按标题/内容子串精确匹配单工作区列表；本插件把「找那次修 XX 问题的会话」这类模糊意图交给 LLM 语义排序，且跨工作区（全部持久化会话）。
+
+界面（视图骨架 / 步骤流 / 降级横幅 / composer 卡）以 `specs/optimize-session-advanced-search/prototype/`（`index.html` + 截图）为真相源。
 
 ## 机制
 
 双半装配，经 `lib/index.js`（host，ESM cordis 插件）与 `lib/client.js`（client，`window.__ModuleLoader__.load` CJS 工厂）两个独立产物分别进入 web profile 的 loader 清单与 client 模块表。
 
-### client 半（入口 + 弹窗）
+### client 半（入口 + 内容区视图）
 
-1. **搜索框注入缝**（DOM）：官方搜索框锚点 `input[class*="searchInput"]`（属性子串匹配，容忍构建哈希前缀漂移）；`input.after(button)` 注入入口按钮（即 clearButton 左侧）。`MutationObserver`（`documentElement` 子树）持续维护在位——官方重渲染移除后自动补插，侧栏懒挂载（面板未打开时锚点不存在）也由观察覆盖；去抖防热循环。锚点失配 warn 限流一次后放弃注入（不抛错）。
-2. **弹窗**（React `createRoot`，自建容器挂 `document.body`）：描述输入（空/空白禁提交）、可选开始/结束日期（闭开区间，本地时区日界；结束早于开始禁提交）、关闭按钮与 Esc、关闭重开状态重置。提交 = `POST /api/session-advanced-search/jobs`，随后 1s 轮询任务状态（阶段文案：收集会话 → 语义排序）。同一弹窗单在途：在途期间再次提交先 `DELETE` 旧任务再新建；关闭弹窗同样 `DELETE` 在途任务。
-3. **结果跳转**：候选行点击 → `uiWorkspace.openSession(sessionId)` 优先（跨工作区天然支持）；服务缝不可用时兜底侧栏列表项标题精确匹配 + `click()`；两者皆不可达 warn 不跳转（不抛错）。跳转前先关弹窗。
+1. **搜索框注入缝**（DOM）：官方搜索框锚点 `input[class*="searchInput"]`（属性子串匹配，容忍构建哈希前缀漂移）；`input.after(button)` 注入入口按钮（即 clearButton 左侧）。按钮内联 SVG 为官方 `IconSearchOutlineMedium` 原样几何（viewBox 0 0 16 16、stroke currentColor 1.3、无星标），28×28 按钮座 `color inherit` 不降透明。`MutationObserver`（`documentElement` 子树）持续维护在位——官方重渲染移除后自动补插，侧栏懒挂载（面板未打开时锚点不存在）也由观察覆盖；去抖防热循环。锚点失配 warn 限流一次后放弃注入（不抛错）。
+2. **内容区视图**（React `createRoot`，非模态）：挂载位置按结构化锚点判定——`input.closest('[class*="sidebar"]').nextElementSibling`（官方布局侧栏与内容区为相邻兄弟）命中则容器 absolute inset 0 占满内容区（无遮罩、侧栏保持可交互；关闭/跳转即还原会话视图）；失配降级右侧抽屉（fixed、左边界避让侧栏实测宽度）+ warn 限流一次。视图含 header（标题+范围 chips+官方 `IconCloseOutline` X）、初始态、AI 分析面板、结果列表与底部 composer 卡（居中 max 952px、radius 28px、32px 圆形发送按钮）。描述输入（空/空白禁提交）、可选开始/结束日期（闭开区间，本地时区日界；结束早于开始禁提交）、关闭按钮与 Esc、关闭重开状态重置。提交 = `POST /api/session-advanced-search/jobs`，随后 1s 轮询任务状态。同一视图单在途：在途期间再次提交先 `DELETE` 旧任务再新建；关闭视图同样 `DELETE` 在途任务。
+3. **步骤流与中断**：轮询载荷 `progress[]` 按 canonical `collecting → filtering → analyzing → done` 渲染 Agent 对话风格步骤流（完成 ✓ / 进行中 spinner / 等待 ○ 三态；host 实报的 detail 原样展示，不伪造流式中间进度）；面板头 status-pill 本地计时逐 0.1s 刷新「分析中 · X.Xs」。在途时面板头提供「中断」按钮 = `DELETE` 在途任务 + 停轮 + 回初始态。
+4. **降级横幅**：终态 `degraded=true` 时按 `degradedReason` 精确映射中文文案（见下表）；`credential-missing` 附两动作——「前往模型设置配置凭证」（设置导航缝在位时直达，缺位时点击展示「设置 → 模型」路径提示）与「仅重试 AI 分析」（同 query 重新 POST）。
+5. **结果跳转**：候选行点击 → `uiWorkspace.openSession(sessionId)` 优先（跨工作区天然支持）；服务缝不可用时兜底侧栏列表项标题精确匹配 + `click()`；两者皆不可达 warn 不跳转（不抛错）。跳转前先关视图。
 
 ### host 半（HTTP API + 分析管线）
 
@@ -21,31 +25,43 @@ cordis Service（`static inject = ['webServer', 'sessionPersistence']`），装�
 | 端点 | 语义 |
 | --- | --- |
 | `POST /api/session-advanced-search/jobs` | 建任务，立即返回 `{jobId}`（管线异步推进） |
-| `GET /api/session-advanced-search/jobs/:id` | 轮询：`phase` + `results`（终态）+ `degraded` |
+| `GET /api/session-advanced-search/jobs/:id` | 轮询：`phase` + `results`（终态）+ `degraded` + `degradedReason?` + `progress?`（过程步骤流，可选扩展字段，向后兼容） |
 | `DELETE /api/session-advanced-search/jobs/:id` | 取消（幂等：不存在 404，已终态 200 noop） |
 
 任务状态机：`collecting → filtering → analyzing → done | error | cancelled`（终态幂等）。管线单轮：
 
 1. **collecting**：`sessionPersistence.list()` 全量会话快照 → `sessionController.list()` 增强 title/活动时间 → **cold 会话 title 折叠回退**（controller.list 对未激活会话只回投影缓存且永不折叠，无缓存行 title 恒空——对时间过滤后仍无投影 title 的会话，`open()` 只读事件流折叠最后一条 `session/title` 事件补齐标题，最近活跃优先、上限 200，单会话失败跳过不中断；同一会话的事件流读取同时提取首条用户消息供节选复用，每会话至多读一次）。
 2. **filtering**：机械预筛——标题/内容关键词命中计分（多词 AND 优先、子串兜底），按分排序取 `maxCandidates` 上限（同分取最近活跃）。
-3. **analyzing**：LLM 语义排序——`ctx.agentDefaultModel.currentSelection()` 取默认路由 + `ctx.llm.stream` 单调用，输出编号列表解析回会话 id，取 `topN`；端到端 `llmTimeoutMs` 超时守卫。
+3. **analyzing**：LLM 语义排序——路由解析优先级 插件配置 `analyzeRoute` > `ctx.agentDefaultModel.currentSelection()` 默认路由；`ctx.llm.stream` 单调用，输出 JSON 排名解析回会话 id，取 `topN`。**超时硬解耦**：流消费 promise 与超时 marker `Promise.race` 竞速——`llmTimeoutMs` 到点立即降级返回，不依赖底层流闭合（pi-ai 惰性流 abort 不返回的实证根因）；外部取消（DELETE）优先于超时（不降级不产出）。**凭证预检**：发起调用前按路由 provider 读 credential-ref（llm providers 投影优先，缺失按 dsh 命名约定 `<ROUTE 大写蛇形>_API_KEY` 派生），进程环境非空或 `ctx.credentials` 凭据库已配置才放行；两处皆无 → 不发起调用快速失败降级（`credential-missing`）；缝/形状漂移 warn 一次跳过预检（不误杀，由超时硬解耦兜底）。
 
-LLM 缝为可选缝（不进 `static inject`，管线执行期 try/catch 探测），避免宿主服务缺失时插件永不激活。
+LLM 缝为可选缝（不进 `static inject`，管线执行期 `ctx.get` 探测），避免宿主服务缺失时插件永不激活。
 
 ### 降级矩阵
 
 | 触发 | 行为 | 用户可见 |
 | --- | --- | --- |
-| LLM 服务缝缺失 / 默认路由缺失 | 机械评分排序（预筛序原样） | 结果可用 + 顶部「降级」横幅（`degraded=true`，原因 `llm-missing`） |
-| LLM 调用超时（`llmTimeoutMs`） | 同上 | 横幅（`timeout`） |
+| LLM 服务缝缺失 / 默认路由缺失 | 机械评分排序（预筛序原样） | 结果可用 + 降级横幅（`degraded=true`，原因 `llm-missing`） |
+| 分析路由凭证缺失（env 与凭据库皆未配置） | 不发起调用，快速失败 | 横幅（`credential-missing`）+ 两动作按钮（前往模型设置 / 仅重试 AI 分析） |
+| LLM 调用超时（`llmTimeoutMs` 硬上限） | 同上 | 横幅（`timeout`） |
 | LLM 调用失败（流中断等） | 同上 | 横幅（`call-failed`） |
 | LLM 输出解析失败（含零有效行） | 同上 | 横幅（`parse-failed`） |
 | 空候选（预筛零命中） | 直接空态完成，不走 LLM | 空态文案（非降级） |
-| `uiWorkspace` 缺失/形态漂移 | 侧栏列表项标题匹配 `click()` 兜底 | 未命中时 warn，弹窗保持打开 |
+| `uiWorkspace` 缺失/形态漂移 | 侧栏列表项标题匹配 `click()` 兜底 | 未命中时 warn，视图保持打开 |
 | 搜索框锚点失配 | warn 限流一次，放弃注入 | 入口缺失（见「已知限制」修缝指引） |
-| host `enabled=false` | 零注册（info 停用） | POST 404 → 弹窗显式「高级搜索服务未启用」 |
+| 内容区锚点失配 | warn 限流一次 | 视图降级右侧抽屉（避让侧栏宽度） |
+| host `enabled=false` | 零注册（info 停用） | POST 404 → 视图显式「高级搜索服务未启用」 |
 
-任务被取消（DELETE 或宿主重启丢任务表）：`cancelled` 中断机械回退无意义，直接静默退出；轮询 404 → 弹窗「任务已丢失（宿主可能已重启）」。
+**降级横幅原因 → 文案映射**（`UI_TEXT.degradedReasonText`，缺项回退「LLM 分析不可用，已按机械匹配排序」）：
+
+| degradedReason | 横幅文案 |
+| --- | --- |
+| `llm-missing` | LLM 分析服务不可用，已按机械匹配排序 |
+| `credential-missing` | 分析模型路由缺少凭证，已按机械匹配排序 |
+| `timeout` | 分析超时，守卫已中断等待，已按机械匹配排序 |
+| `call-failed` | 模型调用失败，已按机械匹配排序 |
+| `parse-failed` | 分析输出解析失败，已按机械匹配排序 |
+
+任务被取消（DELETE 或宿主重启丢任务表）：`cancelled` 中断机械回退无意义，直接静默退出；轮询 404 → 视图「任务已丢失（宿主可能已重启）」。
 
 `enabled=false` 为合法零动作停用；必选服务缝漂移（`webServer.register` / `sessionPersistence.list+open` 形态不符）为 error 级显式停用。
 
@@ -57,6 +73,7 @@ LLM 缝为可选缝（不进 `static inject`，管线执行期 try/catch 探测�
 | `maxCandidates` | `number` | `30` | 机械预筛候选集上限（评分优先、同分取最近活跃截断），约束 LLM 输入规模 |
 | `topN` | `number` | `5` | LLM 排序后返回的 Top-N 候选数量 |
 | `llmTimeoutMs` | `number` | `60000` | LLM 单调用端到端超时（毫秒），超时回退机械评分排序 |
+| `analyzeRoute` | `object?` | （缺省） | 可选 `{ provider, model }`（均非空串）：把语义分析路由指到指定 provider/model，优先于 profile 默认路由——典型用途是路由到有凭证的 provider（凭证预检按该 provider 判定） |
 
 ## 安装（人工步骤）
 
@@ -78,7 +95,7 @@ LLM 缝为可选缝（不进 `static inject`，管线执行期 try/catch 探测�
          name: fenix-dsh-session-advanced-search
    ```
 
-3. **重启 web profile**：重启后 client 半随 client 模块表下发，host 半随 loader 清单装载。
+3. **重启 dsh-web（web profile 宿主进程）**：以上两步改的是 profile 目录文件，**必须重启 web profile 宿主进程才生效**（例如 `systemctl restart dsh-web`，或按部署形态重启对应服务/容器）。重启后 client 半随 client 模块表下发，host 半随 loader 清单装载。
 
 client 半的产物 `lib/client.js` 经 `package.json` 的 `exports["./client"]` 暴露，由 dsh client-modules 机制（`__ModuleLoader__` 工厂）加载；`inject: ['uiWorkspace']` 声明消费的服务键。
 
@@ -91,7 +108,11 @@ client 半的产物 `lib/client.js` 经 `package.json` 的 `exports["./client"]`
 - **搜索框锚点签名**（官方升级后第一修缝点，`src/client/searchButton.ts` 的 `ANCHOR`）：0.2.2-rc.1 发行包实证，官方搜索框（WorkspaceBrowser，侧栏面板内）DOM 层级为
   `div.<hash>_searchSlot > div.<hash>_search > button.<hash>_searchButton / input.<hash>_searchInput / button.<hash>_clearButton（仅展开态渲染）`，
   类值带构建哈希前缀（会漂移），键名稳定——锚点签名取 `input[class*="searchInput"]` 属性子串匹配。官方若改名 `searchInput` 键或改用非 input 元素，注入静默放弃（warn 限流一次）；修缝 = 改 `ANCHOR.inputSelector` 一处。
-- **client 半无法感知 host `enabled`**：dsh client-modules 不下发插件配置，`enabled=false` 时 client 仍注入入口与弹窗，POST 得 404 后显式提示「高级搜索服务未启用」。属显式接受的偏差（`enabled` 实际约束 host 注册面）。
-- **单在途任务以弹窗为单位**：同一 client 半同时只有一个在途任务（新提交/关弹窗均 DELETE 旧任务）；多弹窗场景不存在（单例 React root）。
+- **入口图标几何**：内联 SVG 为官方 `IconSearchOutlineMedium` 原样几何（`src/client/searchButton.ts` 的 `ICON_SVG`；取自 `specs/optimize-session-advanced-search/prototype/` 的 ICONS 常量，0.2.2-rc.1 发行包核对）。官方升级若改版图标（路径数据/viewBox），入口按钮与官方搜索按钮出现观感漂移；修缝 = 按新版 `dsh-client-ui-primitives` 图标几何更新 `ICON_SVG` 一处。
+- **内容区锚点缝**（视图挂载位置，`src/client/index.ts` 的 `resolveContentHost`）：结构化判定 = 搜索框 input `closest('[class*="sidebar"]')` 的 `nextElementSibling`。官方布局调整（侧栏键名变更/侧栏与内容区不再相邻）→ 判定失配，视图降级右侧抽屉（fixed、避让侧栏实测宽度、warn 限流一次），功能不受影响仅观感差异；修缝 = 调整 `SIDEBAR_SELECTOR` / 兄弟判定逻辑。
+- **设置导航缝未接**：降级横幅「前往模型设置配置凭证」按钮缺 `onOpenModelSettings` 回调（dsh web 未暴露可编程的设置页导航缝），点击展示「设置 → 模型」路径提示文案；官方提供导航缝后在装配层接上即可直达。
+- **初始态不展示查询语法 chips**：原型初始态含 `ws:` / `since:` / `in:` 语法提示与「最近搜索」装饰，host 管线未实现前缀语法解析（自然语言 + 日期范围即全部输入面），实装仅保留标题/描述文案——避免宣传未实现的语法。
+- **client 半无法感知 host `enabled`**：dsh client-modules 不下发插件配置，`enabled=false` 时 client 仍注入入口与视图，POST 得 404 后显式提示「高级搜索服务未启用」。属显式接受的偏差（`enabled` 实际约束 host 注册面）。
+- **单在途任务以视图为单位**：同一 client 半同时只有一个在途任务（新提交/关视图/中断均 DELETE 旧任务）；多开场景不存在（单例 React root）。
 - **跳转兜底的标题匹配是精确相等**：`uiWorkspace` 不可用时按结果行 title 与侧栏列表项 `textContent.trim()` 精确匹配后 `click()`；标题渲染带前后缀修饰（未读标记等）时未命中，仅 warn。
 - **LLM 排序质量受预筛截断约束**：`maxCandidates` 截断发生在 LLM 之前，关键词机械分低的会话不进语义排序；调大 `maxCandidates` 换召回、耗 token。

@@ -4,7 +4,7 @@
  * topN 截断、机械回退归一化置信度。
  */
 import { describe, expect, it } from 'vitest'
-import { buildUserPrompt, parseLlmRanking, rankCandidates } from '../src/host/analyzer.js'
+import { buildUserPrompt, parseLlmRanking, rankCandidates, resolveRoute } from '../src/host/analyzer.js'
 import type { AnalyzerLog } from '../src/host/analyzer.js'
 import type { DshAgentDefaultModel, DshLlmRuntime } from '../src/types/dsh-runtime.js'
 import type { PrefilteredSession } from '../src/host/collector.js'
@@ -71,6 +71,25 @@ function row(sessionId: string, score: number, activityTime = 100): PrefilteredS
 }
 
 const SIGNAL = new AbortController().signal
+
+/** 顽固挂起 stub LLM（2.5 超时硬上限用例）：**忽略 abort 信号**、永不产出永不闭合——超时返回不得依赖底层流闭合。 */
+function stubbornLlm(lateRejectAfterMs?: number): DshLlmRuntime {
+  return {
+    stream() {
+      return (async function* () {
+        await new Promise<void>((resolve, reject) => {
+          if (lateRejectAfterMs === undefined) {
+            // 永不结算（连 abort 也不观察）：race 必须由超时侧独立胜出。
+            return
+          }
+          // 迟到 reject：超时胜出后败者流的错误必须被 .catch 吸收，
+          // 绝不能外泄为 unhandled rejection（vitest 会令测试失败）。
+          setTimeout(() => reject(new Error('late stream failure')), lateRejectAfterMs)
+        })
+      })()
+    },
+  }
+}
 
 describe('rankCandidates 命中排序', () => {
   it('LLM 排名决定顺序，reason/confidence 透传，degraded=false', async () => {
@@ -222,6 +241,119 @@ describe('rankCandidates 空候选', () => {
     const outcome = await rankCandidates({ llm, agentDefaultModel: ROUTE, log, timeoutMs: 1000, topN: 5 }, 'q', [], SIGNAL)
     expect(called).toBe(false)
     expect(outcome).toEqual({ results: [], degraded: false })
+  })
+})
+
+describe('rankCandidates 超时硬解耦（optimize 轮 2.5）', () => {
+  const CANDIDATES = [row('s1', 4, 900), row('s2', 2, 800)]
+
+  it('stub 忽略 signal 永不 resolve 的流：按时返回 degradedReason=timeout，不依赖底层流闭合', async () => {
+    const log = makeLog()
+    const started = Date.now()
+    const outcome = await rankCandidates({ llm: stubbornLlm(), agentDefaultModel: ROUTE, log, timeoutMs: 50, topN: 5 }, 'q', CANDIDATES, SIGNAL)
+    const elapsed = Date.now() - started
+    expect(outcome.degraded).toBe(true)
+    expect(outcome.degradedReason).toBe('timeout')
+    expect(outcome.route).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
+    expect(outcome.results).toHaveLength(2)
+    // 按时返回：远小于「等待底层流闭合」才可能出现的秒级挂起。
+    expect(elapsed).toBeLessThan(2000)
+    expect(log.warns.some((m) => m.includes('超时') && m.includes('50ms'))).toBe(true)
+  })
+
+  it('败者流迟到 reject 被 .catch 吸收，无 unhandled rejection', async () => {
+    const log = makeLog()
+    const outcome = await rankCandidates({ llm: stubbornLlm(30), agentDefaultModel: ROUTE, log, timeoutMs: 10, topN: 5 }, 'q', CANDIDATES, SIGNAL)
+    expect(outcome.degradedReason).toBe('timeout')
+    // 等迟到 reject 发生：若未被吸收，vitest 将以 unhandled rejection 判本测试失败。
+    await new Promise((resolve) => setTimeout(resolve, 80))
+  })
+})
+
+describe('rankCandidates 凭证预检（optimize 轮 2.5）', () => {
+  const CANDIDATES = [row('s1', 4), row('s2', 2)]
+
+  it('credentialProbe 返回 false → 不发起调用立即降级 credential-missing，route 可见', async () => {
+    let called = false
+    const llm: DshLlmRuntime = {
+      stream() {
+        called = true
+        return (async function* () {})()
+      },
+    }
+    const log = makeLog()
+    const outcome = await rankCandidates({ llm, agentDefaultModel: ROUTE, credentialProbe: () => false, log, timeoutMs: 1000, topN: 5 }, 'q', CANDIDATES, SIGNAL)
+    expect(called).toBe(false)
+    expect(outcome.degraded).toBe(true)
+    expect(outcome.degradedReason).toBe('credential-missing')
+    expect(outcome.route).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
+    expect(outcome.results.every((row) => row.degraded === true)).toBe(true)
+    expect(log.warns.some((m) => m.includes('凭证缺失') && m.includes('deepseek/deepseek-chat'))).toBe(true)
+  })
+
+  it('credentialProbe 返回 true → 放行正常调用（不降级）', async () => {
+    const llm = stubLlm(JSON.stringify({ results: [{ id: 's1', reason: 'r', confidence: 0.8 }] }))
+    const outcome = await rankCandidates({ llm, agentDefaultModel: ROUTE, credentialProbe: () => true, log: makeLog(), timeoutMs: 1000, topN: 5 }, 'q', CANDIDATES, SIGNAL)
+    expect(outcome.degraded).toBe(false)
+    expect(outcome.results.map((row) => row.sessionId)).toEqual(['s1'])
+  })
+
+  it('credentialProbe 缺失（undefined）→ 跳过预检照常发起调用', async () => {
+    const llm = stubLlm(JSON.stringify({ results: [{ id: 's2', reason: 'r', confidence: 0.7 }] }))
+    const outcome = await rankCandidates({ llm, agentDefaultModel: ROUTE, log: makeLog(), timeoutMs: 1000, topN: 5 }, 'q', CANDIDATES, SIGNAL)
+    expect(outcome.degraded).toBe(false)
+    expect(outcome.results.map((row) => row.sessionId)).toEqual(['s2'])
+  })
+})
+
+describe('rankCandidates 路由覆盖（optimize 轮 2.5）', () => {
+  it('routeOverride 优先于 agentDefaultModel，调用与 route 均取覆盖路由', async () => {
+    const calls: { user: string; provider?: string; model?: string }[] = []
+    const llm = stubLlm(JSON.stringify({ results: [{ id: 's1', reason: 'r', confidence: 0.9 }] }), calls)
+    const outcome = await rankCandidates(
+      { llm, agentDefaultModel: ROUTE, routeOverride: { provider: 'kimi', model: 'moonshot-v1-8k' }, credentialProbe: () => true, log: makeLog(), timeoutMs: 1000, topN: 5 },
+      'q',
+      [row('s1', 1)],
+      SIGNAL,
+    )
+    expect(outcome.degraded).toBe(false)
+    expect(calls[0]?.provider).toBe('kimi')
+    expect(calls[0]?.model).toBe('moonshot-v1-8k')
+    expect(outcome.route).toEqual({ provider: 'kimi', model: 'moonshot-v1-8k' })
+  })
+
+  it('routeOverride 覆盖到凭证缺失路由时，降级 reason=credential-missing 且 route=覆盖路由', async () => {
+    const outcome = await rankCandidates(
+      { llm: stubLlm('{}'), agentDefaultModel: ROUTE, routeOverride: { provider: 'bare', model: 'm' }, credentialProbe: () => false, log: makeLog(), timeoutMs: 1000, topN: 5 },
+      'q',
+      [row('s1', 1)],
+      SIGNAL,
+    )
+    expect(outcome.degradedReason).toBe('credential-missing')
+    expect(outcome.route).toEqual({ provider: 'bare', model: 'm' })
+  })
+})
+
+describe('resolveRoute 导出面（optimize 轮 2.5）', () => {
+  it('routeOverride 合形 → 直接采用', () => {
+    expect(resolveRoute({ log: makeLog(), timeoutMs: 1000, topN: 5, routeOverride: { provider: 'p1', model: 'm1' } })).toEqual({ provider: 'p1', model: 'm1' })
+  })
+
+  it('无 override → agentDefaultModel 默认路由', () => {
+    expect(resolveRoute({ agentDefaultModel: ROUTE, log: makeLog(), timeoutMs: 1000, topN: 5 })).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
+  })
+
+  it('override 形状非法（空 provider）→ 回退默认路由', () => {
+    expect(resolveRoute({ agentDefaultModel: ROUTE, log: makeLog(), timeoutMs: 1000, topN: 5, routeOverride: { provider: '  ', model: 'm1' } })).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
+  })
+
+  it('currentSelection 抛异常 → undefined', () => {
+    const explosive: DshAgentDefaultModel = { currentSelection: () => { throw new Error('boom') } }
+    expect(resolveRoute({ agentDefaultModel: explosive, log: makeLog(), timeoutMs: 1000, topN: 5 })).toBeUndefined()
+  })
+
+  it('两缝皆缺 → undefined', () => {
+    expect(resolveRoute({ log: makeLog(), timeoutMs: 1000, topN: 5 })).toBeUndefined()
   })
 })
 

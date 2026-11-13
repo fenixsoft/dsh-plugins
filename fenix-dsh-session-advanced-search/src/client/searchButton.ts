@@ -33,12 +33,11 @@ export interface SearchButtonHandle {
   dispose(): void
 }
 
-/** 放大镜 + 星标内联 SVG（design D8：仅图标形态）。 */
+/** 官方 IconSearchOutlineMedium 内联 SVG（optimize 轮 3.3：几何原样 specs/.../prototype ICONS，无星标；viewBox 0 0 16 16、stroke 1.3）。 */
 const ICON_SVG = [
-  '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">',
-  '<circle cx="10.5" cy="10.5" r="6.2"/>',
-  '<path d="M15.3 15.3 20 20"/>',
-  '<path d="M10.5 7.4l.9 1.9 2.1.3-1.5 1.4.4 2.1-1.9-1-1.9 1 .4-2.1-1.5-1.4 2.1-.3z" fill="currentColor" stroke="none"/>',
+  '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true">',
+  '<path d="M6.58727 11.8586C9.55061 11.8586 11.9529 9.45637 11.9529 6.49304C11.9529 3.5297 9.55061 1.12744 6.58727 1.12744C3.62394 1.12744 1.22168 3.5297 1.22168 6.49304C1.22168 9.45637 3.62394 11.8586 6.58727 11.8586Z"/>',
+  '<path d="M10.2991 10.3933L14.7783 14.8725"/>',
   '</svg>',
 ].join('')
 
@@ -104,9 +103,9 @@ function createButton(doc: Document, onClick: () => void): HTMLButtonElement {
   button.title = UI_TEXT.buttonTitle
   button.setAttribute('aria-label', UI_TEXT.buttonTitle)
   button.innerHTML = ICON_SVG
-  // all:unset 脱离宿主 button 默认样式；尺寸贴官方 28px 图标按钮。
+  // all:unset 脱离宿主 button 默认样式；尺寸贴官方 28px 图标按钮（optimize 轮：去降透明，color inherit 随主题）。
   button.style.cssText =
-    'all:unset;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:none;cursor:pointer;color:inherit;opacity:.75;'
+    'all:unset;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:none;cursor:pointer;color:inherit;'
   button.addEventListener('click', (event) => {
     event.preventDefault()
     event.stopPropagation()

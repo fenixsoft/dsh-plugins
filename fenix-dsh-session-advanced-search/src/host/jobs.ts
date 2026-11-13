@@ -12,8 +12,12 @@
  * - 终态回收：client 轮询到终态即停（不 DELETE），终态任务（含 results）会
  *   滞留表内——在写入/读取路径惰性回收超龄（TTL）终态任务并设容量上限，
  *   常驻进程下任务表不无界增长（在途任务不受影响）。
+ * - 过程步骤（optimize-session-advanced-search design D5）：推进点经
+ *   appendProgress 追加（有界 50 条），GET 快照携带 progress 与
+ *   degradedReason（向后兼容可选字段）。
  */
-import type { SearchCandidate, SearchJobStatus, SearchPhase, SearchRequest } from '../shared/protocol.js'
+import type { SearchCandidate, SearchJobStatus, SearchPhase, SearchProgressStep, SearchRequest } from '../shared/protocol.js'
+import { PROGRESS_MAX_STEPS } from '../shared/protocol.js'
 
 /** 终态集合（状态机迁移门）。 */
 const TERMINAL_PHASES: readonly SearchPhase[] = ['done', 'error', 'cancelled']
@@ -34,10 +38,14 @@ export interface SearchJob {
   /** 取消通道（collector/analyzer 全程监听）。 */
   readonly controller: AbortController
   phase: SearchPhase
+  /** 过程步骤流（推进点追加，有界保留最近 PROGRESS_MAX_STEPS 条）。 */
+  readonly progress: SearchProgressStep[]
   /** 终态打点时刻（epoch ms；写入终态时设置，回收据此判超龄）。 */
   completedAt?: number
   results?: readonly SearchCandidate[]
   degraded?: boolean
+  /** degraded=true 时的原因分类（degradedReason 贯通轮询载荷）。 */
+  degradedReason?: SearchJobStatus['degradedReason']
   message?: string
 }
 
@@ -71,6 +79,7 @@ export class JobTable {
       createdAt: Date.now(),
       controller: new AbortController(),
       phase: 'collecting',
+      progress: [],
     }
     this.jobs.set(job.id, job)
     return job
@@ -79,6 +88,20 @@ export class JobTable {
   /** 查任务（GET/DELETE 共用；未知 id undefined → 路由层映射 404）。 */
   get(id: string): SearchJob | undefined {
     return this.jobs.get(id)
+  }
+
+  /**
+   * 追加过程步骤（design D5 推进点记录）：写入时刻打点 + 有界保留最近
+   * PROGRESS_MAX_STEPS 条（超出淘汰最旧）。未知 id no-op；终态后步骤不再
+   * 变更（轮询端可见状态恒定）。
+   */
+  appendProgress(id: string, step: string, detail?: string): void {
+    const job = this.jobs.get(id)
+    if (job === undefined || TERMINAL_PHASES.includes(job.phase)) return
+    job.progress.push({ step, ...(detail !== undefined ? { detail } : {}), at: Date.now() })
+    if (job.progress.length > PROGRESS_MAX_STEPS) {
+      job.progress.splice(0, job.progress.length - PROGRESS_MAX_STEPS)
+    }
   }
 
   /** 当前在途（非终态）任务数（可观测）。 */
@@ -105,9 +128,10 @@ export class JobTable {
 
   /**
    * 以完成收尾（done + 结果）。终态幂等：已终态任务保持原终态不变。
+   * @param degradedReason - degraded=true 时的原因分类（贯通轮询载荷）。
    * @returns true = 本次生效；false = 任务缺失或已终态。
    */
-  complete(id: string, results: readonly SearchCandidate[], degraded: boolean): boolean {
+  complete(id: string, results: readonly SearchCandidate[], degraded: boolean, degradedReason?: SearchJobStatus['degradedReason']): boolean {
     this.reclaimTerminalJobs()
     const job = this.jobs.get(id)
     if (job === undefined || TERMINAL_PHASES.includes(job.phase)) return false
@@ -115,6 +139,7 @@ export class JobTable {
     job.completedAt = Date.now()
     job.results = results
     job.degraded = degraded
+    if (degraded && degradedReason !== undefined) job.degradedReason = degradedReason
     return true
   }
 
@@ -146,7 +171,7 @@ export class JobTable {
     return 'cancelled'
   }
 
-  /** 任务轮询快照（SearchJobStatus 载荷形状）。 */
+  /** 任务轮询快照（SearchJobStatus 载荷形状；progress/degradedReason 可选扩展字段）。 */
   status(id: string): SearchJobStatus | undefined {
     this.reclaimTerminalJobs()
     const job = this.jobs.get(id)
@@ -156,6 +181,8 @@ export class JobTable {
       phase: job.phase,
       results: job.results,
       degraded: job.degraded,
+      ...(job.degradedReason !== undefined ? { degradedReason: job.degradedReason } : {}),
+      ...(job.progress.length > 0 ? { progress: [...job.progress] } : {}),
       message: job.message,
     }
   }
