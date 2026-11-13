@@ -1,7 +1,7 @@
 /**
  * fenix-dsh-session-advanced-search loader 配置解析与校验（design D7）。
  *
- * 配置键：`enabled`(true) / `maxCandidates`(30) / `topN`(5) / `llmTimeoutMs`(60000) /
+ * 配置键：`enabled`(true) / `maxCandidates`(30) / `topN`(5) / `llmTimeoutMs`(120000) /
  * `analyzeRoute`(可选 {provider, model}，非空串；把语义分析路由指到有凭证的
  * provider，优先级高于 profile 默认路由——design D2)。
  * 非法值（类型不符或超出范围）装载期显式抛 TypeError（session-grouper 纪律）：
@@ -36,12 +36,17 @@ export interface AdvancedSearchConfigInput {
   readonly analyzeRoute?: unknown
 }
 
-/** 配置键默认值（design D7；package.json dsh.config 描述镜像同一来源）。 */
+/**
+ * 配置键默认值（design D7；package.json dsh.config 描述镜像同一来源）。
+ * llmTimeoutMs=120_000：实机标定 bigmodel-cn/glm-5.3-flash 对 30 候选的
+ * 真实排序耗时 60~70s（2026-11-13 /root/fenixd 1285 会话实测，成功任务
+ * 68s 完成、非降级），60s 默认会把一半的成功分析掐成降级——取 2 倍余量。
+ */
 export const CONFIG_DEFAULTS = {
   enabled: true,
   maxCandidates: 30,
   topN: 5,
-  llmTimeoutMs: 60_000,
+  llmTimeoutMs: 120_000,
 } as const
 
 /** 布尔校验：真布尔才放行（loader schemastery 已给真布尔，这里兜字符串化形态）。 */

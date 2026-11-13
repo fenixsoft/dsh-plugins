@@ -51,7 +51,7 @@
       },
       "llmTimeoutMs": {
         "type": "number",
-        "default": 60000,
+        "default": 120000,
         "description": "LLM 单调用端到端超时（毫秒），超时回退机械评分排序"
       },
       "analyzeRoute": {

@@ -70,7 +70,7 @@ LLM 缝为可选缝（不进 `static inject`，管线执行期 `ctx.get` 探测�
 | `enabled` | `boolean` | `true` | 总开关：false 时 host 零注册（页面与 API 均不存在） |
 | `maxCandidates` | `number` | `30` | 机械预筛候选集上限（评分优先、同分取最近活跃截断），约束 LLM 输入规模 |
 | `topN` | `number` | `5` | LLM 排序后返回的 Top-N 候选数量 |
-| `llmTimeoutMs` | `number` | `60000` | LLM 单调用端到端超时（毫秒），超时回退机械评分排序 |
+| `llmTimeoutMs` | `number` | `120000` | LLM 单调用端到端超时（毫秒），超时回退机械评分排序。默认值按实机标定取 2 倍余量：bigmodel-cn/glm-5.3-flash 对 30 候选的真实排序耗时 60~70s |
 | `analyzeRoute` | `object?` | （缺省） | 可选 `{ provider, model }`（均非空串）：把语义分析路由指到指定 provider/model，优先于 profile 默认路由——典型用途是路由到有凭证的 provider（凭证预检按该 provider 判定） |
 
 ## 安装（人工步骤）
