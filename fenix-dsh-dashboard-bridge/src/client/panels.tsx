@@ -28,6 +28,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ReactElement } from 'react'
+import { alertCountStore } from './alertCount.js'
 import { buildProjectRowMap, compareNames } from './projectSync.js'
 import type { ProjectRowInfo, ProjectSummaryProjection, WorkspaceItemLike } from './projectSync.js'
 import { createNativeTipSuppressor, createWorkspaceTipController } from './wsTooltip.js'
@@ -82,10 +83,77 @@ const FIXED_GLYPHS: Record<FixedEntryId, readonly string[]> = {
   ],
 }
 
+/* ============ 运维条目告警徽标（add-dsh-ops-alert-badge） ============ */
+
+/**
+ * 徽标圆几何（viewBox 24×24 坐标系钉值）：右上角落位，圆域
+ * [cx±r, cy±r] = [12.75,23.75]×[0.25,11.25] 完全落于 viewBox 之内
+ * （tests/opsBadge.test.ts 元素树断言钉值；svg 内绘制天然落在图标盒内，
+ * 免疫宿主侧栏条目容器 overflow:hidden 裁剪——fenixd dashboard 侧栏徽标
+ * 「绝对定位角标悬出文本盒被裁成红弧」同型缺陷的根因规避，spec 防裁剪条款）。
+ * viewBox 坐标随 size 渲染尺寸等比缩放，窄态侧栏（仅显图标）同样完整。
+ */
+export const OPS_BADGE_CIRCLE = { cx: 18.25, cy: 5.75, r: 5.5 } as const
+
+/** 徽标红底色钉值（红底白字角标，spec「徽标渲染与零值隐匿」）。 */
+export const OPS_BADGE_RED = '#e5484d'
+
+/** 超百截断阈值：计数 > 99 显示 `99+`。 */
+export const OPS_BADGE_MAX = 99
+
+/** 徽标角标 testid（元素树断言锚点）。 */
+export const OPS_BADGE_TESTID = 'fenix-ops-alert-badge'
+
+/** 徽标文案：>99 显示 `99+`（spec 超百截断），其余原样十进制。 */
+export function opsBadgeLabel(count: number): string {
+  return count > OPS_BADGE_MAX ? '99+' : String(count)
+}
+
+/** 徽标字号（viewBox 单位）：随字符数收缩，单字符大字、`99+` 三字符最小可读。 */
+function opsBadgeFontSize(label: string): number {
+  if (label.length <= 1) return 8
+  if (label.length === 2) return 6.2
+  return 5
+}
+
+/**
+ * 徽标 `<g>`（circle + text）元素：红底白字，文字白描边（paintOrder:stroke
+ * 描边垫底）保细字在小尺寸下不断裂可读。调用方保证 count > 0（0/尚无成功
+ * 拉取不产生任何角标元素——零告警隐匿）。
+ */
+export function opsAlertBadgeElement(count: number): ReactElement {
+  const label = opsBadgeLabel(count)
+  const { cx, cy, r } = OPS_BADGE_CIRCLE
+  return (
+    <g data-testid={OPS_BADGE_TESTID}>
+      <circle cx={cx} cy={cy} r={r} fill={OPS_BADGE_RED} stroke="none" />
+      <text
+        x={cx}
+        y={cy}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={opsBadgeFontSize(label)}
+        fontWeight={700}
+        fill="#fff"
+        stroke="#fff"
+        strokeWidth={0.9}
+        paintOrder="stroke"
+      >
+        {label}
+      </text>
+    </g>
+  )
+}
+
 /** 固定条目线性图标组件工厂（每个条目 id 一枚）。 */
 export function fixedIconComponent(id: FixedEntryId): (props: PanelIconProps) => ReactElement {
   const glyph = FIXED_GLYPHS[id]
   return function FixedIcon({ size = 18 }: PanelIconProps) {
+    // 运维条目叠加待裁决告警徽标（add-dsh-ops-alert-badge）：无 hook 纯函数
+    // 读 alertCountStore 快照求值——计数变更经 index.ts 遮蔽重注册触发宿主
+    // 重渲染后此快照即新值（组件自身不订阅，仓库纪律：服务端/测试可直接求值
+    // 元素树）。count>0 渲染角标；0 或尚无成功拉取（null）不渲染任何角标元素。
+    const count = id === 'fenix-activities' ? alertCountStore.getSnapshot().count : null
     return (
       <svg
         width={size}
@@ -101,6 +169,7 @@ export function fixedIconComponent(id: FixedEntryId): (props: PanelIconProps) =>
         {glyph.map((d) => (
           <path key={d} d={d} />
         ))}
+        {count !== null && count > 0 ? opsAlertBadgeElement(count) : null}
       </svg>
     )
   }
