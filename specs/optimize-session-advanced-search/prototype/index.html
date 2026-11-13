@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-proto-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DSH 高级搜索 · 右侧内容区原型 (Round 1)</title>
+<script src="annotator.js" defer></script>
+<style>
+/* ===== DSH 真实主题令牌（提取自 dsh-client-ui 0.2.2-rc.1 bundle，light 主题）===== */
+:root {
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --dsw-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  /* static neutral-bluish (light) */
+  --n-00: #ffffff; --n-50: #f9fafb; --n-60: #f5f6f7; --n-100: #ebeef2; --n-150: #e9ecf2;
+  --n-300: #cfd3d6; --n-400: #adb2b8; --n-600: #81858c; --n-700: #61666b; --n-1000: #0f1115;
+  /* alias */
+  --label-primary: var(--n-1000);
+  --label-secondary: var(--n-700);
+  --label-tertiary: var(--n-600);
+  --label-caption: var(--n-400);
+  --bg-base: var(--n-00);
+  --bg-hover: var(--n-60);
+  --bg-overlay: var(--n-150);
+  --divider: var(--n-100);
+  /* accent */
+  --ds-500: #4176e6; --ds-400: #7aaaff; --ds-50: #edf3fe; --ds-100: #e4edfd; --ds-200: #d3e2ff;
+  --blue-500: #3b82f6; --blue-75: #e5f0ff;
+  --amber-bg: #fff7e8; --amber-fg: #b45309; --amber-dot: #f59e0b;
+  --red-fg: #b42318; --green-fg: #067647;
+  /* radius */
+  --r-xs: 4px; --r-sm: 8px; --r-md: 12px; --r-lg: 16px;
+  /* official icon-button chrome */
+  --icon-btn-size: 24px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  font-family: var(--dsw-font-family);
+  font-size: 13px; line-height: 20px;
+  color: var(--label-primary);
+  background: var(--bg-base);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; border: none; background: none; cursor: pointer; color: inherit; }
+svg { display: block; flex: none; }
+
+/* ===== 官方图标按钮 chrome（对齐 .bhn1Oq_clearButton 规格）===== */
+.icon-btn {
+  width: var(--icon-btn-size); height: var(--icon-btn-size);
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-sm); color: var(--label-secondary);
+  transition: background .12s ease, color .12s ease;
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--label-primary); }
+.icon-btn:focus-visible { outline: 2px solid var(--ds-500); outline-offset: 1px; }
+
+/* ===== 壳层布局：左栏 + 右内容区 ===== */
+#shell { display: flex; height: 100vh; }
+
+/* ---- 左侧栏（会话列表）---- */
+#sidebar {
+  width: 280px; flex: none;
+  border-right: 1px solid var(--divider);
+  display: flex; flex-direction: column;
+  background: var(--bg-base);
+}
+.sb-header { padding: 16px 16px 8px; }
+.sb-brand { font-size: 15px; font-weight: 600; letter-spacing: .2px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.sb-brand .logo-dot { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg, var(--ds-500), var(--blue-500)); }
+
+/* 官方搜索槽复刻：searchSlot > search > [searchButton][input][advanced★][clearButton] */
+.search-slot {
+  display: flex; align-items: center; gap: 2px;
+  height: 36px; padding: 0 6px 0 2px;
+  border: 1px solid var(--divider); border-radius: var(--r-md);
+  background: var(--n-50);
+  transition: border-color .12s ease, background .12s ease;
+}
+.search-slot:focus-within { border-color: var(--ds-400); background: var(--bg-base); box-shadow: 0 0 0 3px var(--ds-100); }
+.search-slot .sb-mag { color: var(--label-tertiary); }
+.search-slot input {
+  flex: 1; min-width: 0; border: none; outline: none; background: none;
+  font: inherit; font-size: 13px; color: var(--label-primary);
+}
+.search-slot input::placeholder { color: var(--label-caption); }
+.search-slot .icon-btn.adv-btn { position: relative; }
+.search-slot .icon-btn.adv-btn::after {
+  content: ""; position: absolute; inset: -3px; border-radius: 10px; display: none;
+}
+.sb-list { flex: 1; overflow-y: auto; padding: 8px; }
+.sb-item {
+  padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px; margin-bottom: 2px;
+  transition: background .12s ease;
+}
+.sb-item:hover { background: var(--bg-hover); }
+.sb-item .t { font-size: 13px; color: var(--label-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-item .m { font-size: 12px; line-height: 16px; color: var(--label-caption); display: flex; gap: 6px; align-items: center; }
+.sb-item .m .ws { font-family: var(--dsw-font-mono); font-size: 11px; }
+.sb-footer { padding: 10px 16px; border-top: 1px solid var(--divider); font-size: 12px; color: var(--label-caption); display: flex; align-items: center; gap: 8px; }
+.avatar { width: 20px; height: 20px; border-radius: 50%; background: var(--ds-200); color: var(--ds-500); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+
+/* ---- 右内容区：默认态 / 高级搜索态 ---- */
+#content { flex: 1; min-width: 0; position: relative; background: var(--n-50); }
+.view-chat {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px; color: var(--label-caption); font-size: 13px;
+}
+.view-chat .chat-card { width: 560px; max-width: 80%; background: var(--bg-base); border: 1px solid var(--divider); border-radius: var(--r-lg); padding: 16px; box-shadow: 0 1px 2px rgba(15,17,21,.04); }
+.view-chat .chat-card .ln { height: 10px; border-radius: 5px; background: var(--n-100); margin-bottom: 8px; }
+.view-chat .chat-card .ln.w60 { width: 60%; } .view-chat .ln.w85 { width: 85%; } .view-chat .ln.w40 { width: 40%; margin-bottom: 0; }
+
+/* ===== 高级搜索视图（右侧内容区对话框，非弹窗）===== */
+.view-search { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--n-50); animation: viewIn .18s ease; }
+@keyframes viewIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.as-header {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 12px 20px; background: var(--bg-base); border-bottom: 1px solid var(--divider);
+}
+.as-header .ttl { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.as-header .ttl svg { color: var(--label-secondary); }
+.scope-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 24px; padding: 0 8px; border-radius: 999px;
+  background: var(--n-100); color: var(--label-secondary); font-size: 12px;
+}
+.mode-toggle { margin-left: auto; display: inline-flex; padding: 2px; border-radius: var(--r-sm); background: var(--n-100); gap: 2px; }
+.mode-toggle button {
+  height: 22px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: var(--label-tertiary);
+  transition: all .12s ease;
+}
+.mode-toggle button.on { background: var(--bg-base); color: var(--label-primary); box-shadow: 0 1px 2px rgba(15,17,21,.08); }
+.mode-toggle button.on.demo-deg { color: var(--amber-fg); }
+
+/* ---- 底部输入区（对齐 DSH 会话 composer：居中 max 952px / radius-panel 28px / 底部渐变座）---- */
+.as-composer {
+  flex: none; position: relative; z-index: 7;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--n-50) 0%, transparent) 0px, var(--n-50) 36px);
+  padding: 10px 20px 14px;
+}
+.composer-card {
+  width: min(calc(100% - 16px), 952px);
+  margin: 0 auto;
+  background: var(--bg-base);
+  border: 1px solid #00000029;
+  border-radius: 28px;
+  padding: 8px 10px 8px 16px;
+  box-shadow: 0 1px 3px rgba(15,17,21,.05);
+  transition: border-color .15s ease, box-shadow .15s ease;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.composer-card:focus-within { border-color: var(--ds-400); box-shadow: 0 0 0 3px var(--ds-100); }
+.composer-row { display: flex; align-items: center; gap: 8px; }
+.composer-row .q-ic { color: var(--label-caption); }
+.composer-row input { flex: 1; border: none; outline: none; font: inherit; font-size: 13px; color: var(--label-primary); background: none; }
+.composer-row input::placeholder { color: var(--label-caption); }
+.send-btn {
+  width: 32px; height: 32px; flex: none; border-radius: 50%;
+  background: var(--ds-500); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background .12s ease, opacity .12s ease, transform .12s ease;
+}
+.send-btn:hover { background: #3565cc; }
+.send-btn:active { transform: scale(.96); }
+.send-btn:disabled { opacity: .4; cursor: default; }
+.composer-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.f-chip {
+  height: 26px; padding: 0 10px; border-radius: 999px; font-size: 12px;
+  border: 1px solid var(--divider); color: var(--label-secondary); background: var(--bg-base);
+  display: inline-flex; align-items: center; gap: 5px;
+  transition: all .12s ease;
+}
+.f-chip:hover { border-color: var(--n-300); }
+.f-chip.on { background: var(--ds-50); border-color: var(--ds-200); color: var(--ds-500); }
+.f-chip svg { color: currentColor; }
+.filter-row .hint { margin-left: auto; font-size: 12px; color: var(--label-caption); }
+.filter-row .hint kbd { font-family: var(--dsw-font-mono); font-size: 11px; background: var(--n-100); border-radius: 4px; padding: 1px 5px; }
+
+/* ---- 主体滚动区 ---- */
+.as-body { flex: 1; overflow-y: auto; padding: 14px 20px 24px; }
+
+/* AI 分析过程面板（Agent 对话风格）*/
+.ai-panel {
+  background: var(--bg-base); border: 1px solid var(--divider); border-radius: var(--r-lg);
+  margin-bottom: 14px; overflow: hidden; box-shadow: 0 1px 2px rgba(15,17,21,.04);
+  animation: viewIn .2s ease;
+}
+.ai-panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--divider); background: linear-gradient(180deg, var(--ds-50), var(--bg-base)); }
+.ai-panel-head .ai-ic { color: var(--ds-500); }
+.ai-panel-head .ai-ttl { font-size: 13px; font-weight: 600; }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px;
+  border-radius: 999px; font-size: 12px;
+}
+.status-pill.run { background: var(--ds-50); color: var(--ds-500); }
+.status-pill.done { background: #ecfdf3; color: var(--green-fg); }
+.status-pill.fail { background: var(--amber-bg); color: var(--amber-fg); }
+.status-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+.status-pill.run .dot { background: var(--ds-500); animation: pulse 1.2s ease infinite; }
+.status-pill.done .dot { background: var(--green-fg); }
+.status-pill.fail .dot { background: var(--amber-dot); }
+@keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.8); } }
+.ai-panel-head .spacer { flex: 1; }
+.btn-ghost {
+  height: 24px; padding: 0 9px; border-radius: var(--r-xs); font-size: 12px;
+  color: var(--label-secondary); display: inline-flex; align-items: center; gap: 5px;
+  transition: all .12s ease;
+}
+.btn-ghost:hover { background: var(--bg-hover); color: var(--label-primary); }
+.btn-ghost.stop { color: var(--red-fg); }
+.progress-track { height: 3px; background: var(--n-100); }
+.progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--ds-400), var(--ds-500)); border-radius: 0 3px 3px 0; transition: width .4s ease; }
+
+.ai-steps { padding: 6px 0; }
+.step { display: flex; gap: 10px; padding: 7px 14px; align-items: flex-start; animation: stepIn .25s ease; }
+@keyframes stepIn { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
+.step .st-ic { margin-top: 2px; color: var(--label-caption); }
+.step.ok .st-ic { color: var(--green-fg); }
+.step.run .st-ic { color: var(--ds-500); }
+.step.fail .st-ic { color: var(--red-fg); }
+.step .st-body { flex: 1; min-width: 0; }
+.step .st-l1 { font-size: 13px; color: var(--label-primary); }
+.step.run .st-l1 { color: var(--ds-500); }
+.step.fail .st-l1 { color: var(--amber-fg); }
+.step .st-l2 { font-size: 12px; line-height: 16px; color: var(--label-tertiary); margin-top: 1px; }
+.step .st-l2 .mono, .mono { font-family: var(--dsw-font-mono); font-size: 11.5px; }
+.step .st-time { font-size: 11px; color: var(--label-caption); margin-top: 2px; font-family: var(--dsw-font-mono); }
+.streaming-dots { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: 1px; }
+.streaming-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--ds-400); animation: pulse 1s ease infinite; }
+.streaming-dots i:nth-child(2) { animation-delay: .15s; } .streaming-dots i:nth-child(3) { animation-delay: .3s; }
+.detail-toggle { padding: 4px 14px 10px; }
+.detail-body { padding: 8px 14px 12px 38px; }
+.log-line { font-family: var(--dsw-font-mono); font-size: 11px; line-height: 18px; color: var(--label-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-line .ts { color: var(--label-caption); margin-right: 8px; }
+.log-line.warn { color: var(--amber-fg); }
+.log-line.err { color: var(--red-fg); }
+
+/* 降级横幅 */
+.degrade-banner {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--amber-bg); border: 1px solid #fde3b7; border-radius: var(--r-md);
+  padding: 10px 12px; margin-bottom: 14px; animation: viewIn .2s ease;
+}
+.degrade-banner svg { color: var(--amber-dot); margin-top: 1px; }
+.degrade-banner .db-body { flex: 1; }
+.degrade-banner .db-t { font-size: 13px; font-weight: 600; color: var(--amber-fg); }
+.degrade-banner .db-d { font-size: 12px; line-height: 17px; color: var(--amber-fg); opacity: .85; margin-top: 2px; }
+.degrade-banner .db-d .mono { background: #ffffffb3; border-radius: 4px; padding: 0 4px; }
+.degrade-banner .db-actions { display: flex; gap: 8px; margin-top: 8px; }
+.btn-amber {
+  height: 26px; padding: 0 10px; border-radius: var(--r-sm); font-size: 12px;
+  background: var(--bg-base); border: 1px solid #fde3b7; color: var(--amber-fg);
+  display: inline-flex; align-items: center; gap: 5px; transition: all .12s ease;
+}
+.btn-amber:hover { background: #fff; border-color: var(--amber-dot); }
+
+/* 结果区 */
+.results-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 2px 10px; }
+.results-head .r-ttl { font-size: 12px; font-weight: 600; color: var(--label-secondary); letter-spacing: .3px; }
+.results-head .r-cnt { font-size: 12px; color: var(--label-caption); }
+.results-head .sort-by { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--label-tertiary); }
+.result-card {
+  background: var(--bg-base); border: 1px solid var(--divider); border-radius: var(--r-md);
+  padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+  transition: border-color .12s ease, box-shadow .12s ease, transform .12s ease;
+  animation: viewIn .25s ease backwards;
+}
+.result-card:hover { border-color: var(--ds-200); box-shadow: 0 2px 8px rgba(15,17,21,.06); transform: translateY(-1px); }
+.rc-top { display: flex; align-items: center; gap: 8px; }
+.rc-title { font-size: 13px; font-weight: 600; color: var(--label-primary); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc-title mark { background: var(--ds-100); color: var(--ds-500); border-radius: 3px; padding: 0 2px; }
+.conf { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.conf .c-track { width: 64px; height: 4px; border-radius: 2px; background: var(--n-100); overflow: hidden; }
+.conf .c-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--ds-400), var(--ds-500)); width: 0%; transition: width .6s ease; }
+.conf .c-val { font-family: var(--dsw-font-mono); font-size: 11px; color: var(--ds-500); width: 26px; text-align: right; }
+.conf.mech .c-fill { background: var(--n-300); }
+.conf.mech .c-val { color: var(--label-tertiary); }
+.rc-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 12px; line-height: 16px; color: var(--label-caption); flex-wrap: wrap; }
+.rc-meta .ws-chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--dsw-font-mono); font-size: 11px; color: var(--label-tertiary); background: var(--n-60); border-radius: 5px; padding: 1px 6px; }
+.rc-meta .dot-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--n-300); }
+.rc-reason { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--label-secondary); }
+.rc-reason svg { color: var(--label-caption); }
+.rc-reason b { color: var(--ds-500); font-weight: 600; }
+.rc-reason.mech b { color: var(--label-secondary); }
+.match-kw { display: inline-flex; gap: 4px; }
+.match-kw span { background: var(--n-100); border-radius: 4px; padding: 0 5px; font-size: 11px; font-family: var(--dsw-font-mono); color: var(--label-secondary); }
+
+/* 初始态 */
+.initial-state { padding: 40px 0 0; text-align: center; color: var(--label-tertiary); animation: viewIn .2s ease; }
+.initial-state .big-ic { margin: 0 auto 12px; width: 44px; height: 44px; border-radius: var(--r-md); background: var(--bg-base); border: 1px solid var(--divider); display: flex; align-items: center; justify-content: center; color: var(--label-caption); box-shadow: 0 1px 2px rgba(15,17,21,.04); }
+.initial-state .h { font-size: 14px; font-weight: 600; color: var(--label-secondary); margin-bottom: 4px; }
+.initial-state .d { font-size: 12px; color: var(--label-caption); }
+.syntax-row { display: flex; justify-content: center; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.syntax-chip { font-size: 12px; font-family: var(--dsw-font-mono); color: var(--label-secondary); background: var(--bg-base); border: 1px solid var(--divider); border-radius: 999px; padding: 4px 10px; cursor: default; }
+.syntax-chip b { color: var(--ds-500); font-weight: 600; }
+.recent-row { margin-top: 20px; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; align-items: center; }
+.recent-row .lbl { font-size: 12px; color: var(--label-caption); }
+.recent-chip { font-size: 12px; color: var(--label-secondary); background: var(--bg-base); border: 1px solid var(--divider); border-radius: 999px; padding: 3px 10px; cursor: pointer; transition: all .12s ease; }
+.recent-chip:hover { border-color: var(--ds-200); color: var(--ds-500); }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--n-300); border-radius: 4px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 旋转 spinner */
+.spinner { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* annotator 高亮兼容 */
+[data-proto-id] { position: relative; }
+/* 锚点辅助不得覆盖视图级 absolute 定位 */
+.view-search[data-proto-id], .view-chat[data-proto-id] { position: absolute; }
+</style>
+</head>
+<body>
+<div id="shell">
+
+  <!-- ===================== 左侧栏 ===================== -->
+  <aside id="sidebar" data-proto-id="sidebar">
+    <div class="sb-header" data-proto-id="sidebar-header">
+      <div class="sb-brand"><span class="logo-dot"></span>DeepSeek Harness</div>
+      <!-- 官方搜索槽 + 新高级搜索入口（官方 IconSearchOutlineMedium 几何，16 viewBox / stroke 1.3） -->
+      <div class="search-slot" data-proto-id="sidebar-search-slot">
+        <button class="icon-btn sb-mag" title="搜索会话" data-proto-id="sidebar-search-mag">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+            <path d="M6.58727 11.8586C9.55061 11.8586 11.9529 9.45637 11.9529 6.49304C11.9529 3.5297 9.55061 1.12744 6.58727 1.12744C3.62394 1.12744 1.22168 3.5297 1.22168 6.49304C1.22168 9.45637 3.62394 11.8586 6.58727 11.8586Z"/>
+            <path d="M10.2991 10.3933L14.7783 14.8725"/>
+          </svg>
+        </button>
+        <input placeholder="搜索会话…" data-proto-id="sidebar-search-input">
+        <!-- ★ 新高级搜索入口：与官方 X 完全同规格（16px / stroke 1.3 / 24px 按钮座 / label-secondary） -->
+        <button class="icon-btn adv-btn" id="advEntry" title="高级搜索" aria-label="高级搜索" data-proto-id="sidebar-advanced-entry">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+            <path d="M6.58727 11.8586C9.55061 11.8586 11.9529 9.45637 11.9529 6.49304C11.9529 3.5297 9.55061 1.12744 6.58727 1.12744C3.62394 1.12744 1.22168 3.5297 1.22168 6.49304C1.22168 9.45637 3.62394 11.8586 6.58727 11.8586Z"/>
+            <path d="M10.2991 10.3933L14.7783 14.8725"/>
+            <path d="M8 4.2V7.8" stroke-width="1.1"/>
+            <path d="M6.2 6H9.8" stroke-width="1.1"/>
+          </svg>
+        </button>
+        <button class="icon-btn" title="清除" data-proto-id="sidebar-search-clear">
+          <!-- 官方 IconCloseOutline 原样几何 -->
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">
+            <path d="M2.5 2.5L13.5 13.5"/><path d="M13.5 2.5L2.5 13.5"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="sb-list" data-proto-id="sidebar-session-list">
+      <div class="sb-item"><span class="t">修复 fenix 插件安装问题</span><span class="m"><span class="ws">/root/dsh-plugins</span>· 14:42</span></div>
+      <div class="sb-item"><span class="t">你是 Fenixd 代码修复子代理，请按 SPEC 修复…</span><span class="m"><span class="ws">/root/fenixd</span>· 14:31</span></div>
+      <div class="sb-item"><span class="t">fenix-prototype 原型批注迭代</span><span class="m"><span class="ws">/root/dsh-plugins</span>· 13:58</span></div>
+      <div class="sb-item"><span class="t">DSH web 高级搜索 SPEC 终审</span><span class="m"><span class="ws">/root/dsh-plugins</span>· 12:40</span></div>
+      <div class="sb-item"><span class="t">Hexo 博客主题微调</span><span class="m"><span class="ws">/root/hexo-blog</span>· 昨天</span></div>
+      <div class="sb-item"><span class="t">fenixd dashboard FRP 隧道配置</span><span class="m"><span class="ws">/root/fenixd</span>· 昨天</span></div>
+    </div>
+    <div class="sb-footer" data-proto-id="sidebar-footer">
+      <span class="avatar">F</span> fenix · 全部会话
+    </div>
+  </aside>
+
+  <!-- ===================== 右内容区 ===================== -->
+  <main id="content" data-proto-id="content-area">
+
+    <!-- 默认态：聊天视图占位（证明高级搜索不弹窗、不遮挡） -->
+    <div class="view-chat" id="chatView" data-proto-id="chat-view">
+      <div>当前会话 · 修复 fenix 插件安装问题</div>
+      <div class="chat-card">
+        <div class="ln w85"></div><div class="ln w60"></div><div class="ln w85"></div><div class="ln w40"></div>
+      </div>
+      <div style="font-size:12px">↑ 点击左侧搜索框的 <b style="color:var(--ds-500)">⊕ 高级搜索</b>，此处将切换为搜索视图（右侧内容区，非弹窗）</div>
+    </div>
+
+    <!-- 高级搜索视图 -->
+    <section class="view-search" id="searchView" style="display:none" data-proto-id="advanced-search-view">
+
+      <header class="as-header" data-proto-id="search-header">
+        <div class="ttl">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+            <path d="M6.58727 11.8586C9.55061 11.8586 11.9529 9.45637 11.9529 6.49304C11.9529 3.5297 9.55061 1.12744 6.58727 1.12744C3.62394 1.12744 1.22168 3.5297 1.22168 6.49304C1.22168 9.45637 3.62394 11.8586 6.58727 11.8586Z"/>
+            <path d="M10.2991 10.3933L14.7783 14.8725"/><path d="M8 4.2V7.8" stroke-width="1.1"/><path d="M6.2 6H9.8" stroke-width="1.1"/>
+          </svg>
+          高级搜索
+        </div>
+        <span class="scope-chip" data-proto-id="scope-chip">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8 2V14"/><path d="M2 8H14"/></svg>
+          全部工作区
+        </span>
+        <span class="scope-chip" data-proto-id="scope-time-chip">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8.11646 4.78442V8.03442L10.6165 9.53442"/><path d="M8.11646 13.4094C11.154 13.4094 13.6165 10.947 13.6165 7.90942C13.6165 4.87186 11.154 2.40942 8.11646 2.40942C5.07889 2.40942 2.61646 4.87186 2.61646 7.90942C2.61646 10.947 5.07889 13.4094 8.11646 13.4094Z"/></svg>
+          近 7 天
+        </span>
+        <div class="mode-toggle" id="modeToggle" title="原型预览用：切换 AI 分析 / 机械搜索两种结果形态" data-proto-id="preview-mode-toggle">
+          <button class="on" data-mode="ok">AI 分析</button>
+          <button data-mode="degraded">机械搜索</button>
+        </div>
+        <button class="icon-btn" id="closeSearch" title="关闭高级搜索" data-proto-id="search-close">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+            <path d="M2.5 2.5L13.5 13.5"/><path d="M13.5 2.5L2.5 13.5"/>
+          </svg>
+        </button>
+      </header>
+
+      <div class="as-body" id="asBody" data-proto-id="search-body">
+
+        <!-- 初始态 -->
+        <div class="initial-state" id="initialState" data-proto-id="initial-state">
+          <div class="big-ic">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+              <path d="M6.58727 11.8586C9.55061 11.8586 11.9529 9.45637 11.9529 6.49304C11.9529 3.5297 9.55061 1.12744 6.58727 1.12744C3.62394 1.12744 1.22168 3.5297 1.22168 6.49304C1.22168 9.45637 3.62394 11.8586 6.58727 11.8586Z"/>
+              <path d="M10.2991 10.3933L14.7783 14.8725"/><path d="M8 4.2V7.8" stroke-width="1.1"/><path d="M6.2 6H9.8" stroke-width="1.1"/>
+            </svg>
+          </div>
+          <div class="h">用自然语言搜索历史会话</div>
+          <div class="d">先机械预筛，再由 AI 按语义相关性排序；分析过程实时可见，随时可中断</div>
+          <div class="syntax-row">
+            <span class="syntax-chip"><b>ws:</b>/root/fenixd 限定工作区</span>
+            <span class="syntax-chip"><b>since:</b>3d 近三天</span>
+            <span class="syntax-chip"><b>in:</b>title|path|content</span>
+          </div>
+          <div class="recent-row">
+            <span class="lbl">最近搜索</span>
+            <button class="recent-chip">spec 高级搜索 结果排序</button>
+            <button class="recent-chip">fenixd 会话去重</button>
+            <button class="recent-chip">dashboard FRP 端口</button>
+          </div>
+        </div>
+
+        <!-- 运行时注入：AI 分析面板 / 降级横幅 / 结果列表 -->
+        <div id="dynamicArea"></div>
+      </div>
+
+      <!-- 底部输入区（对齐 DSH 会话 composer 样式） -->
+      <footer class="as-composer" data-proto-id="composer-section">
+        <div class="composer-card">
+          <div class="composer-row">
+            <span class="q-ic">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+                <path d="M6.58727 11.8586C9.55061 11.8586 11.9529 9.45637 11.9529 6.49304C11.9529 3.5297 9.55061 1.12744 6.58727 1.12744C3.62394 1.12744 1.22168 3.5297 1.22168 6.49304C1.22168 9.45637 3.62394 11.8586 6.58727 11.8586Z"/>
+                <path d="M10.2991 10.3933L14.7783 14.8725"/>
+              </svg>
+            </span>
+            <input id="queryInput" placeholder="描述你要找的内容，AI 将按语义匹配历史会话…" value="修复 fenix 插件安装的问题" data-proto-id="query-input">
+            <button class="send-btn" id="runSearch" title="搜索（Enter）" data-proto-id="run-search-btn">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M6.97211 1.94476C7.55785 1.35914 8.50767 1.35919 9.09343 1.94476L13.921 6.77228L13.2138 7.47939L8.38632 2.65187C8.19108 2.45682 7.87443 2.45677 7.67922 2.65187L2.74397 7.58711L2.03687 6.88L6.97211 1.94476Z"/><path d="M7.97571 14.5732L8.02421 2.34139"/></svg>
+            </button>
+          </div>
+          <div class="composer-meta" data-proto-id="filter-chips">
+            <button class="f-chip on" data-filter="ws">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M13.5 2.5H2.5C1.94772 2.5 1.5 2.94772 1.5 3.5V4.5C1.5 5.05228 1.94772 5.5 2.5 5.5H13.5C14.0523 5.5 14.5 5.05228 14.5 4.5V3.5C14.5 2.94772 14.0523 2.5 13.5 2.5Z"/><path d="M2.5 5.5V13.5C2.5 13.7652 2.60536 14.0196 2.79289 14.2071C2.98043 14.3946 3.23478 14.5 3.5 14.5H12.5C12.7652 14.5 13.0196 14.3946 13.2071 14.2071C13.3946 14.0196 13.5 13.7652 13.5 13.5V5.5"/><path d="M6.5 9.5H9.5"/></svg>
+              工作区 · 全部
+            </button>
+            <button class="f-chip" data-filter="status">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M1.01503 8.0001L5.6964 8.0001C6.41913 8.0001 6.78049 8.0001 7.12115 7.91951C7.4232 7.84804 7.71233 7.73014 7.97821 7.57C8.27809 7.38939 8.5364 7.13669 9.05303 6.63129L11.3281 4.40564"/><path d="M1.01221 7.9999L5.6964 7.9999C6.41913 7.9999 6.78049 7.9999 7.12115 8.08049C7.4232 8.15196 7.71233 8.26986 7.97821 8.43C8.27809 8.61061 8.5364 8.86331 9.05303 9.36871L11.3281 11.5944"/></svg>
+              状态 · 全部
+            </button>
+            <span class="hint" style="margin-left:auto;font-size:12px;color:var(--label-caption)"><kbd>Enter</kbd> 搜索 · 支持 <b>ws:</b> <b>since:</b> <b>in:</b> 前缀</span>
+          </div>
+        </div>
+      </footer>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+/* ============ 官方图标（dsh-client-ui-primitives 0.2.2-rc.1 原样几何） ============ */
+const ICONS = {
+  search: (sw) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" aria-hidden="true"><path d="M6.58727 11.8586C9.55061 11.8586 11.9529 9.45637 11.9529 6.49304C11.9529 3.5297 9.55061 1.12744 6.58727 1.12744C3.62394 1.12744 1.22168 3.5297 1.22168 6.49304C1.22168 9.45637 3.62394 11.8586 6.58727 11.8586Z"/><path d="M10.2991 10.3933L14.7783 14.8725"/></svg>`,
+  check: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M12.5303 6.53027L8.80273 10.2578C8.54967 10.5109 8.31796 10.7439 8.10645 10.9141C7.88375 11.0932 7.616 11.2602 7.27344 11.3145C7.09229 11.3431 6.90771 11.3431 6.72656 11.3145C6.384 11.2602 6.11625 11.0932 5.89355 10.9141C5.68204 10.7439 5.45033 10.5109 5.19727 10.2578L3.46973 8.53027L4.53027 7.46973L6.25781 9.19727C6.53457 9.47402 6.70036 9.63859 6.83398 9.74609C6.95637 9.84453 6.98241 9.83644 6.96094 9.83301C6.98679 9.83709 7.01321 9.83709 7.03906 9.83301C7.01759 9.83644 7.04363 9.84453 7.16602 9.74609C7.29964 9.63859 7.46543 9.47402 7.74219 9.19727L11.4697 5.46973L12.5303 6.53027Z"/><path d="M14.5996 8C14.5996 4.35492 11.6451 1.40039 8 1.40039C4.35492 1.40039 1.40039 4.35492 1.40039 8C1.40039 11.6451 4.35492 14.5996 8 14.5996C11.6451 14.5996 14.5996 11.6451 14.5996 8ZM15.9004 8C15.9004 12.363 12.363 15.9004 8 15.9004C3.63695 15.9004 0.0996094 12.363 0.0996094 8C0.0996094 3.63695 3.63695 0.0996094 8 0.0996094C12.363 0.0996094 15.9004 8 15.9004 8Z"/></svg>`,
+  warn: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M6.87 2.6a1.33 1.33 0 0 1 2.26 0l5.34 9.33A1.33 1.33 0 0 1 13.33 14H2.67a1.33 1.33 0 0 1-1.14-2.07Z"/><path d="M8 6v3m0 2.33h.01"/></svg>`,
+  refresh: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M14.5001 8C14.5 9.28552 14.1188 10.5422 13.4045 11.611C12.6903 12.6799 11.6752 13.5129 10.4875 14.0049C9.29982 14.4968 7.99295 14.6255 6.73212 14.3747C5.4713 14.124 4.31314 13.505 3.4041 12.596C2.49514 11.687 1.87614 10.5288 1.62537 9.26798C1.37459 8.00716 1.50331 6.70028 1.99525 5.51261C2.48719 4.32494 3.32025 3.30981 4.3891 2.59557C5.45795 1.88134 6.71458 1.50008 8.0001 1.5C9.9001 1.5 11.7001 2.3 13.0001 3.6L14.5001 5.1"/><path d="M14.4999 1.5V5.1H10.8999"/></svg>`,
+  stop: `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M12.5 2.5H3.5C2.94772 2.5 2.5 2.94772 2.5 3.5V12.5C2.5 13.0523 2.94772 13.5 3.5 13.5H12.5C13.0523 13.5 13.5 13.0523 13.5 12.5V3.5C13.5 2.94772 13.0523 2.5 12.5 2.5Z"/></svg>`,
+  sparkle: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M5.875 3C5.875 6.33333 7.54167 8 10.875 8C7.54167 8 5.875 9.66667 5.875 13C5.875 9.66667 4.20833 8 0.875 8C4.20833 8 5.875 6.33333 5.875 3Z"/><path d="M12.375 1.55823C12.375 3.39156 13.2917 4.30823 15.125 4.30823C13.2917 4.30823 12.375 5.22489 12.375 7.05823C12.375 5.22489 11.4583 4.30823 9.625 4.30823C11.4583 4.30823 12.375 3.39156 12.375 1.55823Z"/><path d="M12.375 10.4418C12.375 11.7751 13.0417 12.4418 14.375 12.4418C13.0417 12.4418 12.375 13.1084 12.375 14.4418C12.375 13.1084 11.7083 12.4418 10.375 12.4418C11.7083 12.4418 12.375 11.7751 12.375 10.4418Z"/></svg>`,
+  think: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M10.2854 5.71481C12.9673 8.39663 14.1182 11.5938 12.8562 12.8559C11.5942 14.1179 8.39706 12.9669 5.71518 10.2851C3.03333 7.60323 1.88236 4.40608 3.14441 3.14403C4.40644 1.882 7.6036 3.03297 10.2854 5.71481Z"/><path d="M10.2854 10.2851C7.6036 12.9669 4.40644 14.1179 3.14441 12.8559C1.88236 11.5938 3.03333 8.39663 5.71518 5.71481C8.39706 3.03297 11.5942 1.882 12.8562 3.14403C14.1182 4.40608 12.9673 7.60323 10.2854 10.2851Z"/><path d="M8.86291 8.0002C8.86291 8.47549 8.47762 8.86087 8.00224 8.86087C7.52694 8.86087 7.1416 8.47549 7.1416 8.0002C7.1416 7.52485 7.52694 7.13953 8.00224 7.13953C8.47762 7.13953 8.86291 7.52485 8.86291 8.0002Z"/></svg>`,
+  branch: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M1.01503 8.0001L5.6964 8.0001C6.41913 8.0001 6.78049 8.0001 7.12115 7.91951C7.4232 7.84804 7.71233 7.73014 7.97821 7.57C8.27809 7.38939 8.5364 7.13669 9.05303 6.63129L11.3281 4.40564"/><path d="M1.01221 7.9999L5.6964 7.9999C6.41913 7.9999 6.78049 7.9999 7.12115 8.08049C7.4232 8.15196 7.71233 8.26986 7.97821 8.43C8.27809 8.61061 8.5364 8.86331 9.05303 9.36871L11.3281 11.5944"/></svg>`,
+  users: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M6 8.25C7.51878 8.25 8.75 7.01878 8.75 5.5C8.75 3.98122 7.51878 2.75 6 2.75C4.48122 2.75 3.25 3.98122 3.25 5.5C3.25 7.01878 4.48122 8.25 6 8.25Z"/><path d="M1 14.5C1 11.5 3.5 10.25 6 10.25C8.5 10.25 11 11.5 11 14.5"/><path d="M10.5 2.9C11.65 3.35 12.45 4.35 12.45 5.5C12.45 6.65 11.65 7.65 10.5 8.1"/><path d="M12.4 10.6C13.9 11.3 15 12.6 15 14.5"/></svg>`,
+  archive: `<svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><path d="M13.5 2.5H2.5C1.94772 2.5 1.5 2.94772 1.5 3.5V4.5C1.5 5.05228 1.94772 5.5 2.5 5.5H13.5C14.0523 5.5 14.5 5.05228 14.5 4.5V3.5C14.5 2.94772 14.0523 2.5 13.5 2.5Z"/><path d="M2.5 5.5V13.5C2.5 13.7652 2.60536 14.0196 2.79289 14.2071C2.98043 14.3946 3.23478 14.5 3.5 14.5H12.5C12.7652 14.5 13.0196 14.3946 13.2071 14.2071C13.3946 14.0196 13.5 13.7652 13.5 13.5V5.5"/><path d="M6.5 9.5H9.5"/></svg>`,
+  rightUp: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M11.7256 2.77441C12.5538 2.77469 13.2256 3.44616 13.2256 4.27441V10.1416H12.2256V4.27441C12.2256 3.99844 12.0015 3.77469 11.7256 3.77441H5.7207V2.77441H11.7256Z"/><path d="M2.77441 13.2255L12.3756 3.62427"/></svg>`,
+  chevron: `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M6 12L9.29289 8.70711C9.68342 8.31658 9.68342 7.68342 9.29289 7.29289L6 4"/></svg>`,
+  clock: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8.11646 4.78442V8.03442L10.6165 9.53442"/><path d="M8.11646 13.4094C11.154 13.4094 13.6165 10.947 13.6165 7.90942C13.6165 4.87186 11.154 2.40942 8.11646 2.40942C5.07889 2.40942 2.61646 4.87186 2.61646 7.90942C2.61646 10.947 5.07889 13.4094 8.11646 13.4094Z"/></svg>`,
+  spinner: `<svg class="spinner" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M8 1.5A6.5 6.5 0 1 1 1.5 8" stroke-linecap="round"/><circle cx="8" cy="8" r="6.5" stroke-opacity=".2"/></svg>`,
+  x: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M2.5 2.5L13.5 13.5"/><path d="M13.5 2.5L2.5 13.5"/></svg>`,
+};
+
+/* ============ 假数据（源自真实探测结果） ============ */
+const RESULT_OK = [
+  { title: "修复 fenix 插件安装问题", ws: "/root/dsh-plugins", time: "今天 14:42", score: 0.94, ai: true,
+    reason: `语义命中：讨论 <b>fenix 插件</b>的 cordis.patch 注册与 pnpm link 安装路径`,
+    kw: ["插件安装", "cordis.patch"] },
+  { title: "你是 Fenixd 代码修复子代理，请按 SPEC 修复 verify-web-bridge…", ws: "/root/fenixd", time: "今天 14:31", score: 0.88, ai: true,
+    reason: `语义命中：<b>修复</b>流程与插件验证桥接脚本相关`,
+    kw: ["修复", "verify-web-bridge"] },
+  { title: "fenixd dashboard FRP 隧道配置", ws: "/root/fenixd", time: "昨天 22:10", score: 0.71, ai: true,
+    reason: `语义关联：fenix 组件的部署与连通性排查`,
+    kw: ["fenixd", "部署"] },
+  { title: "DSH web 高级搜索 SPEC 终审", ws: "/root/dsh-plugins", time: "今天 12:40", score: 0.63, ai: true,
+    reason: `语义关联：插件交付物清单与验收流程`,
+    kw: ["SPEC", "插件"] },
+  { title: "fenix-prototype 原型批注迭代", ws: "/root/dsh-plugins", time: "今天 13:58", score: 0.55, ai: true,
+    reason: `语义关联：fenix 工具链的 UI 验证环节`,
+    kw: ["fenix", "原型"] },
+];
+const RESULT_DEGRADED = [
+  { title: "你是 Fenixd 代码修复子代理，", ws: "/root/fenixd", time: "今天 14:31", score: 1.0, ai: false, mech: "标题/路径关键词命中（5 分）", kw: ["修复", "fenix"] },
+  { title: "你是 Fenixd 代码修复子代理，", ws: "/root/fenixd", time: "今天 14:31", score: 1.0, ai: false, mech: "标题/路径关键词命中（5 分）", kw: ["修复", "fenix"] },
+  { title: "修复 fenix 插件安装问题", ws: "/root/dsh-plugins", time: "今天 14:42", score: 0.8, ai: false, mech: "标题/路径关键词命中（4 分）", kw: ["修复", "插件"] },
+  { title: "DSH web 高级搜索 SPEC 终审", ws: "/root/dsh-plugins", time: "今天 12:40", score: 0.6, ai: false, mech: "路径关键词命中（3 分）", kw: ["fenix"] },
+  { title: "fenixd dashboard FRP 隧道配置", ws: "/root/fenixd", time: "昨天 22:10", score: 0.6, ai: false, mech: "路径关键词命中（3 分）", kw: ["fenix"] },
+];
+
+/* ============ 交互脚本 ============ */
+const $ = (s, p) => (p || document).querySelector(s);
+const $$ = (s, p) => Array.from((p || document).querySelectorAll(s));
+let mode = "ok";            // ok | degraded
+let runToken = 0;           // 中断令牌
+let elapsedTimer = null;
+
+/* 视图切换：右侧内容区原地替换，无遮罩无弹窗 */
+function openSearch() {
+  $("#chatView").style.display = "none";
+  $("#searchView").style.display = "flex";
+}
+function closeSearch() {
+  $("#searchView").style.display = "none";
+  $("#chatView").style.display = "flex";
+  resetToInitial();
+}
+$("#advEntry").addEventListener("click", openSearch);
+$("#sidebarSearchMag", document); // 静态
+$(".sb-mag").addEventListener("click", openSearch);
+$("#closeSearch").addEventListener("click", closeSearch);
+
+/* 预览模式切换 */
+$$("#modeToggle button").forEach((b) => b.addEventListener("click", () => {
+  $$("#modeToggle button").forEach((x) => x.classList.remove("on"));
+  b.classList.add("on");
+  mode = b.dataset.mode;
+  const q = $("#queryInput").value.trim();
+  if (q && $("#dynamicArea").children.length) runSearch(q);
+}));
+
+/* 工具 */
+function esc(s) { return s.replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function fmtTime(sec) { return sec.toFixed(1) + "s"; }
+function stopTimer() { if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; } }
+
+function resetToInitial() {
+  runToken++;
+  stopTimer();
+  $("#dynamicArea").innerHTML = "";
+  $("#initialState").style.display = "";
+  $("#runSearch").disabled = false;
+}
+
+/* AI 分析面板（Agent 对话风格：步骤流 + 可展开详情 + 可中断） */
+function renderAiPanel() {
+  return `
+  <div class="ai-panel" data-proto-id="ai-analysis-panel">
+    <div class="ai-panel-head">
+      <span class="ai-ic">${ICONS.sparkle}</span>
+      <span class="ai-ttl">AI 语义分析</span>
+      <span class="status-pill run" id="aiStatus"><span class="dot"></span><span id="aiStatusText">分析中 · 0.0s</span></span>
+      <span class="spacer"></span>
+      <button class="btn-ghost" id="detailToggle" data-proto-id="analysis-detail-toggle">详细信息 ${ICONS.chevron}</button>
+      <button class="btn-ghost stop" id="stopBtn" data-proto-id="analysis-stop-btn">${ICONS.stop} 中断</button>
+    </div>
+    <div class="progress-track"><div class="progress-bar" id="aiProgress"></div></div>
+    <div class="ai-steps" id="aiSteps"></div>
+    <div class="detail-body" id="detailBody" style="display:none" data-proto-id="analysis-detail-log"></div>
+  </div>`;
+}
+
+function stepHTML(id, icon, l1, l2, cls) {
+  return `<div class="step ${cls || ""}" id="${id}" data-proto-id="analysis-step">
+    <span class="st-ic">${icon}</span>
+    <span class="st-body"><span class="st-l1">${l1}</span>${l2 ? `<span class="st-l2">${l2}</span>` : ""}</span>
+  </div>`;
+}
+
+function logLine(ts, text, cls) {
+  return `<div class="log-line ${cls || ""}"><span class="ts">${ts}</span>${text}</div>`;
+}
+
+/* 结果卡片 */
+function resultCard(r, i) {
+  const confCls = r.ai ? "conf" : "conf mech";
+  const pct = Math.round(Math.min(r.score, 1) * 100);
+  const title = esc(r.title);
+  const reason = r.ai
+    ? `<span class="rc-reason">${ICONS.sparkle.replace('width="16"', 'width="13"').replace('height="16"', 'height="13"')}<span>${r.reason}</span></span>`
+    : `<span class="rc-reason mech">${ICONS.search(1).replace('width="16"', 'width="13"').replace('height="16"', 'height="13"')}<span>机械匹配 · ${r.mech}</span></span>`;
+  return `<div class="result-card" style="animation-delay:${i * 60}ms" data-proto-id="result-card">
+    <div class="rc-top">
+      <span class="rc-title">${title}</span>
+      <span class="${confCls}"><span class="c-track"><span class="c-fill" data-pct="${pct}"></span></span><span class="c-val">${r.ai ? pct + "%" : r.score.toFixed(1)}</span></span>
+    </div>
+    <div class="rc-meta">
+      <span class="ws-chip">${ICONS.archive.replace('width="14"', 'width="12"').replace('height="14"', 'height="12"')}${esc(r.ws)}</span>
+      <span class="dot-sep"></span><span>${ICONS.clock.replace('width="14"', 'width="12"').replace('height="14"', 'height="12"') ? "" : ""}${esc(r.time)}</span>
+      <span class="dot-sep"></span><span>${r.ai ? "AI 相关性排序" : "机械匹配排序"}</span>
+    </div>
+    ${reason}
+    <div style="margin-top:6px;display:flex;gap:4px;align-items:center">
+      <span style="font-size:11px;color:var(--label-caption)">命中</span>
+      <span class="match-kw">${r.kw.map((k) => `<span>${esc(k)}</span>`).join("")}</span>
+    </div>
+  </div>`;
+}
+
+function resultsHTML(list, ai) {
+  const head = ai
+    ? `<div class="results-head" data-proto-id="results-header"><span class="r-ttl">搜索结果</span><span class="r-cnt">${list.length} 个会话</span><span class="sort-by">${ICONS.sparkle.replace('width="16"', 'width="12"').replace('height="16"', 'height="12"')}按 AI 相关性排序</span></div>`
+    : `<div class="results-head" data-proto-id="results-header"><span class="r-ttl">搜索结果</span><span class="r-cnt">${list.length} 个会话</span><span class="sort-by">${ICONS.search(1).replace('width="16"', 'width="12"').replace('height="16"', 'height="12"')}按机械匹配排序</span></div>`;
+  return head + list.map(resultCard).join("");
+}
+
+function degradeBannerHTML() {
+  return `<div class="degrade-banner" data-proto-id="degrade-banner">
+    ${ICONS.warn}
+    <div class="db-body">
+      <div class="db-t">LLM 分析不可用，已按机械匹配排序</div>
+      <div class="db-d">原因：分析模型路由 <span class="mono">bigmodel-cn / glm-5.3-flash</span> 缺少凭证（环境变量 <span class="mono">BIGMODEL_CN_API_KEY</span> 未配置）；60s 超时守卫已强制中断等待，不再长时间卡住。</div>
+      <div class="db-actions">
+        <button class="btn-amber" data-proto-id="degrade-config-btn">${ICONS.rightUp} 前往模型设置配置凭证</button>
+        <button class="btn-amber" data-proto-id="degrade-retry-btn">${ICONS.refresh} 仅重试 AI 分析</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* 搜索执行（演示时序） */
+async function runSearch(q) {
+  const token = ++runToken;
+  stopTimer();
+  $("#initialState").style.display = "none";
+  $("#runSearch").disabled = true;
+  const area = $("#dynamicArea");
+  const degraded = mode === "degraded";
+
+  /* 面板骨架 */
+  area.innerHTML = renderAiPanel();
+  const steps = $("#aiSteps");
+  const detail = $("#detailBody");
+  const logs = [];
+  const addLog = (text, cls) => { logs.push({ text, cls }); if (!detail.style.display || detail.style.display === "block") renderLogs(); };
+  const renderLogs = () => { detail.innerHTML = logs.map((l, i) => logLine("T+" + (i * 0.4 + 0.2).toFixed(1) + "s", l.text, l.cls)).join(""); };
+
+  /* 计时器 */
+  const t0 = performance.now();
+  elapsedTimer = setInterval(() => {
+    if (token !== runToken) { stopTimer(); return; }
+    const el = $("#aiStatusText");
+    if (el) el.textContent = "分析中 · " + fmtTime((performance.now() - t0) / 1000);
+  }, 100);
+
+  const setProgress = (p) => { const b = $("#aiProgress"); if (b) b.style.width = p + "%"; };
+  const addStep = (id, icon, l1, l2, cls) => { steps.insertAdjacentHTML("beforeend", stepHTML(id, icon, l1, l2, cls)); };
+  const doneStep = (id, l1, l2) => { const el = $("#" + id); if (el) { el.className = "step ok"; $(".st-ic", el).innerHTML = ICONS.check; $(".st-l1", el).textContent = l1; if (l2) { const l2el = $(".st-l2", el); if (l2el) { l2el.innerHTML = l2; } else { $(".st-body", el).insertAdjacentHTML("beforeend", `<span class="st-l2">${l2}</span>`); } } } };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const alive = () => token === runToken;
+
+  /* Step 1 解析查询 */
+  addStep("s1", ICONS.spinner, "解析查询意图…", `「${esc(q)}」`, "run");
+  setProgress(12);
+  addLog(`query="${q}" scope=ALL workspaces=3`);
+  await wait(650); if (!alive()) return;
+  doneStep("s1", "解析查询意图", `抽取关键词 <span class="mono">修复 / fenix / 插件 / 安装</span> · 意图=排障定位`);
+
+  /* Step 2 预筛 */
+  addStep("s2", ICONS.spinner, "机械预筛候选会话…", "全量 3 个工作区 · 128 个会话", "run");
+  setProgress(30);
+  addLog(`prefilter: 128 sessions → scan title/path/content`);
+  await wait(900); if (!alive()) return;
+  doneStep("s2", "机械预筛候选会话", `128 → <b>24</b> 个候选（<span class="mono">/root/fenixd</span> ×14 · <span class="mono">/root/dsh-plugins</span> ×8 · 其他 ×2）`);
+
+  if (!degraded) {
+    /* Step 3 LLM 分析（成功路径） */
+    addStep("s3", ICONS.spinner, `调用 ${ICONS ? "" : ""}AI 语义分析<span class="streaming-dots"><i></i><i></i><i></i></span>`, `<span class="mono">bigmodel-cn · glm-5.3-flash</span> · 24 个候选`, "run");
+    setProgress(55);
+    addLog(`llm.stream route=bigmodel-cn/glm-5.3-flash candidates=24`);
+    await wait(400); if (!alive()) return;
+    addLog(`llm: streaming 1st token (0.9s)…`);
+    await wait(700); if (!alive()) return;
+    addLog(`llm: reasoning over 24 candidates…`);
+    await wait(800); if (!alive()) return;
+    addLog(`llm: done · tokens≈1.2k · 2.4s`);
+    doneStep("s3", "AI 语义分析完成", `模型 <span class="mono">glm-5.3-flash</span> · 耗时 2.4s · 置信度最高 0.94`);
+    setProgress(85);
+
+    /* Step 4 重排 */
+    addStep("s4", ICONS.spinner, "按 AI 相关性重排…", "", "run");
+    await wait(500); if (!alive()) return;
+    doneStep("s4", "按 AI 相关性重排完成", `5 个高相关会话入选`);
+    setProgress(100);
+  } else {
+    /* 降级路径：展示真实病因与守卫行为 */
+    addStep("s3", ICONS.spinner, `调用 AI 语义分析<span class="streaming-dots"><i></i><i></i><i></i></span>`, `<span class="mono">bigmodel-cn · glm-5.3-flash</span> · 24 个候选`, "run");
+    setProgress(55);
+    addLog(`llm.stream route=bigmodel-cn/glm-5.3-flash candidates=24`);
+    await wait(1200); if (!alive()) return;
+    addLog(`llm: credential BIGMODEL_CN_API_KEY missing → auth fail`, "warn");
+    addLog(`llm: retry 1/2 …`, "warn");
+    await wait(900); if (!alive()) return;
+    addLog(`timeout-guard: 60s deadline reached → hard-cancel (Promise.race)`, "err");
+    doneStep("s3", "AI 分析不可用", `凭证缺失（<span class="mono">BIGMODEL_CN_API_KEY</span>）· 60s 守卫已中断，未卡住界面`);
+    setProgress(100);
+  }
+
+  /* 收尾 */
+  stopTimer();
+  const st = $("#aiStatus");
+  st.className = "status-pill " + (degraded ? "fail" : "done");
+  $("#aiStatusText").textContent = degraded ? "机械搜索 · 已完成" : "AI 分析完成 · 2.4s";
+  $("#stopBtn").style.display = "none";
+  $("#detailToggle").innerHTML = "详细信息 " + ICONS.chevron;
+
+  await wait(250); if (!alive()) return;
+  const list = degraded ? RESULT_DEGRADED : RESULT_OK;
+  area.insertAdjacentHTML("beforeend", (degraded ? degradeBannerHTML() : "") + `<div id="resultsWrap" data-proto-id="results-list">${resultsHTML(list, !degraded)}</div>`);
+  $$(".c-fill", area).forEach((el) => requestAnimationFrame(() => { el.style.width = el.dataset.pct + "%"; }));
+  $("#runSearch").disabled = false;
+  if (degraded) {
+    $("[data-proto-id=degrade-retry-btn]")?.addEventListener("click", () => runSearch($("#queryInput").value));
+    $("[data-proto-id=degrade-config-btn]")?.addEventListener("click", () => alert("原型演示：跳转 设置 → 模型 → bigmodel-cn 配置 API Key"));
+  }
+}
+
+/* 详情展开 */
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#detailToggle")) {
+    const d = $("#detailBody");
+    if (d) { d.style.display = d.style.display === "none" ? "block" : "none"; }
+  }
+  if (e.target.closest("#stopBtn")) {
+    runToken++;
+    stopTimer();
+    const st = $("#aiStatus");
+    if (st) { st.className = "status-pill fail"; $("#aiStatusText").textContent = "已中断"; }
+    $$(".step.run").forEach((el) => { el.className = "step fail"; $(".st-ic", el).innerHTML = ICONS.x; $(".st-l1", el).textContent = "已中断（超时守卫 / 手动停止均不会卡住界面）"; });
+    $("#stopBtn").style.display = "none";
+    $("#runSearch").disabled = false;
+  }
+});
+
+/* Enter 触发 */
+$("#queryInput").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch($("#queryInput").value.trim() || "修复 fenix 插件安装的问题"); });
+$("#runSearch").addEventListener("click", () => runSearch($("#queryInput").value.trim() || "修复 fenix 插件安装的问题"));
+$$(".recent-chip").forEach((b) => b.addEventListener("click", () => { $("#queryInput").value = b.textContent; runSearch(b.textContent); }));
+$$(".f-chip").forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
+
+/* 默认展示：搜索视图已打开（聚焦本轮设计主体） */
+openSearch();
+</script>
+</body>
+</html>
