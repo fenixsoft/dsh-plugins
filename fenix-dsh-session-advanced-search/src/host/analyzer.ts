@@ -1,23 +1,40 @@
 /**
- * host 半 LLM 语义分析器（design D3：单调用排序）。
+ * host 半 LLM 语义分析器（design D3：单调用排序；D1 超时硬解耦；D2 凭证预检
+ * 与路由覆盖）。
  *
  * - 候选集摘要（标题/活动时间/工作区/首条用户消息节选）打包进一个 prompt，
  *   一次 `ctx.llm.stream` 调用返回 JSON 排名（id+reason+confidence）。
  *   成本 O(1) 次调用；`topN` 截取。
- * - 降级矩阵（spec「LLM 失败回退」）：LLM 服务缺失 / 调用超时（llmTimeoutMs）/
- *   调用失败 / 输出解析失败（含零有效行）→ 机械评分排序回退 + `degraded=true`，
- *   且按原因分类记录 warn 级日志（服务缺失/超时/解析失败/调用失败）。
- * - LLM 路由取 profile 既有默认（`ctx.agentDefaultModel.currentSelection()`），
- *   不自带 provider 配置（session-titles 同模式）。
+ * - 超时硬解耦（design D1）：流消费 promise 与超时 marker `Promise.race`
+ *   竞速——deadline 到点**立即**返回降级结果，不依赖底层流闭合（pi-ai 惰性
+ *   流在 pending 中不观察 abort 信号，await 底层 `for await` 永不返回的
+ *   实证根因）；败者流挂 `.catch` 吸收（防 unhandled rejection）；外部取消
+ *   （任务 DELETE）优先于超时——不降级不产出；finally 清理定时器与监听。
+ * - 凭证预检（design D2）：`credentialProbe` 缝在位且对路由 provider 返回
+ *   false → 不发起调用，立即 `mechanicalFallback('credential-missing')`；
+ *   缝缺失（undefined）→ 跳过预检（超时硬解耦兜底）。
+ * - 路由覆盖（design D2）：`resolveRoute` 优先级 `routeOverride`（插件配置
+ *   analyzeRoute）> profile 默认路由（`agentDefaultModel.currentSelection()`）；
+ *   解析结果经 `AnalysisOutcome['route']` 对 host 管线可见（analyzing 进度
+ *   步骤 detail 取 provider·model）。
+ * - 降级矩阵（spec「LLM 失败回退」）：LLM 服务缺失 / 凭证缺失 / 调用超时
+ *   （llmTimeoutMs）/ 调用失败 / 输出解析失败（含零有效行）→ 机械评分排序
+ *   回退 + `degraded=true`，且按原因分类记录 warn 级日志。
  */
 import type { DshAgentDefaultModel, DshLlmRuntime } from '../types/dsh-runtime.js'
-import type { SearchCandidate } from '../shared/protocol.js'
+import type { SearchCandidate, SearchDegradedReason } from '../shared/protocol.js'
 import type { PrefilteredSession } from './collector.js'
 
 /** 分析器日志门面。 */
 export interface AnalyzerLog {
   warn(message: string): void
   debug(message: string): void
+}
+
+/** LLM 路由（provider+model）。 */
+export interface AnalyzerRoute {
+  readonly provider: string
+  readonly model: string
 }
 
 /** 分析器依赖缝（测试注入 stub LLM；host 装配传 ctx 缝）。 */
@@ -29,14 +46,23 @@ export interface AnalyzerDeps {
   readonly timeoutMs: number
   /** 返回 Top-N（design D7 topN）。 */
   readonly topN: number
+  /**
+   * 凭证预检缝（design D2；可选）：入参路由 provider，返回 true=有凭证或
+   * 未知（放行）；false=凭证缺失（快速失败不发起调用）。缝缺失 → 跳过预检。
+   */
+  readonly credentialProbe?: ((provider: string) => boolean) | undefined
+  /** 路由覆盖（design D2；可选）：插件配置 analyzeRoute 透传，优先于默认路由。 */
+  readonly routeOverride?: AnalyzerRoute | undefined
 }
 
-/** 分析结果：结果行 + 降级标注（降级时附原因分类）。 */
+/** 分析结果：结果行 + 降级标注（降级时附原因分类）+ 路由解析结果。 */
 export interface AnalysisOutcome {
   readonly results: readonly SearchCandidate[]
   readonly degraded: boolean
-  /** 降级原因分类（degraded=true 时有值）：llm-missing/timeout/call-failed/parse-failed。 */
-  readonly degradedReason?: 'llm-missing' | 'timeout' | 'call-failed' | 'parse-failed'
+  /** 降级原因分类（degraded=true 时有值）。 */
+  readonly degradedReason?: SearchDegradedReason
+  /** 本次解析生效的路由（空候选/未装配时不产出——未发起路由解析）。 */
+  readonly route?: AnalyzerRoute
 }
 
 /** LLM 排名行（严格校验后的被消费面）。 */
@@ -58,13 +84,24 @@ export async function rankCandidates(
   candidates: readonly PrefilteredSession[],
   signal: AbortSignal,
 ): Promise<AnalysisOutcome> {
-  // 空候选：无 LLM 调用必要，直接空态（非降级——管线正常，只是没有匹配）。
+  // 空候选：无 LLM 调用必要，直接空态（非降级——管线正常，只是没有匹配；
+  // 未发起路由解析，故不产出 route）。
   if (candidates.length === 0) return { results: [], degraded: false }
 
-  // LLM 缺失（服务缝/默认路由缝任一不在位）：机械回退，分类『服务缺失』。
+  // 路由解析（routeOverride > agentDefaultModel，design D2）。
   const route = resolveRoute(deps)
+  // LLM 缺失（服务缝/路由缝任一不在位）：机械回退，分类『服务缺失』。
   if (route === undefined || deps.llm === undefined || typeof deps.llm.stream !== 'function') {
-    return mechanicalFallback(deps, candidates, 'llm-missing', 'LLM 服务缺失')
+    return { ...mechanicalFallback(deps, candidates, 'llm-missing', 'LLM 服务缺失'), route: route ?? undefined }
+  }
+
+  // 凭证预检（design D2）：缝在位且判 false → 不发起调用立即降级；
+  // 缝缺失（undefined）→ 跳过预检，由超时硬解耦兜底。
+  if (deps.credentialProbe !== undefined && deps.credentialProbe(route.provider) === false) {
+    return {
+      ...mechanicalFallback(deps, candidates, 'credential-missing', `分析路由 ${route.provider}/${route.model} 凭证缺失`),
+      route,
+    }
   }
 
   // 单调用：候选摘要打包 + 严格 JSON 输出契约。
@@ -76,56 +113,93 @@ export async function rankCandidates(
   ].join('')
   const user = buildUserPrompt(query, candidates)
 
-  // 超时 deadline：内部 controller + 定时器；外部取消即刻转发。
+  // 超时硬解耦（design D1）：流消费 promise 与超时 marker 竞速——deadline
+  // 到点 race 必定结算，不依赖底层流闭合。三参与者：
+  //   streamPromise  流消费（挂 .catch 吸收败者错误防 unhandled rejection）
+  //   timeoutPromise deadline abort（定时器到点）→ reject marker
+  //   cancelPromise  外部取消（任务 DELETE）→ resolve 哨兵（优先于超时，不降级）
   const deadline = new AbortController()
-  const timer = setTimeout(() => deadline.abort(), Math.max(1, deps.timeoutMs))
-  const onOuterAbort = () => deadline.abort()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let onOuterAbort: (() => void) | undefined
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    const onDeadlineAbort = () => reject(new TimeoutMarker())
+    if (deadline.signal.aborted) {
+      onDeadlineAbort()
+      return
+    }
+    deadline.signal.addEventListener('abort', onDeadlineAbort, { once: true })
+  })
+  // 超时 marker 的拒绝吸收为哨兵：race 以值结算（胜者判定集中在 race 之后），
+  // 败者的迟到 reject 也被本 catch 消费，无 unhandled rejection。
+  const timeoutSentinel = timeoutPromise.catch(() => 'timeout' as const)
+  const cancelPromise = new Promise<'cancelled'>((resolve) => {
+    // 外部取消：置取消哨兵并同步 abort deadline（真实流据此停止底层 HTTP
+    // 调用；挂起 stub 不观察也无妨——取消哨兵已让 race 立即结算）。
+    onOuterAbort = () => {
+      deadline.abort()
+      resolve('cancelled')
+    }
+    if (signal.aborted) resolve('cancelled')
+  })
+  timer = setTimeout(() => deadline.abort(), Math.max(1, deps.timeoutMs))
   signal.addEventListener('abort', onOuterAbort, { once: true })
-  let raw: string
+
+  let streamError: { error: unknown } | undefined
+  let settled: { raw: string } | 'timeout' | 'cancelled'
   try {
-    raw = await streamText(
+    const streamPromise = streamText(
       deps.llm,
       { provider: route.provider, model: route.model, system, user, maxTokens: resolveMaxTokens(candidates.length) },
       deadline.signal,
-    )
-  } catch (error) {
-    if (signal.aborted) {
-      // 任务被取消（而非超时）：直接中断，机械回退无意义。
-      return { results: [], degraded: false }
-    }
-    if (deadline.signal.aborted) {
-      return mechanicalFallback(deps, candidates, 'timeout', `LLM 调用超时（${deps.timeoutMs}ms）`)
-    }
-    return mechanicalFallback(deps, candidates, 'call-failed', `LLM 调用失败：${errorMessage(error)}`)
+    ).catch((error: unknown) => {
+      // 败者流错误吸收：超时/取消胜出后流 promise 仍可能在后台 reject，
+      // 记账供 race 胜出时分类，绝不外泄为 unhandled rejection。
+      streamError = { error }
+      return ''
+    })
+    settled = await Promise.race([streamPromise.then((raw) => ({ raw })), timeoutSentinel, cancelPromise])
   } finally {
-    clearTimeout(timer)
-    signal.removeEventListener('abort', onOuterAbort)
+    if (timer !== undefined) clearTimeout(timer)
+    if (onOuterAbort !== undefined) signal.removeEventListener('abort', onOuterAbort)
   }
-  // 流正常闭合但 deadline 已到（生成器被 abort 静默终止）：按超时分类；
-  // 外部任务取消优先（不降级、不产出——取消语义由任务层收尾）。
-  if (signal.aborted) return { results: [], degraded: false }
-  if (deadline.signal.aborted) {
-    return mechanicalFallback(deps, candidates, 'timeout', `LLM 调用超时（${deps.timeoutMs}ms）`)
+
+  // 外部取消优先（不降级不产出——取消语义由任务层收尾）；超时次之
+  //（deadline 到点立即降级，不依赖底层流闭合）。
+  if (signal.aborted || settled === 'cancelled') return { results: [], degraded: false, route }
+  if (settled === 'timeout' || deadline.signal.aborted) {
+    return { ...mechanicalFallback(deps, candidates, 'timeout', `LLM 调用超时（${deps.timeoutMs}ms 硬上限）`), route }
   }
+  if (streamError !== undefined) {
+    return { ...mechanicalFallback(deps, candidates, 'call-failed', `LLM 调用失败：${errorMessage(streamError.error)}`), route }
+  }
+  const raw = settled.raw
 
   // 严格 JSON 解析 + id 白名单过滤 + topN 截取；失败回退分类『解析失败』。
   const rows = parseLlmRanking(raw, new Set(candidates.map((row) => row.sessionId)))
   if (rows.length === 0) {
-    return mechanicalFallback(deps, candidates, 'parse-failed', 'LLM 输出解析失败（零有效排名行）')
+    return { ...mechanicalFallback(deps, candidates, 'parse-failed', 'LLM 输出解析失败（零有效排名行）'), route }
   }
   const byId = new Map(candidates.map((row) => [row.sessionId, row]))
   const results = rows.slice(0, Math.max(1, deps.topN)).map((row) => toCandidate(byId.get(row.id) as PrefilteredSession, row.reason, row.confidence, false))
-  deps.log.debug(`session-advanced-search: LLM 排序完成（${rows.length} 行，取 topN=${deps.topN}）`)
-  return { results, degraded: false }
+  deps.log.debug(`session-advanced-search: LLM 排序完成（${rows.length} 行，取 topN=${deps.topN}，路由 ${route.provider}/${route.model}）`)
+  return { results, degraded: false, route }
+}
+
+/** 超时 marker（仅作 race 败者信号；错误体不被消费）。 */
+class TimeoutMarker extends Error {
+  constructor() {
+    super('llm-call-timeout-marker')
+    this.name = 'TimeoutMarker'
+  }
 }
 
 /** 机械评分排序回退：候选保持 collector 顺序（评分优先、同分最近活跃），topN 截取。 */
 function mechanicalFallback(
   deps: AnalyzerDeps,
   candidates: readonly PrefilteredSession[],
-  reason: AnalysisOutcome['degradedReason'],
+  reason: SearchDegradedReason,
   warnMessage: string,
-): AnalysisOutcome {
+): Omit<AnalysisOutcome, 'route'> {
   deps.log.warn(`session-advanced-search: ${warnMessage}，回退机械评分排序（degraded）`)
   const maxScore = Math.max(...candidates.map((row) => row.score), 0)
   const results = candidates.slice(0, Math.max(1, deps.topN)).map((row) =>
@@ -152,18 +226,31 @@ function toCandidate(row: PrefilteredSession, reason: string, confidence: number
   }
 }
 
-/** 解析默认 LLM 路由；缝缺失（或 provider/model 空）返回 undefined。 */
-function resolveRoute(deps: AnalyzerDeps): { provider: string; model: string } | undefined {
+/**
+ * 解析 LLM 路由（design D2 优先级：插件配置 routeOverride > profile 默认
+ * 路由）。导出供 host 管线在发起分析前取 provider（凭证预热的路由来源）。
+ * 缝缺失（或 provider/model 空）返回 undefined。
+ */
+export function resolveRoute(deps: AnalyzerDeps): AnalyzerRoute | undefined {
+  const override = deps.routeOverride
+  if (override !== undefined && isShapedRoute(override)) {
+    return { provider: override.provider.trim(), model: override.model.trim() }
+  }
   const agentDefaultModel = deps.agentDefaultModel
   if (agentDefaultModel === undefined || typeof agentDefaultModel.currentSelection !== 'function') return undefined
   try {
     const selection = agentDefaultModel.currentSelection()
-    if (typeof selection?.provider !== 'string' || selection.provider.length === 0) return undefined
-    if (typeof selection?.model !== 'string' || selection.model.length === 0) return undefined
-    return { provider: selection.provider, model: selection.model }
+    if (typeof selection?.provider !== 'string' || selection.provider.trim().length === 0) return undefined
+    if (typeof selection?.model !== 'string' || selection.model.trim().length === 0) return undefined
+    return { provider: selection.provider.trim(), model: selection.model.trim() }
   } catch {
     return undefined
   }
+}
+
+/** 路由覆盖形状门：provider/model 均为非空白串（trim 与 config.schema 同语义）。 */
+function isShapedRoute(route: AnalyzerRoute): boolean {
+  return typeof route.provider === 'string' && route.provider.trim().length > 0 && typeof route.model === 'string' && route.model.trim().length > 0
 }
 
 /**
