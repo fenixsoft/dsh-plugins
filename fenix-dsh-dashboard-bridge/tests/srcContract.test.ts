@@ -154,10 +154,16 @@ function noopFetch(): Promise<readonly string[]> {
   return Promise.resolve([])
 }
 
+/** 告警计数桩（零网络装配契约：apply 装配告警计数同步后桩上不触真实 fetch；
+ * 返回 0 → 徽标隐匿，slots 里零遮蔽注册，既有条目计数断言不受影响）。 */
+function noopAlertCount(): Promise<number> {
+  return Promise.resolve(0)
+}
+
 /** 运行 apply 并等待启动拉取落定，返回桩上下文与 apply 停止函数。 */
 async function applied(options: Omit<ClientPluginOptions, 'upstream'>) {
   const stub = stubSlotsCtx()
-  const stop = apply(stub.ctx as never, { ...options, timer: fakeTimer() })
+  const stop = apply(stub.ctx as never, { ...options, fetchAlertCount: noopAlertCount, timer: fakeTimer() })
   await flush()
   return { ...stub, stop }
 }

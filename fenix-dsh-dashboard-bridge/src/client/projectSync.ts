@@ -31,8 +31,9 @@ export const MIN_POLL_INTERVAL_MS = 5_000
 /**
  * 规整轮询周期（仅在启动时调用一次，warn 只发一次、不随轮询刷屏）：
  * 非有限/非正数视为配置笔误，回退缺省值；合法但低于下界的钳到下界。
+ * （导出供 alertCount.ts 计数同步复用同一归一口径，add-dsh-ops-alert-badge。）
  */
-function normalizeIntervalMs(raw: number | undefined): number {
+export function normalizeIntervalMs(raw: number | undefined): number {
   if (raw === undefined) return DEFAULT_POLL_INTERVAL_MS
   if (!Number.isFinite(raw) || raw <= 0) {
     console.warn(
@@ -318,7 +319,8 @@ export interface SyncTimer {
   onFocus(fn: () => void): () => void
 }
 
-function defaultTimer(): SyncTimer {
+/** 默认计时/焦点钩子（导出供 alertCount.ts 计数同步复用同一节奏实现）。 */
+export function defaultTimer(): SyncTimer {
   return {
     setInterval(fn, ms) {
       return setInterval(fn, ms)

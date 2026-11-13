@@ -1,25 +1,191 @@
 {
   "status": "success",
-  "spec": "add-session-advanced-search",
-  "summary": "验证修复（原地打回第 2 轮）完成：复核 verification-report（judge r3）确认唯一真实产品缺陷 BUG-01 深层根因——sessionController.list 对 cold（未激活）会话只回投影缓存且永不折叠（官方 dsh-api-session-controller list.js projectionsFor 注释「a listing never seeds a fold」实源坐实），collector 仅消费投影 title → 无缓存行 title 恒空 → title+cwd 计分全零 → analyzer 机械回退保持 collector 序即纯 recency，实例自有空会话压过双词命中且应居首的 F1；场景断言与 spec.md:76-79/design D4 排序语义一致，零场景文件缺陷。产品修复：collector 新增 cold 会话 title 折叠回退——对时间过滤后仍无投影 title 的会话经 persistence.open(id,read) 只读事件流折叠最后一条 session/title 事件的 data.title（官方 dsh-session-title foldSessionTitle findLast last-wins 同语义，验证实例夹具行形态实源核对），最近活跃优先、上限 TITLE_FOLD_MAX_SESSIONS=200、单会话失败 warn 隔离，同会话事件流至多读一次（首条用户消息节选复用同次读取，open 计数用例钉死）；tests/collector.test.ts 桩支持自定义事件流并新增 5 个回归用例（BUG-01 复刻排序/last-wins/失败隔离/缓存复用/上限截断）；design.md D5「冷安全只读」侦察结论修正（cold 行 title 仅投影缓存行存在时非空）+ README 机制节同步。重跑验证：tsc --noEmit 零错误、vitest 125/125 零跳过全绿（10 文件，较上轮 +5 回归用例）、tsdown 三产物构建成功且产物内核验 session/title 折叠逻辑在场/ctx.get 探测形态保持/属性访问探测绝迹/cordis 保持 external；live 场景链由框架验证链重跑（run 内未重复执行全量回归，add-impl-selfcheck-model-probe 3.1 默认）。上轮已修复项（safeSeam→ctx.get、routes prefix 座位）随本轮回归用例一并保持绿。",
+  "spec": "add-dsh-ops-alert-badge",
+  "mode": "fast-track",
+  "summary": "dsh web 左侧栏「运维」条目待裁决告警计数徽标落地：alertCount.ts 计数同步（GET <prefix>api/alerts，choices 非空口径与 fenixd dashboard 徽标同数，60s+focus 轮询、10s 超时、失败保留旧值、node 环境跳过）；panels.tsx 运维条目图标 svg 内叠加红底白字角标（零值隐匿、>99 显示 99+、无 hook 纯函数读 store 快照）；index.ts 装配（priority -10 遮蔽重注册、先 dispose 旧注册至多一条在册、注册抛错 warn 降级不崩且计数变更自然重试、停止函数幂等收口）。验证：173 vitest 用例全绿 + tsc 零错 + tsdown rc=0；真实环境 5 场景（3 web + 1 api + 1 cli）全过——真实 Chromium 渲染真实源码 bundle，fetch 经同源反代透传真实 fenixd dashboard :8787（实测 total_unhandled=14、14 条 alerts 仅 1 条 choices 非空→徽标 1，与 dashboard 徽标同口径同数；13 条知情类无 choices 键天然不计）；零值隐匿与 99+ 截断经 UI 态注入验证。修复轮 1：真实浏览器实测发现 99+ 档 text em-box 右缘溢出 svg 0.09px（违反防裁剪条款），改 OPS_BADGE_CIRCLE r=6（圆域 [12,24]×[0,12] 闭边界含于 viewBox）+ 三字符档字号 4.8 后复验全过（g/text/circle 全落于 svg 内 + elementFromPoint 像素可见），s1/s2 同步复验无回归。无遗留 product-bug。",
   "completed_tasks": [
     "1.1",
     "1.2",
-    "1.3",
     "2.1",
     "2.2",
-    "2.3",
     "3.1",
     "3.2",
     "3.3",
-    "3.4",
-    "3.5",
-    "4.1",
-    "4.2",
-    "4.3",
-    "4.4",
-    "5.1",
-    "5.2",
-    "5.3"
-  ]
+    "4.1"
+  ],
+  "implementation": {
+    "deliverables": [
+      "fenix-dsh-dashboard-bridge/src/client/alertCount.ts",
+      "fenix-dsh-dashboard-bridge/src/client/panels.tsx",
+      "fenix-dsh-dashboard-bridge/src/client/index.ts",
+      "fenix-dsh-dashboard-bridge/tests/alertCount.test.ts",
+      "fenix-dsh-dashboard-bridge/tests/opsBadge.test.ts",
+      "fenix-dsh-dashboard-bridge/src/client/projectSync.ts"
+    ]
+  },
+  "verification": {
+    "scenarios": [
+      {
+        "scenario_id": "ops-badge-live-count",
+        "kind": "web",
+        "description": "有数渲染：真实 Chromium 加载真实源码 bundle（fixedIconComponent + startAlertCountSync/fetchAlertCount），首拉经同源反代透传真实 fenixd dashboard GET /api/alerts（实测 total_unhandled=14、alerts 14 条中仅 1 条 choices 非空→计数 1），运维条目图标右上角红底白字角标「1」，与 fenix dashboard 徽标同口径同数；角标矩形完整落于图标可视区不被两级 overflow:hidden 裁剪",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "navigate http://127.0.0.1:19105/ + 等待角标渲染"
+          },
+          {
+            "type": "element_visible",
+            "pass": true,
+            "message": "g[data-testid=fenix-ops-alert-badge] 在场；text='1'（真实口径计数）、circleFill=#e5484d、textFill=#fff"
+          },
+          {
+            "type": "no_console_error",
+            "pass": true,
+            "message": "console 0 errors"
+          },
+          {
+            "type": "step",
+            "pass": true,
+            "message": "几何：g/text/circle getBoundingClientRect 全落于 svg rect（16×16）；elementFromPoint 命中角标 circle/text（两级 overflow:hidden 下像素真实可见）；glyph 心电线 path 不变、label 运维不变"
+          }
+        ],
+        "screenshots": [
+          "/root/dsh-plugins/.fenix/verify-evidence/add-dsh-ops-alert-badge/s1-badge-live-count.png"
+        ],
+        "evidence": {
+          "failed_assertions": [],
+          "dom": "web-assert-results.md s1 段",
+          "live_payload": ".fenix/verify-evidence/add-dsh-ops-alert-badge/s4-api-alerts-payload.json"
+        },
+        "classification": ""
+      },
+      {
+        "scenario_id": "ops-badge-zero-hidden",
+        "kind": "web",
+        "description": "零值隐匿：计数 0 时运维条目图标不渲染任何角标元素，glyph 与条目观感不变",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "window.__opsHarness.setCount(0)（store 真实变更→重渲染路径）"
+          },
+          {
+            "type": "no_element",
+            "pass": true,
+            "message": "badgeG=false、circleCount=0、textCount=0（无任何角标元素）；glyphPathCount=1 保留；store snapshot={\"count\":0}"
+          },
+          {
+            "type": "no_console_error",
+            "pass": true,
+            "message": "console 0 errors"
+          }
+        ],
+        "screenshots": [
+          "/root/dsh-plugins/.fenix/verify-evidence/add-dsh-ops-alert-badge/s2-badge-zero-hidden-fixed.png"
+        ],
+        "evidence": {
+          "failed_assertions": [],
+          "dom": "web-assert-results.md s2 段"
+        },
+        "classification": ""
+      },
+      {
+        "scenario_id": "ops-badge-over-cap-99plus",
+        "kind": "web",
+        "description": "超百截断：计数 127 时角标显示 99+，几何完整落于 viewBox 之内",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "step",
+            "pass": true,
+            "message": "window.__opsHarness.setCount(127)"
+          },
+          {
+            "type": "element_text",
+            "pass": true,
+            "message": "text='99+'、fontSize=4.8、红底白字"
+          },
+          {
+            "type": "step",
+            "pass": true,
+            "message": "修复轮 1 后：g/text/circle 全部 insideSvg（circleRect [50,40,58,48] ⊂ svgRect [42,40,58,56]）+ elementFromPoint 像素可见 true/true；修复前实测 text em-box 右缘 58.09>svg 58（0.09px 溢出，svg overflow hidden 会裁）已修复"
+          },
+          {
+            "type": "no_console_error",
+            "pass": true,
+            "message": "console 0 errors"
+          }
+        ],
+        "screenshots": [
+          "/root/dsh-plugins/.fenix/verify-evidence/add-dsh-ops-alert-badge/s3-badge-99plus-fixed.png"
+        ],
+        "evidence": {
+          "failed_assertions": [],
+          "fixed_in": "修复轮 1（commit 463ee88）：OPS_BADGE_CIRCLE r 5.5→6、三字符档 fontSize 5→4.8",
+          "detail": "web-assert-results.md s3 段"
+        },
+        "classification": ""
+      },
+      {
+        "scenario_id": "ops-badge-api-alerts-shape",
+        "kind": "api",
+        "description": "数据源契约：GET <harness>/api/alerts（同源反代透传真实 fenixd dashboard :8787）返回 200，alerts 为数组、徽标口径计数=1、total_unhandled=14（对照：不用 total_unhandled）、13 条知情类缺 choices 键天然不计",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "status_code",
+            "pass": true,
+            "message": "HTTP 200"
+          },
+          {
+            "type": "json_schema",
+            "pass": true,
+            "message": "alerts 数组（14 条）、total_unhandled 数字"
+          },
+          {
+            "type": "step",
+            "pass": true,
+            "message": "徽标口径计数 choices非空=1；缺 choices 键条目=13（Array.isArray 天然排除，知情类不计口径成立）"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "payload": ".fenix/verify-evidence/add-dsh-ops-alert-badge/s4-api-alerts-payload.json",
+          "assert": "s4-assert-result.txt"
+        },
+        "classification": ""
+      },
+      {
+        "scenario_id": "ops-badge-cli-suite",
+        "kind": "cli",
+        "description": "单测套件全绿（真实命令）：vitest run 173 用例覆盖口径过滤（14 条仅 1 条带 choices→1）、alerts 形状漂移按 0、失败保留最后已知值、60s/focus 节奏与收口、127→99+、零值隐匿、防裁剪几何断言（徽标坐标域完全落于 viewBox）、遮蔽重注册与形状漂移降级",
+        "status": "pass",
+        "assertion_results": [
+          {
+            "type": "exit_code",
+            "pass": true,
+            "message": "npm test exit=0"
+          },
+          {
+            "type": "output_match",
+            "pass": true,
+            "message": "Test Files 9 passed (9) / Tests 173 passed (173)"
+          }
+        ],
+        "screenshots": [],
+        "evidence": {
+          "failed_assertions": [],
+          "log": ".fenix/verify-evidence/add-dsh-ops-alert-badge/s5-full-suite.log"
+        },
+        "classification": ""
+      }
+    ],
+    "verdict": "verified",
+    "bugs": []
+  }
 }
