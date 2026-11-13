@@ -7,20 +7,36 @@
  *      updatedAt 增强（header 自身无 title/活动时间——侦察结论见 design.md）。
  *   2. 可选时间范围过滤：活动时间（controller updatedAt 优先，回退
  *      header.createdAt）落在 [start, end) 内才保留。
+ *   2b. cold 会话 title 折叠回退（BUG-01 修复）：controller.list 对未激活
+ *      （cold）会话只回投影缓存且永不折叠（官方 api-session-controller list
+ *      「a listing never seeds a fold」），无缓存行 title 恒空 → 标题计分
+ *      整体失效。对过滤后仍无投影 title 的会话，经
+ *      `sessionPersistence.open(id, 'read')` 只读事件流折叠最后一条
+ *      `session/title` 事件的 `data.title`（官方 dsh-session-title
+ *      foldSessionTitle 的 findLast last-wins 同语义）；按最近活跃优先、上限
+ *      TITLE_FOLD_MAX_SESSIONS，单会话失败 warn 隔离；读取成功的同时缓存
+ *      首条用户消息供第 5 步节选复用（同会话只读一次事件流）。
  *   3. 关键词计分：query 切词后对标题（+2/词）与工作区路径（+1/词）命中计分。
  *   4. 截断 maxCandidates：评分优先、同分取最近活跃。
- *   5. 首条用户消息节选（仅截断后的候选集，≤2048 UTF-8 字节/会话）：经
- *      `sessionPersistence.open(id, 'read')` 只读扫描 `user/message` 事件；
- *      单会话读取失败不中断整轮（warn + 空节选）。
+ *   5. 首条用户消息节选（仅截断后的候选集，≤2048 UTF-8 字节/会话）：优先
+ *      复用 2b 缓存，未缓存的候选经 `sessionPersistence.open(id, 'read')`
+ *      只读扫描 `user/message` 事件；单会话读取失败不中断整轮（warn + 空节选）。
  *
  * 只读纪律：绝不调用 persist* 系列写通道（persistHeader/persistBatch），绝不以 'write'
  * 打开会话；不修改任何会话产物（spec「分析只读」场景）。
  */
-import type { DshSessionController, DshSessionPersistence } from '../types/dsh-runtime.js'
+import type { DshSessionController, DshSessionEvent, DshSessionPersistence } from '../types/dsh-runtime.js'
 import type { SearchRequest, SearchTimeRange } from '../shared/protocol.js'
 
 /** 单会话首条用户消息节选字节上限（design D4：2KB）。 */
 export const EXCERPT_MAX_BYTES = 2048
+
+/**
+ * cold 会话 title 折叠读取上限（防超长收集）：折叠回退需对无投影 title 的
+ * 会话逐个读事件流，生产实例 cold 会话可达数百；按最近活跃优先折叠，超限的
+ * 更早会话 title 保持空（仍有 cwd 计分与 header-only 路径，功能不失效）。
+ */
+export const TITLE_FOLD_MAX_SESSIONS = 200
 
 /** 收集器日志门面（debug 逐级可观测；warn 单会话失败隔离）。 */
 export interface CollectorLog {
@@ -84,17 +100,22 @@ export async function collectCandidates(
   const ranged = filterByTimeRange(snapshots, enrichment, request.timeRange)
   deps.log.debug(`session-advanced-search: 时间过滤后 ${ranged.length} 个（范围 ${describeRange(request.timeRange)}）`)
 
+  // 2b. cold 会话 title 折叠回退（BUG-01 修复）：投影缓存对 cold 会话永不
+  //     折叠，无缓存行 title 恒空 → 标题计分失效；经只读事件流折叠补齐，
+  //     并缓存首条用户消息供第 5 步节选复用。
+  const excerptsById = await foldColdTitles(deps, ranged, enrichment, signal)
+
   // 3. 关键词计分 + 4. 截断（评分优先、同分取最近活跃）。
   const scored = scoreSessions(ranged, enrichment, request.query)
   scored.sort(compareByScoreThenRecency)
   const truncated = scored.slice(0, Math.max(1, maxCandidates))
   deps.log.debug(`session-advanced-search: 计分截断后 ${truncated.length} 个（maxCandidates=${maxCandidates}）`)
 
-  // 5. 首条用户消息节选（仅截断后的候选集，控制读取成本）。
+  // 5. 首条用户消息节选（仅截断后的候选集，控制读取成本；2b 缓存优先）。
   const candidates: PrefilteredSession[] = []
   for (const row of truncated) {
     if (signal.aborted) break
-    const excerpt = await readFirstUserMessage(deps.persistence, row.sessionId, signal, deps.log)
+    const excerpt = await readFirstUserMessage(deps.persistence, row.sessionId, signal, deps.log, excerptsById)
     candidates.push({ ...row, excerpt })
   }
   return { candidates, stats: { total, afterTimeFilter: ranged.length, afterScoring: truncated.length } }
@@ -142,6 +163,100 @@ function readProjectionTitle(summary: { projections?: { values?: Readonly<Record
   return typeof title === 'string' ? title : ''
 }
 
+/** 会话活动时间：增强 updatedAt 优先，回退 header.createdAt（时间过滤/折叠排序共用）。 */
+function activityTimeOf(
+  enrichment: Enrichment,
+  header: { readonly id: string; readonly createdAt: number },
+): number {
+  return enrichment.byId.get(header.id)?.updatedAt ?? header.createdAt
+}
+
+/**
+ * cold 会话 title 折叠回退（只读，BUG-01 修复）。
+ *
+ * controller.list 对 cold（未激活）会话只回投影缓存且永不折叠（官方
+ * api-session-controller list.js projectionsFor：「a listing never seeds a
+ * fold / missing cache rows are never folded here」），无缓存行 title 恒空 →
+ * 标题计分整体失效、排序退化为纯最近活跃。对**时间过滤后仍无投影 title** 的
+ * 会话，经只读事件流折叠最后一条 `session/title` 事件的 `data.title` 补齐
+ * （官方 dsh-session-title foldSessionTitle 的 findLast last-wins 同语义）。
+ *
+ * 成本与鲁棒性：按最近活跃优先串行读取、上限 TITLE_FOLD_MAX_SESSIONS（超限
+ * 的更早会话 title 保持空，debug 说明）；单会话失败 warn 隔离不中断。读取
+ * 成功的同时缓存首条用户消息（未截断全文）供第 5 步节选复用，同一会话至多
+ * 读一次事件流。返回 sessionId → 首条用户消息全文。
+ */
+async function foldColdTitles(
+  deps: CollectorDeps,
+  snapshots: readonly { header: { readonly id: string; readonly createdAt: number } }[],
+  enrichment: Enrichment,
+  signal: AbortSignal,
+): Promise<Map<string, string>> {
+  const excerptsById = new Map<string, string>()
+  const cold = snapshots
+    .filter((snapshot) => (enrichment.byId.get(snapshot.header.id)?.title ?? '') === '')
+    .sort((a, b) => activityTimeOf(enrichment, b.header) - activityTimeOf(enrichment, a.header))
+  if (cold.length === 0) return excerptsById
+  const limited = cold.slice(0, TITLE_FOLD_MAX_SESSIONS)
+  if (cold.length > limited.length) {
+    deps.log.debug(
+      `session-advanced-search: cold title 折叠达上限 ${TITLE_FOLD_MAX_SESSIONS}，其余 ${cold.length - limited.length} 个更早会话不折叠（title 保持空）`,
+    )
+  }
+  let folded = 0
+  for (const snapshot of limited) {
+    if (signal.aborted) break
+    const id = snapshot.header.id
+    try {
+      const events = await readEventStream(deps.persistence, id, signal)
+      excerptsById.set(id, extractFirstUserText(events))
+      const title = foldTitleFromEvents(events)
+      const enriched = enrichment.byId.get(id)
+      enrichment.byId.set(id, enriched !== undefined ? { ...enriched, title } : { title, updatedAt: snapshot.header.createdAt })
+      if (title !== '') folded += 1
+    } catch (error) {
+      if (signal.aborted) break
+      deps.log.warn(`session-advanced-search: 会话 ${id} cold title 折叠读取失败（title 保持空）：${errorMessage(error)}`)
+    }
+  }
+  deps.log.debug(`session-advanced-search: cold title 折叠完成（无投影 title ${limited.length} 个，折叠出标题 ${folded} 个）`)
+  return excerptsById
+}
+
+/**
+ * 折叠会话标题：事件流中最后一条 `session/title` 事件的 `data.title`
+ * （官方 dsh-session-title titleProjectionDefinition.apply 的 last-wins 同
+ * 语义；缺 data 或 title 非字符串视为无标题）。纯函数，导出供测试。
+ */
+export function foldTitleFromEvents(events: readonly DshSessionEvent[]): string {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]
+    if (event?.type !== 'session/title') continue
+    const data: unknown = event.data
+    if (data !== null && typeof data === 'object') {
+      const title = (data as Record<string, unknown>).title
+      if (typeof title === 'string') return title
+    }
+    return ''
+  }
+  return ''
+}
+
+/** 只读载入会话事件流（open→read→close；异常上抛由调用方隔离）。 */
+async function readEventStream(
+  persistence: DshSessionPersistence,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<readonly DshSessionEvent[]> {
+  const handle = await persistence.open(sessionId, 'read', { signal })
+  try {
+    const { events } = await handle.read()
+    return events
+  } finally {
+    await handle.close()
+  }
+}
+
 /** 时间范围过滤（闭开区间 [start, end)；无范围原样通过）。 */
 function filterByTimeRange(
   snapshots: readonly { header: { readonly id: string; readonly createdAt: number; readonly cwd?: string } }[],
@@ -150,7 +265,7 @@ function filterByTimeRange(
 ): typeof snapshots {
   if (range === undefined) return snapshots
   return snapshots.filter((snapshot) => {
-    const activity = enrichment.byId.get(snapshot.header.id)?.updatedAt ?? snapshot.header.createdAt
+    const activity = activityTimeOf(enrichment, snapshot.header)
     return activity >= range.start && activity < range.end
   })
 }
@@ -211,27 +326,26 @@ function compareByScoreThenRecency(a: ScoredRow, b: ScoredRow): number {
 
 /**
  * 只读读取某会话首条用户消息的 ≤2KB 文本节选。
- * 单会话失败（含打开/读流异常）warn 隔离返回空串，不中断整轮收集。
+ * 优先复用 cold title 折叠阶段缓存的事件流读取结果（同一会话至多读一次流）；
+ * 缓存未命中再读。单会话失败（含打开/读流异常）warn 隔离返回空串，不中断
+ * 整轮收集。
  */
 async function readFirstUserMessage(
   persistence: DshSessionPersistence,
   sessionId: string,
   signal: AbortSignal,
   log: CollectorLog,
+  excerptsById?: ReadonlyMap<string, string>,
 ): Promise<string> {
+  const cached = excerptsById?.get(sessionId)
+  if (cached !== undefined) return byteTruncate(cached, EXCERPT_MAX_BYTES)
   try {
-    const handle = await persistence.open(sessionId, 'read', { signal })
-    try {
-      // 成本假设：handle.read() 为缝当前唯一形态（一次性全量载入事件流；
-      // 类型面 read(offset?, length?) 的偏移语义未钉死、返回仍是全量
-      // events 数组，故不走分页）。长会话事件流可达数 MB，串行读取
-      // maxCandidates 个候选的瞬时内存峰值与耗时在此接受。
-      const { events } = await handle.read()
-      const text = extractFirstUserText(events)
-      return byteTruncate(text, EXCERPT_MAX_BYTES)
-    } finally {
-      await handle.close()
-    }
+    // 成本假设：handle.read() 为缝当前唯一形态（一次性全量载入事件流；
+    // 类型面 read(offset?, length?) 的偏移语义未钉死、返回仍是全量
+    // events 数组，故不走分页）。长会话事件流可达数 MB，串行读取
+    // maxCandidates 个候选的瞬时内存峰值与耗时在此接受。
+    const events = await readEventStream(persistence, sessionId, signal)
+    return byteTruncate(extractFirstUserText(events), EXCERPT_MAX_BYTES)
   } catch (error) {
     if (signal.aborted) return ''
     log.warn(`session-advanced-search: 会话 ${sessionId} 首条用户消息读取失败（跳过节选）：${errorMessage(error)}`)

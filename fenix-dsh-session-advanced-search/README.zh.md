@@ -26,7 +26,7 @@ cordis Service（`static inject = ['webServer', 'sessionPersistence']`），装�
 
 任务状态机：`collecting → filtering → analyzing → done | error | cancelled`（终态幂等）。管线单轮：
 
-1. **collecting**：`sessionPersistence.list()` 全量会话快照 → 逐会话 `open()` 只读读产物头部+事件文本（单会话失败跳过不中断）。
+1. **collecting**：`sessionPersistence.list()` 全量会话快照 → `sessionController.list()` 增强 title/活动时间 → **cold 会话 title 折叠回退**（controller.list 对未激活会话只回投影缓存且永不折叠，无缓存行 title 恒空——对时间过滤后仍无投影 title 的会话，`open()` 只读事件流折叠最后一条 `session/title` 事件补齐标题，最近活跃优先、上限 200，单会话失败跳过不中断；同一会话的事件流读取同时提取首条用户消息供节选复用，每会话至多读一次）。
 2. **filtering**：机械预筛——标题/内容关键词命中计分（多词 AND 优先、子串兜底），按分排序取 `maxCandidates` 上限（同分取最近活跃）。
 3. **analyzing**：LLM 语义排序——`ctx.agentDefaultModel.currentSelection()` 取默认路由 + `ctx.llm.stream` 单调用，输出编号列表解析回会话 id，取 `topN`；端到端 `llmTimeoutMs` 超时守卫。
 
