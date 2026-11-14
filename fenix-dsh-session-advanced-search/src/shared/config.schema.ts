@@ -1,7 +1,7 @@
 /**
  * fenix-dsh-session-advanced-search loader 配置解析与校验（design D7）。
  *
- * 配置键：`enabled`(true) / `maxCandidates`(30) / `topN`(5) / `llmTimeoutMs`(120000) /
+ * 配置键：`enabled`(true) / `maxCandidates`(30，上界 200) / `topN`(5) / `llmTimeoutMs`(120000) /
  * `analyzeRoute`(可选 {provider, model}，非空串；把语义分析路由指到有凭证的
  * provider，优先级高于 profile 默认路由——design D2)。
  * 非法值（类型不符或超出范围）装载期显式抛 TypeError（session-grouper 纪律）：
@@ -17,7 +17,7 @@ export interface AnalyzeRoute {
 /** 解析后的配置（内部视角：全部字段必填、已规范化）。 */
 export interface AdvancedSearchSettings {
   readonly enabled: boolean
-  /** 预筛候选集上限（≥1）。 */
+  /** 预筛候选集上限（≥1 且 ≤MAX_CANDIDATES_LIMIT 上界）。 */
   readonly maxCandidates: number
   /** LLM 排序返回 Top-N（≥1）。 */
   readonly topN: number
@@ -49,6 +49,14 @@ export const CONFIG_DEFAULTS = {
   llmTimeoutMs: 120_000,
 } as const
 
+/**
+ * maxCandidates 装载期上界：候选集直接进 LLM 单调用 prompt（token 预算随候选
+ * 数伸缩）且分析器机械回退按候选集遍历计分，超大量级既拖垮分析成本也无检索
+ * 价值。200 倍余量于默认 30（覆盖生产实例数百会话量级）；超界装载期
+ * TypeError，与「≥1」同一显式失败纪律。
+ */
+const MAX_CANDIDATES_LIMIT = 200
+
 /** 布尔校验：真布尔才放行（loader schemastery 已给真布尔，这里兜字符串化形态）。 */
 function parseBoolean(key: string, value: unknown, fallback: boolean): boolean {
   if (value === undefined) return fallback
@@ -65,6 +73,15 @@ function parsePositiveInt(key: string, value: unknown, fallback: number): number
   return value
 }
 
+/** 带上界的正整数校验（maxCandidates：≥1 且 ≤上界，防超大候选集无界展开）。 */
+function parseBoundedPositiveInt(key: string, value: unknown, fallback: number, max: number): number {
+  const parsed = parsePositiveInt(key, value, fallback)
+  if (parsed > max) {
+    throw new TypeError(`fenix-dsh-session-advanced-search: 配置 ${key} 须为 ≥1 且 ≤${max} 的整数，收到 ${describe(value)}`)
+  }
+  return parsed
+}
+
 /** 正数校验（llmTimeoutMs：>0 的有限数）。 */
 function parsePositiveNumber(key: string, value: unknown, fallback: number): number {
   if (value === undefined) return fallback
@@ -77,6 +94,7 @@ function parsePositiveNumber(key: string, value: unknown, fallback: number): num
 /**
  * analyzeRoute 校验：undefined 放行（可选键，缺省走 profile 默认路由）；
  * 对象形态且 provider/model 均为非空串才合法，否则装载期 TypeError。
+ * 返回值已 trim 归一化（校验面与产出面一致；analyzer 侧 routeOverride 同语义）。
  * 用途（design D2）：把语义分析路由指到有凭证的 provider（如 deepseek），
  * 优先级高于 profile 默认路由（agent-default-model）。
  */
@@ -91,12 +109,19 @@ function parseAnalyzeRoute(key: string, value: unknown): AnalyzeRoute | undefine
   if (typeof provider !== 'string' || provider.trim().length === 0 || typeof model !== 'string' || model.trim().length === 0) {
     throw new TypeError(`fenix-dsh-session-advanced-search: 配置 ${key}.provider / ${key}.model 均须为非空字符串`)
   }
-  return { provider, model }
+  return { provider: provider.trim(), model: model.trim() }
 }
 
-/** 非法值简述（错误信息可定位）。 */
+/** 非法值简述（错误信息可定位）：串 JSON 引用；对象/数组 JSON 序列化（循环引用兜底 String）。 */
 function describe(value: unknown): string {
   if (typeof value === 'string') return JSON.stringify(value)
+  if (typeof value === 'object' && value !== null) {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
   return String(value)
 }
 
@@ -108,7 +133,7 @@ export function resolveSettings(config?: AdvancedSearchConfigInput | null): Adva
   const analyzeRoute = parseAnalyzeRoute('analyzeRoute', config?.analyzeRoute)
   return {
     enabled: parseBoolean('enabled', config?.enabled, CONFIG_DEFAULTS.enabled),
-    maxCandidates: parsePositiveInt('maxCandidates', config?.maxCandidates, CONFIG_DEFAULTS.maxCandidates),
+    maxCandidates: parseBoundedPositiveInt('maxCandidates', config?.maxCandidates, CONFIG_DEFAULTS.maxCandidates, MAX_CANDIDATES_LIMIT),
     topN: parsePositiveInt('topN', config?.topN, CONFIG_DEFAULTS.topN),
     llmTimeoutMs: parsePositiveNumber('llmTimeoutMs', config?.llmTimeoutMs, CONFIG_DEFAULTS.llmTimeoutMs),
     ...(analyzeRoute !== undefined ? { analyzeRoute } : {}),

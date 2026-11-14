@@ -47,8 +47,11 @@ import { promisify } from 'node:util'
 
 const scrypt = promisify(scryptCallback)
 
-/** scrypt 参数（design D6：N=16384, r=8, p=1, keylen=64）。 */
-const SCRYPT_PARAMS = Object.freeze({ N: 16384, r: 8, p: 1, keylen: 64 })
+/* scrypt 参数（design D6 原为 N=16384；OWASP 现行建议交互式登录 ≥ N=2^17，
+ * 新写入用 131072——记录泄露后的离线爆破成本提约一个量级。N=2^17/r=8 派生
+ * 需 128MiB，超 Node scrypt 默认 maxmem 32MiB，故显式放宽 maxmem，否则新旧
+ * 记录的派生一律抛错。校验按记录内落盘参数执行，旧记录（N=16384）向后兼容。 */
+const SCRYPT_PARAMS = Object.freeze({ N: 131072, r: 8, p: 1, keylen: 64, maxmem: 268_435_456 })
 
 /** 凭据记录 key（`<owner>/<id>`；owner=插件注册名）。 */
 const CREDENTIAL_SCOPE = 'fenix-dsh-auth'
@@ -95,6 +98,7 @@ export async function hashPassword(password, saltHex) {
 		N: SCRYPT_PARAMS.N,
 		r: SCRYPT_PARAMS.r,
 		p: SCRYPT_PARAMS.p,
+		maxmem: SCRYPT_PARAMS.maxmem,
 	})
 	return {
 		salt: salt.toString('hex'),
@@ -119,7 +123,9 @@ export async function verifyPassword(password, payload) {
 	if (salt === undefined || expected === undefined || salt.length === 0 || expected.length === 0) return false
 	const { N = SCRYPT_PARAMS.N, r = SCRYPT_PARAMS.r, p = SCRYPT_PARAMS.p, keylen = SCRYPT_PARAMS.keylen } = payload
 	try {
-		const candidate = await scrypt(password, salt, keylen, { N, r, p })
+		/* maxmem 显式放宽（N=2^17 档需 128MiB > Node 默认 32MiB）；对旧记录的
+		 * 低档参数同样成立——maxmem 只是上界，不影响低档派生。 */
+		const candidate = await scrypt(password, salt, keylen, { N, r, p, maxmem: SCRYPT_PARAMS.maxmem })
 		return candidate.length === expected.length && timingSafeEqual(candidate, expected)
 	} catch {
 		return false
@@ -785,7 +791,7 @@ function createIndexHandler({ connection, webServer, credentials, limiter, log }
 			}
 
 			if (sinkStatus.code === 401) {
-				const record = await readLoginRecord(credentials)
+				const record = await readLoginRecord(credentials, log)
 				const payload = record?.payload
 				const configured = payload !== undefined && payload !== null && typeof payload === 'object' && typeof payload.hash === 'string'
 				/* 未认证且 Host 不受信任：登录页直接挂横幅预告（登录成功也进不去）。 */
@@ -863,7 +869,7 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 				return writeRedirect(req, res, '/auth/login?error=locked')
 			}
 
-			const record = await readLoginRecord(credentials)
+			const record = await readLoginRecord(credentials, log)
 			const payload = record?.payload
 			if (payload === undefined || payload === null || typeof payload !== 'object' || typeof payload.hash !== 'string') {
 				return writeRedirect(req, res, '/auth/login?error=unconfigured')
@@ -881,11 +887,27 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 			 * 限流计数），不靠响应时序区分哪个字段错。 */
 			const usernameOk = verifyUsername(parsed.username, payload)
 			if (!passwordOk || !usernameOk) {
-				limiter.fail(remoteAddress)
+				const locked = limiter.fail(remoteAddress)
+				if (locked) {
+					/* 锁定留痕：限流按 remoteAddress 分桶，反代/本机聚合部署下任一
+					 * 来源可把共享地址锁死——先从日志可见（局限说明见 README
+					 * 「安全边界」）。 */
+					log('warn', `login rate limit locked source ${remoteAddress || '?'} for ${RATE_LOCK_MS}ms after ${RATE_MAX_FAILS} failures`)
+				}
 				return writeRedirect(req, res, '/auth/login?error=invalid')
 			}
 
 			limiter.reset(remoteAddress)
+			/* Host 为请求方可控头，铸 token 的重定向 base 直接取自它。上方信任
+			 * 预检只拦「确定不受信」（probeUntrusted === true），isTrusted 缺失或
+			 * 抛错时返回 undefined 即放行——DNS rebinding / 改写 Host 的反向代理
+			 * 可借此把会话 token 重定向到非受信域外泄。此处复核：未能确证受信
+			 * （!== false，含 readTrustedHosts/isTrusted 不可用）一律回退既有
+			 * error=untrusted 重定向，不签发带 token 的跳转。 */
+			if (probeUntrusted(connection, req.headers) !== false) {
+				log('warn', 'login success redirect withheld: host trust not confirmable; falling back to error=untrusted')
+				return writeRedirect(req, res, '/auth/login?error=untrusted')
+			}
 			const base = `${protocol}//${headerValue(req.headers, 'host') ?? 'localhost'}/`
 			let target
 			try {
@@ -906,7 +928,7 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 
 /**
  * 凭据端点 `/auth/credentials`（design D6/D9）：三方法均要求 admit 通过
- * （未认证 401）；GET `{configured, username}`（不回显密码/哈希/盐）；POST/
+ * （未认证 401）；GET/HEAD `{configured, username}`（HEAD 只写头，不回显密码/哈希/盐）；POST/
  * DELETE 严格同源（isSameOriginStrict：Origin 缺失判 403）；POST 参数校验
  * （username 1-64、password ≥8、confirm 一致）+ key 段校验 → scrypt 派生 →
  * modifyRecord 写入；DELETE → deleteRecord + 清该来源限流（回退 token-only）；
@@ -927,11 +949,11 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 				return
 			}
 
-			if (req.method === 'GET') {
-				const record = await readLoginRecord(credentials)
+			if (req.method === 'GET' || req.method === 'HEAD') {
+				const record = await readLoginRecord(credentials, log)
 				const payload = record?.payload
 				const configured = payload !== undefined && payload !== null && typeof payload === 'object' && typeof payload.hash === 'string'
-				writeJson(res, 200, { configured, username: configured ? String(payload.username ?? '') : null })
+				writeJson(res, 200, { configured, username: configured ? String(payload.username ?? '') : null }, req.method === 'HEAD')
 				return
 			}
 
@@ -1007,12 +1029,18 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 	}
 }
 
-/** 读凭据记录（readRecord 不在 apply 探测清单内，运行期防御缺失/异常）。 */
-async function readLoginRecord(credentials) {
+/**
+ * 读凭据记录（readRecord 不在 apply 探测清单内，运行期防御缺失/异常）。
+ * 读故障（存储/权限等）warn 留痕后与「从未配置」同形返回 undefined——对外
+ * 契约不变（登录页 unconfigured 提示 / 凭据 GET configured:false），但日志
+ * 可区分排查，不再静默吞错。
+ */
+async function readLoginRecord(credentials, log) {
 	if (typeof credentials?.readRecord !== 'function') return undefined
 	try {
 		return await credentials.readRecord(CREDENTIAL_KEY)
-	} catch {
+	} catch (error) {
+		log?.('warn', `credential record read failed (${error?.message ?? error}); treating as unconfigured`)
 		return undefined
 	}
 }

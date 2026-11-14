@@ -27,6 +27,7 @@
  */
 import type { DshSessionController, DshSessionEvent, DshSessionPersistence } from '../types/dsh-runtime.js'
 import type { SearchRequest, SearchTimeRange } from '../shared/protocol.js'
+import { errorMessage } from '../shared/errors.js'
 
 /** 单会话首条用户消息节选字节上限（design D4：2KB）。 */
 export const EXCERPT_MAX_BYTES = 2048
@@ -253,7 +254,14 @@ async function readEventStream(
     const { events } = await handle.read()
     return events
   } finally {
-    await handle.close()
+    // close 失败（句柄已失效、后端异常等）不得覆盖 read 的原始异常：
+    // 上层 warn 隔离日志记录的须是真实读取失败原因。本函数无日志缝，
+    // close 失败静默吞掉（close 结果不影响已读取的事件流语义）。
+    try {
+      await handle.close()
+    } catch {
+      // 静默吞掉，见上注释。
+    }
   }
 }
 
@@ -303,7 +311,9 @@ function scoreSessions(
 
 /**
  * query 切词：ASCII/数字词（≥2 字符）逐词；CJK 连续段按 2 字片段切
- * （自然语言描述无分词边界，2-gram 提供稳健的子串命中信号）。
+ * （自然语言描述无分词边界，2-gram 提供稳健的子串命中信号）；长度为 1
+ * 的 CJK 段切不出 2-gram，保留单字 token 参与标题/路径子串命中（否则
+ * 单汉字 query 下机械分全零，截断退化为纯最近活跃、较早相关会话失去召回）。
  */
 export function tokenize(query: string): string[] {
   const tokens: string[] = []
@@ -312,7 +322,11 @@ export function tokenize(query: string): string[] {
     if (ascii !== undefined) {
       tokens.push(ascii)
     } else if (cjk !== undefined) {
-      for (let i = 0; i + 2 <= cjk.length; i += 1) tokens.push(cjk.slice(i, i + 2))
+      if (cjk.length === 1) {
+        tokens.push(cjk)
+      } else {
+        for (let i = 0; i + 2 <= cjk.length; i += 1) tokens.push(cjk.slice(i, i + 2))
+      }
     }
   }
   return tokens
@@ -393,9 +407,4 @@ export function byteTruncate(text: string, maxBytes: number): string {
 function describeRange(range: SearchTimeRange | undefined): string {
   if (range === undefined) return '未提供'
   return `[${new Date(range.start).toISOString()}, ${new Date(range.end).toISOString()})`
-}
-
-/** 错误摘要。 */
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

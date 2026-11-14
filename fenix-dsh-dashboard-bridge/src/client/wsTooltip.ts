@@ -17,8 +17,8 @@
  * dsh 原生三行提示。原生提示互斥由两层插件侧手段承担（不改原生 tooltip
  * primitive）：① 拦截层 mouse 事件 stopPropagation（panels.tsx 侧）；② 常驻
  * 消解器（createNativeTipSuppressor，panels.tsx 安装期 start）：监听 body 直子
- * 新增/存量浮层，文本命中任一已装层项目名即隐藏（warn 一次），项目移除经
- * refresh 解除（删除行保留回退原生）。②不随富提示显隐启停——两者同为 500ms
+ * 新增、名单首次非空时惰性补扫存量浮层，文本命中任一已装层项目名即隐藏
+ * （warn 一次），项目移除经 refresh 解除（删除行保留回退原生）。②不随富提示显隐启停——两者同为 500ms
  * 延迟，show 时才挂观察器会输掉竞速（落地缺陷：两卡同显）。②未命中且①未
  * 奏效时按静默降级纪律处理（富提示自身显隐不受影响，不破坏原生提示）。
  */
@@ -295,9 +295,13 @@ export interface WorkspaceTipController {
 /** 常驻原生提示消解器（手段②·fix-workspace-tip-overlap）：安装期 start、
  * 不随富提示显隐启停——原生 tooltip 与富提示同为 500ms 延迟，show 时才挂
  * 观察器会输掉竞速、错过 portal 节点的 add 事件（落地缺陷实测：两卡同显）。
- * 命中规则 = body 直子（含 start 时存量兜底扫描）文本含任一已装层项目名；
- * 本插件卡经 WORKSPACE_TIP_ATTR 排除，行内浮层（非 body 直子）不误伤。
- * refresh 供项目移除后解除隐藏（删除行保留、回退原生），命中 warn 一次。 */
+ * 命中规则 = body 直子文本含任一已装层项目名；存量兜底为惰性补扫——装配期
+ * （start 先于任何 overlay 挂载）命中名单恒空，名单首次非空时（首颗拦截层
+ * 挂载触发 childList 变更 / refresh 兜底路径）对 body 直子补扫一次，观察器
+ * 启动前已 open 的原生 tooltip 由此覆盖；本插件卡经 WORKSPACE_TIP_ATTR 排除
+ * （应用根整树挂载另经 looksLikeAppRoot 排除），行内浮层（非 body 直子）
+ * 不误伤。refresh 供项目移除后解除隐藏（删除行保留、回退原生），命中 warn
+ * 一次。 */
 export interface NativeTipSuppressor {
   start(): void
   refresh(): void
@@ -312,7 +316,9 @@ export interface NativeTipSuppressor {
  * （通知文案可内嵌项目名，挂载即被吞属误伤）。残留权衡：无任何 role 标记
  * 的非交互 portal（无标记 toast 等）仍在误伤面内——文本包含是消解原生
  * tooltip 的唯一可用判据（原生 tooltip 门户无交互角色、无可钉特征类名，
- * tooltip 角色不可入名单），这类浮层命中后仅 refresh/stop 可解除。 */
+ * tooltip 角色不可入名单），这类浮层命中后仅 refresh/stop 可解除。整树挂载
+ * 的 body 直子（应用级容器，如宿主整体重载重建的应用树）误伤面更大（整页
+ * 白屏），由 looksLikeAppRoot 应用根判据单独承担（2026-11-14 加固）。 */
 export const INTERACTIVE_PORTAL_ROLE_SELECTOR =
   '[role="menu"],[role="menuitem"],[role="dialog"],[role="alertdialog"],[role="listbox"],[role="option"],[role="status"],[role="alert"]'
 
@@ -328,17 +334,61 @@ export function looksLikeInteractivePortal(node: {
   }
 }
 
+/** dsh 工作区行选择器镜像：与 panels.tsx 的 WORKSPACE_ROW_SELECTOR 同值
+ * （srcContract 钉值）。本文件不 import panels（避免 wsTooltip → panels 循环
+ * 依赖，见 WorkspaceTipDeps 注），镜像漂移由 tests/wsTooltip.test.ts 与 panels
+ * 钉值互钉防住。 */
+export const WORKSPACE_ROW_SELECTOR_MIRROR = '[data-row-key^="workspace:"]'
+
+/** 应用根尺寸覆盖比：body 直子同时覆盖视口宽、高各 60% 以上判为应用根
+ * （原生 tooltip 门户 / toast 等小浮层远低于该占比）。 */
+export const APP_ROOT_COVERAGE = 0.6
+
+/** 纯函数守卫（node 可测）：节点是否应用级容器（整树挂载）。两条特征任一
+ * 命中即为真——① 子树含 dsh 工作区行（行只存在于应用树内，按
+ * WORKSPACE_ROW_SELECTOR_MIRROR 查询，querySelector 不含自身但此处只查
+ * 子树，语义正确）；② 节点尺寸同时覆盖视口宽高大半（全屏应用根特征）。
+ * 2026-11-14 加固：宿主整体重载重建 / 预渲染子树作为一个 body 直子整树
+ * 挂载时，其文本可含项目名，旧判据会把整个应用容器隐藏成整页白屏（仅留
+ * 一次 warn）。视口为 0（无布局环境：jsdom 单测 / SSR）时尺寸判据不参与，
+ * 仅①生效。 */
+export function looksLikeAppRoot(
+  node: {
+    querySelector(selector: string): Element | null
+    getBoundingClientRect(): { readonly width: number; readonly height: number }
+  },
+  viewport: { readonly width: number; readonly height: number },
+): boolean {
+  try {
+    if (node.querySelector(WORKSPACE_ROW_SELECTOR_MIRROR) !== null) return true
+  } catch {
+    // detached 等查询异常：仅按尺寸判据继续。
+  }
+  if (viewport.width <= 0 || viewport.height <= 0) return false // 无布局环境
+  const rect = node.getBoundingClientRect()
+  return rect.width >= viewport.width * APP_ROOT_COVERAGE && rect.height >= viewport.height * APP_ROOT_COVERAGE
+}
+
 export function createNativeTipSuppressor(getNames: () => readonly string[]): NativeTipSuppressor {
   if (typeof MutationObserver !== 'function') {
     return { start: () => {}, refresh: () => {}, stop: () => {} }
   }
   let observer: MutationObserver | undefined
   let warned = false
+  let scannedWithNames = false
   const hidden = new Map<HTMLElement, string>()
 
   const hideIfMatch = (node: HTMLElement): void => {
     if (node.hasAttribute(WORKSPACE_TIP_ATTR)) return // 本插件富卡不误伤
     if (looksLikeInteractivePortal(node)) return // 菜单/对话框/下拉/通知条不误伤
+    if (
+      looksLikeAppRoot(node, {
+        width: document.documentElement?.clientWidth ?? 0,
+        height: document.documentElement?.clientHeight ?? 0,
+      })
+    ) {
+      return // 应用级容器（整树挂载）不消解——整树含项目名文本会整页白屏
+    }
     if (hidden.has(node)) return
     const text = node.textContent ?? ''
     for (const name of getNames()) {
@@ -355,16 +405,41 @@ export function createNativeTipSuppressor(getNames: () => readonly string[]): Na
     }
   }
 
+  // 存量扫描：body 直子逐个过消解判据（hideIfMatch）。
+  const scanExisting = (): void => {
+    if (document.body === null) return
+    for (const node of Array.from(document.body.children)) {
+      if (node instanceof HTMLElement) hideIfMatch(node)
+    }
+  }
+
+  // 惰性补扫（2026-11-14）：装配时序上 start 先于任何 overlay 挂载
+  // （panels.tsx installWorkspaceNav），此刻命中名单恒为空集、start 的存量
+  // 扫描必空转——「观察器启动前已 open 的原生 tooltip」漏消解，两卡同显在
+  // 该时序下仍会复现。名单首次转非空（首颗拦截层挂载触发 childList 变更 /
+  // refresh 兜底路径）即对 body 直子补扫一次；名单清空（removeAllOverlays）
+  // 后复位，下次非空再扫。
+  const maybeScanExisting = (): void => {
+    if (getNames().length === 0) {
+      scannedWithNames = false
+      return
+    }
+    if (scannedWithNames) return // 已扫过且名单未清空：增量由观察器覆盖
+    scannedWithNames = true
+    scanExisting()
+  }
+
   return {
     start() {
       this.stop()
       if (document.body === null) return
-      // 存量兜底：观察器启动前已 open 的 portal 节点 childList 不再报 add。
-      for (const node of Array.from(document.body.children)) {
-        if (node instanceof HTMLElement) hideIfMatch(node)
-      }
+      // 名单非空装配（泛用入口）即扫；panels 时序下 start 先于任何 overlay
+      // 挂载、名单恒空而空转，由观察器回调 / refresh 在名单首次非空时惰性
+      // 补扫（见 maybeScanExisting 注）。
+      maybeScanExisting()
       observer = new MutationObserver((mutations) => {
         try {
+          maybeScanExisting() // 名单首次非空的存量补扫（装配前已 open 的 portal）
           for (const mutation of mutations) {
             for (const node of Array.from(mutation.removedNodes)) {
               if (node instanceof HTMLElement) hidden.delete(node)
@@ -392,10 +467,12 @@ export function createNativeTipSuppressor(getNames: () => readonly string[]): Na
         }
         hidden.delete(node)
       }
+      maybeScanExisting() // 名单由空转非空（换层后新挂等）：补扫存量
     },
     stop() {
       observer?.disconnect()
       observer = undefined
+      scannedWithNames = false // 重启后按当前名单重判是否补扫
       for (const node of hidden.keys()) {
         try {
           node.style.removeProperty('display')
@@ -455,7 +532,7 @@ export function createWorkspaceTipController(deps: WorkspaceTipDeps): WorkspaceT
 
   const show = (name: string, anchor: Element): void => {
     const summary = deps.getSummaries().find((row) => row.name === name)
-    if (!shouldRenderRichTip(summary) || summary === undefined) return // 回退原生
+    if (summary === undefined || !shouldRenderRichTip(summary)) return // 回退原生
     // 行瞬窗（重渲染替换中 rect 归零）：不显示残卡。
     const probe = anchor.getBoundingClientRect()
     if (probe.width === 0 && probe.height === 0) return

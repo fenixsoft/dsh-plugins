@@ -176,7 +176,9 @@ export function reorderOfficialPanels(ctx: Context): () => void {
  * recentWorkspace 兜底，两条路都绕不开），默认落点是上次会话视图。本插件
  * boot 后短轮询调 `uiWorkspace.startSession()`——原生侧栏 New Session 按钮逐键
  * 路径（新建/复用空白会话，blank 会话即新会话界面）。URL 带 `#panel=<id>` 深
- * 链时改走 selectPanel 直达该面板（深链优先于默认落点）。门禁：工作区 list
+ * 链时改走 selectPanel 直达该面板（深链优先于默认落点）；面板未注册（boot
+ * 早期项目面板尚未同步注册）抛错则回落 startSession 默认落点——项目面板
+ * 注册到位后由 projectEntrySink.addProject 的补切挂点重试深链。门禁：工作区 list
  * 相位 'ready' 后才触发（过早调用 target 解析不到会 clearMain 落「选择工作区」
  * 空态，与按钮点击观感不符）；250ms ×40 上限；node 环境（vitest 单测）无
  * window 整段跳过，不产计时器泄漏。
@@ -207,13 +209,20 @@ function bootToNewSession(ctx: Context): () => void {
     }
     const hashPanelId = panelIdFromHash()
     if (hashPanelId !== null) {
-      // 深链优先：URL 带 #panel=<id> 直达该面板，默认新会话落点让位
+      // 深链优先：URL 带 #panel=<id> 直达该面板，默认新会话落点让位。宿主
+      // layout 侧 hasMainPanel 校验未注册 id 会抛错（dsh-runtime.d.ts 缝注释）
+      // ——boot 早期项目 main 面板要等 startProjectSync 首轮拉取后才注册，
+      // 项目深链（如分享/书签 #panel=fenix-project-X）刷新常命中此失败。
       try {
         ctx.layout?.selectPanel?.(hashPanelId)
+        return // 深链直达成功：新会话默认落点让位
       } catch {
+        // 未注册：warn 后继续落下方 startSession 默认落点（不提前 return——
+        // 提前返回会把用户留在 restoreSelection 恢复的上次会话视图，与 warn
+        // 文案「维持默认落点」相矛盾）；面板注册到位后由 projectEntrySink
+        // 的 addProject 补切挂点重试深链。
         console.warn(`[fenix-dsh-dashboard-bridge] 深链面板 ${hashPanelId} 未注册，维持默认落点`)
       }
-      return
     }
     try {
       ui.startSession()
@@ -449,10 +458,10 @@ export function installDashboardSessionRequests(
   prefix: string,
   deps?: SessionStarterDeps,
 ): () => void {
-  if (typeof window === 'undefined') {
-    console.warn('[fenix-dsh-dashboard-bridge] window 不可用，dashboard 新会话请求通道降级 no-op')
-    return () => {}
-  }
+  // window 缺席（node 单测/SSR）静默降级 no-op——与同文件 bootToNewSession /
+  // deepLinkPanels / panelIdFromHash 的 window 缺席口径一致（降级属预期行为，
+  // 不打 warn 污染 node 测试日志）。
+  if (typeof window === 'undefined') return () => {}
   const fetchPath = deps?.fetchProjectPath ?? defaultFetchProjectPath(prefix)
   const onMessage = (event: MessageEvent): void => {
     if (event.origin !== window.location.origin) return
@@ -519,6 +528,22 @@ export function projectEntrySink(ctx: Context, prefix: string): ProjectEntrySink
   return {
     addProject(name) {
       registerProjectPanel(name, projectRouteFor(name))
+      // boot 深链补切挂点：bootToNewSession 早期 selectPanel 项目深链常因面板
+      // 未注册抛错回落新会话落点（项目面板要等首轮项目同步注册）。面板注册到
+      // 位时若外层 hash 仍指向本面板（分享/书签 #panel=fenix-project-X），此处
+      // 补一次 selectPanel 兑现深链；hash 已被用户改动/清除（如 startSession 的
+      // selectPanel(null) 已清 hash）则不切，尊重用户中途选择。addProject 仅在
+      // 项目新增/消失后重现时触发（reconcileProjects 指纹幂等），常规 60s 轮询
+      // 不会重入把用户拽回深链面板。未注册/抛错吞掉（deepLinkPanels.applyHash
+      // 同口径：维持当前视图）。
+      const pending = panelIdFromHash()
+      if (pending === projectIdFor(name)) {
+        try {
+          ctx.layout?.selectPanel?.(pending)
+        } catch {
+          // 形状漂移等恒定错误：静默维持当前视图，等 hashchange 自然重试。
+        }
+      }
     },
     openProjectAt(name, route) {
       // 文件右键「在 Fenix 项目中定位」落点：dispose 旧 + 以深链 src 重注册

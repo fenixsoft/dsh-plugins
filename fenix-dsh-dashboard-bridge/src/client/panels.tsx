@@ -471,7 +471,9 @@ interface WorkspaceListSource {
  * - 再挂载（D1）：三通道触发重扫——projectGroupStore 订阅（sync 数据到齐）、
  *   ui.workspaces.list 订阅（工作区增删，防御缺席）、MutationObserver 去抖
  *   （行 React 重渲染替换名称文本等 DOM 变化）；重扫幂等（既有拦截层存活
- *   校验，缺失才补挂），映射失效行清残留层。
+ *   校验，缺失才补挂）。残留层清理由 store.projects 差分驱动（项目从列表
+ *   移除按名清层），扫描轮零清理——映射失效行不清层（防瞬窗震荡，见
+ *   removeOverlaysOfName）。
  * - 降级：项目列表未就绪/工作区行未挂载 → 清层零动作；data-row-key 枚举
  *   整体失效 → warn 一次后降级原生；单行名称文本定位失败 → 该行不装层
  *   warn 一次；全部错误路径 warn-only，无未处理异常。
@@ -542,6 +544,9 @@ export function installWorkspaceNav(ctx: Context, deps: WorkspaceNavDeps): () =>
       tip.leave() // 旧层移除：富提示随收（防残卡挂失锚）
       nativeTipSuppressor.refresh() // 旧名的存量原生提示解Hide
     }
+    // 新挂分支同样先收旧卡：宿主重渲染连 overlay 一并替换时 mouseleave 随
+    // 节点消失，已显示的富提示卡失去回收事件（与上方换层分支防残卡防护一致）。
+    tip.leave()
     installedNames.add(name) // 新挂/换层：该行原生提示进入互斥名单
     const overlay = document.createElement('span')
     overlay.setAttribute(WORKSPACE_NAV_OVERLAY_ATTR, name)

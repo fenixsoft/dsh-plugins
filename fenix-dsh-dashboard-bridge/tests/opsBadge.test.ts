@@ -380,7 +380,7 @@ describe('装配契约（遮蔽重注册 + 形状漂移降级 + 收口）', () =
       (options) => options.id === 'fenix-activities' && options.priority === -10 && failNext,
     )
     // 首拉 count=1：注册抛错 → warn、无遮蔽注册、5 固定条目注册全在。
-    // （apply 在 node 环境另有「window 不可用」降级 warn，断言按内容匹配。）
+    // （断言按内容匹配：window 缺席等预期降级静默，warn 面不含噪音。）
     expect(shadowEntries(stub)).toHaveLength(0)
     const badgeWarn = warnSpy.mock.calls.find((call) => String(call[0]).includes('运维徽标条目重注册失败'))
     expect(badgeWarn).toBeDefined()

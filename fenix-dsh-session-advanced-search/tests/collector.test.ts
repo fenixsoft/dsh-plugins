@@ -323,6 +323,25 @@ describe('collectCandidates 首条用户消息节选', () => {
     expect(outcome.candidates[1]?.excerpt).toBe('正常节选')
     expect(log.warns.some((m) => m.includes('s1'))).toBe(true)
   })
+
+  it('close 失败不覆盖 read 的原始异常（warn 记录真实读取失败原因）', async () => {
+    const persistence = new FakePersistence([snapshot('s1', 50, '/w')], new Map())
+    persistence.open = (id: string, access: 'read') => {
+      persistence.calls.push({ method: 'open', args: [id, access] })
+      return Promise.resolve({
+        id,
+        header: { version: 1, id, createdAt: 0, isSeeded: false },
+        access,
+        read: () => Promise.reject(new Error('read-boom')),
+        close: () => Promise.reject(new Error('close-boom')),
+      })
+    }
+    const log = makeLog()
+    const outcome = await collectCandidates({ persistence, log }, { query: '登录' }, 30, new AbortController().signal)
+    expect(outcome.candidates[0]?.excerpt).toBe('')
+    expect(log.warns.some((m) => m.includes('s1') && m.includes('read-boom'))).toBe(true)
+    expect(log.warns.some((m) => m.includes('close-boom'))).toBe(false)
+  })
 })
 
 describe('collectCandidates 缝缺失回退', () => {
@@ -369,6 +388,9 @@ describe('tokenize 与节选纯函数', () => {
   it('ASCII 词整词、CJK 按 2-gram 切', () => {
     expect(tokenize('fix login 页面')).toEqual(['fix', 'login', '页面'])
     expect(tokenize('修登录功能')).toEqual(['修登', '登录', '录功', '功能'])
+    // 单字 CJK 段切不出 2-gram，保留单字 token 参与命中（否则单汉字 query 机械分全零）。
+    expect(tokenize('登')).toEqual(['登'])
+    expect(tokenize('修 登')).toEqual(['修', '登'])
   })
 
   it('byteTruncate 2KB 边界', () => {

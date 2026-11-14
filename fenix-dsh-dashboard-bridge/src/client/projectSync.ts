@@ -302,7 +302,7 @@ export function reconcileProjects(
   next: readonly string[],
   sink: Pick<ProjectEntrySink, 'addProject' | 'removeProject'>,
 ): ReadonlySet<string> {
-  const desired = new Set([...new Set(next)])
+  const desired = new Set(next)
   for (const name of current) {
     if (!desired.has(name)) sink.removeProject(name)
   }
@@ -357,12 +357,42 @@ export interface ProjectSyncOptions {
   readonly fetchProjectRows?: ProjectRowsFetcher
 }
 
+/** 工作区注册单次调用超时上限（与拉取侧 fetchProjectRowsWithTimeout 同 10s 口径）。 */
+const CREATE_WORKSPACE_TIMEOUT_MS = 10_000
+
+/**
+ * 给 Promise 包一层超时（Promise.race 口径）：目标 Promise 悬挂不落定时按
+ * 超时拒绝，调用方得以走失败路径，不让单个悬挂调用永久占用后续流程。计时器
+ * 在任一侧先落定即清除，不残留常驻 timer；后到一侧的结果/异常由 race 吸收，
+ * 无未处理异常。
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let handle: ReturnType<typeof setTimeout> | undefined
+  const guard = new Promise<never>((_, reject) => {
+    handle = setTimeout(() => reject(new Error(label)), ms)
+  })
+  return Promise.race([
+    promise.then(
+      (value) => {
+        clearTimeout(handle)
+        return value
+      },
+      (error) => {
+        clearTimeout(handle)
+        throw error
+      },
+    ),
+    guard,
+  ])
+}
+
 /**
  * 工作区自动对齐步（move-project-nav-to-workspace-rows D3）：本轮 names 拉取
  * 成功后，exists 可达项目 × 工作区快照求差（matchWorkspaceForProject 同序
  * 判据），缺失者 `workspaces.create({ path })` 注册（不开会话）——只增不改
- * 不删；对齐拉取失败/超时跳过整轮（不建不删）；逐项目注册失败 warn 跳过
- * （下轮重试）。依赖任一缺席整段禁用（零动作，不产生未处理异常）。
+ * 不删；对齐拉取失败/超时跳过整轮（不建不删）；逐项目注册失败/超时
+ * （CREATE_WORKSPACE_TIMEOUT_MS，防宿主 create 悬挂永久占用在飞闸门）warn
+ * 跳过（下轮重试）。依赖任一缺席整段禁用（零动作，不产生未处理异常）。
  *
  * 快照瞬空防护（同 panels.tsx rescan 口径）：`seen` 记录对齐循环是否见过
  * 非空快照——曾非空后转空 = 宿主重载空窗（判定面不可信），本轮不判差
@@ -430,7 +460,16 @@ async function alignWorkspaces(
     // 创建——覆盖快照滞后窗口（快照行未到位前缺失判定会连续误报）。
     if (initiatedPaths.has(normalizeWorkspacePath(row.path))) continue
     try {
-      await createWorkspace({ path: row.path })
+      // 超时保护（与拉取侧同 10s 口径）：宿主 create 悬挂不再永久占用 inFlight
+      // 防重入闸门（否则 60s 周期与 focus 重拉全部 no-op，面板/名称导航/告警
+      // 对齐整体停更，只有插件 stop 能解除）。超时按既有「本轮跳过、下轮重试」
+      // 失败口径处理（走下方既有 catch warn 管道，不记防重集合）；迟到的 create
+      // 若实际成功，快照行到位后由 matchWorkspaceForProject 命中自然接管。
+      await withTimeout(
+        createWorkspace({ path: row.path }),
+        CREATE_WORKSPACE_TIMEOUT_MS,
+        `workspaces.create(${row.path}) 超时（>${CREATE_WORKSPACE_TIMEOUT_MS}ms，按失败处理）`,
+      )
       // 成功才记入防重集合（失败保持既有「下轮重试」语义，等快照恢复）。
       initiatedPaths.add(normalizeWorkspacePath(row.path))
     } catch (error) {
@@ -445,9 +484,13 @@ async function alignWorkspaces(
 
 /**
  * 启动项目列表同步循环：立即拉取一次，随后按周期 + 窗口聚焦重拉。
+ * node 环境（无 window 且未注入 timer 桩）整体跳过，不产计时器泄漏（同
+ * startAlertCountSync / bootToNewSession 先例口径；注入 timer 桩的单测
+ * 不受影响）。
  * 返回停止函数：清定时器、退订焦点、丢弃在途拉取结果；再次调用安全。
  */
 export function startProjectSync(options: ProjectSyncOptions): () => void {
+  if (options.timer === undefined && typeof window === 'undefined') return () => {}
   const intervalMs = normalizeIntervalMs(options.intervalMs)
   const timer = options.timer ?? defaultTimer()
   let current: ReadonlySet<string> = new Set()

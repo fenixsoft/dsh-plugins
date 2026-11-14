@@ -23,11 +23,13 @@
  * 上限（query 文本余量充足）。
  *
  * 「重复提交取消旧任务」语义由 client 半保证（提交前 DELETE 旧任务）——host
- * 不做隐式取消（design D6 多标签页隔离）。
+ * 不做隐式取消（design D6 多标签页隔离）；在途任务数受 MAX_IN_FLIGHT_JOBS
+ * 上界约束，超限 POST 回 429（只限数量，非取消）。
  */
 import { JOBS_PATH, parseSearchRequest } from '../shared/protocol.js'
 import type { SearchJobCreated, SearchJobStatus } from '../shared/protocol.js'
 import type { WebRequest, WebResponse } from '../types/dsh-runtime.js'
+import { MAX_IN_FLIGHT_JOBS } from './jobs.js'
 import type { JobTable } from './jobs.js'
 
 /** POST 请求体上限（design：64KB，自然语言描述 + 时间范围余量充足）。 */
@@ -112,7 +114,8 @@ async function handleJobsCollection(deps: RouteDeps, req: WebRequest, res: WebRe
     return
   }
   if (req.method !== 'POST') {
-    writeJson(res, 405, { error: 'method not allowed; use POST' })
+    // RFC 7231：405 响应 MUST 生成 Allow 头声明该资源支持的方法。
+    writeJson(res, 405, { error: 'method not allowed; use POST' }, { allow: 'POST' })
     return
   }
   let payload: unknown
@@ -128,11 +131,18 @@ async function handleJobsCollection(deps: RouteDeps, req: WebRequest, res: WebRe
     writeJson(res, 400, { error: 'query 必填且非空；timeRange 须为 {start,end}（epoch ms，start<end）' })
     return
   }
+  // 在途并发上界：host 唯一建任务入口在此，失控客户端（轮询 bug 重试循环）不得
+  // 无界并发建任务放大 LLM 调用成本。只限数量、不隐式取消——在途任务终态即腾出
+  // 名额，多标签页并存语义保留。检查与 create 之间无 await，同步原子无竞态。
+  if (deps.jobs.inFlightCount() >= MAX_IN_FLIGHT_JOBS) {
+    writeJson(res, 429, { error: `在途任务已达上限（${MAX_IN_FLIGHT_JOBS} 个），请等待既有任务完成或取消后再提交` })
+    return
+  }
   const job = deps.jobs.create(request)
   // 立即返回 jobId；管线异步执行（fire-and-forget，异常由管线自身 fail 兜底）。
   writeJson(res, 200, { jobId: job.id } satisfies SearchJobCreated)
   void deps.runJob(job.id).catch((error) => {
-    deps.log.warn(`session-advanced-search: 任务 ${job.id} 管线异常：${error instanceof Error ? error.message : String(error)}`)
+    deps.log.warn(`fenix-dsh-session-advanced-search: 任务 ${job.id} 管线异常：${error instanceof Error ? error.message : String(error)}`)
     deps.jobs.fail(job.id, '搜索失败：内部错误')
   })
 }
@@ -175,7 +185,8 @@ function handleJobItem(deps: RouteDeps, req: WebRequest, res: WebResponse): void
     writeJson(res, 200, { cancelled: true })
     return
   }
-  writeJson(res, 405, { error: 'method not allowed; use GET or DELETE' })
+  // RFC 7231：405 响应 MUST 生成 Allow 头声明该资源支持的方法。
+  writeJson(res, 405, { error: 'method not allowed; use GET or DELETE' }, { allow: 'GET, DELETE' })
 }
 
 /**
@@ -294,13 +305,14 @@ export function readRequestBody(req: WebRequest, maxBytes: number): Promise<stri
   })
 }
 
-/** JSON 响应写出（no-store；content-length 固定）。 */
-function writeJson(res: WebResponse, status: number, data: unknown): void {
+/** JSON 响应写出（no-store；content-length 固定；extraHeaders 追加额外头，如 405 的 Allow）。 */
+function writeJson(res: WebResponse, status: number, data: unknown, extraHeaders?: Record<string, string>): void {
   const body = JSON.stringify(data)
   res.writeHead(status, {
     'cache-control': 'no-store',
     'content-type': 'application/json; charset=utf-8',
     'content-length': String(Buffer.byteLength(body)),
+    ...extraHeaders,
   })
   res.end(body)
 }

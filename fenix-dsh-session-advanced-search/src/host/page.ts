@@ -332,6 +332,7 @@ var lastQuery = '';
 var logs = [];
 var detailOpen = false;
 var renderedSteps = 0;
+var finishingRun = false;
 
 function $(sel) { return document.querySelector(sel); }
 function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -365,6 +366,47 @@ async function api(method, path, body) {
     throw new Error(msg);
   }
   return data;
+}
+
+/* ===== 载荷形状守卫（shared/protocol.ts parseJobStatus 同源最小移植）=====
+   页面自包含无模块导入（头注释实现约束），故按 protocol.ts 同形状内联：
+   GET 轮询与 SSE 帧消费前先过守卫，非法载荷不进渲染（漂移由契约测试对账）。 */
+var SEARCH_PHASES = ['collecting', 'filtering', 'analyzing', 'done', 'error', 'cancelled'];
+var SEARCH_DEGRADED_REASONS = ['llm-missing', 'credential-missing', 'timeout', 'call-failed', 'parse-failed'];
+function isPlainObject(v) { return v !== null && typeof v === 'object'; }
+function isCandidateRow(v) {
+  if (!isPlainObject(v)) return false;
+  if (typeof v.sessionId !== 'string' || v.sessionId.length === 0) return false;
+  if (typeof v.title !== 'string' || typeof v.workspacePath !== 'string') return false;
+  if (typeof v.activityTime !== 'number' || !isFinite(v.activityTime)) return false;
+  if (typeof v.reason !== 'string') return false;
+  if (typeof v.confidence !== 'number' || !isFinite(v.confidence) || v.confidence < 0 || v.confidence > 1) return false;
+  if (v.degraded !== undefined && typeof v.degraded !== 'boolean') return false;
+  return true;
+}
+function isProgressStep(v) {
+  if (!isPlainObject(v)) return false;
+  if (typeof v.step !== 'string' || v.step.length === 0) return false;
+  if (v.detail !== undefined && typeof v.detail !== 'string') return false;
+  if (typeof v.at !== 'number' || !isFinite(v.at)) return false;
+  return true;
+}
+function parseJobStatus(v) {
+  if (!isPlainObject(v)) return null;
+  if (typeof v.jobId !== 'string' || v.jobId.length === 0) return null;
+  if (SEARCH_PHASES.indexOf(v.phase) < 0) return null;
+  if (v.results !== undefined) {
+    if (!Array.isArray(v.results)) return null;
+    for (var ri = 0; ri < v.results.length; ri++) { if (!isCandidateRow(v.results[ri])) return null; }
+  }
+  if (v.degraded !== undefined && typeof v.degraded !== 'boolean') return null;
+  if (v.degradedReason !== undefined && SEARCH_DEGRADED_REASONS.indexOf(v.degradedReason) < 0) return null;
+  if (v.progress !== undefined) {
+    if (!Array.isArray(v.progress)) return null;
+    for (var pi = 0; pi < v.progress.length; pi++) { if (!isProgressStep(v.progress[pi])) return null; }
+  }
+  if (v.message !== undefined && typeof v.message !== 'string') return null;
+  return v;
 }
 
 /* ===== 面板渲染 ===== */
@@ -412,7 +454,7 @@ function renderProgress(progress, finished, failed) {
     var isLast = i === progress.length - 1;
     var inFlight = !finished && !failed && isLast;
     var failing = failed && isLast;
-    var title = STEP_TITLES[p.step] || p.step;
+    var title = esc(STEP_TITLES[p.step] || p.step);
     var cls = failing ? 'fail' : (inFlight ? 'run' : 'ok');
     var icon = failing ? ICONS.x : (inFlight ? ICONS.spinner : ICONS.check);
     if (p.step === 'analyzing' && inFlight) {
@@ -446,9 +488,13 @@ function renderProgress(progress, finished, failed) {
 function renderLogs() {
   var detail = $('#detailBody');
   if (!detail) return;
+  /* T+ 以首条日志的 at（服务器推进打点，与步骤行 fmtTime(p.at) 同源）为基准
+     计算真实耗时；不再按行号伪造。 */
+  var base = (logs.length > 0 && typeof logs[0].at === 'number') ? logs[0].at : 0;
   var html = '';
   for (var i = 0; i < logs.length; i++) {
-    html += '<div class="log-line ' + (logs[i].cls || '') + '"><span class="ts">T+' + (i * 0.5 + 0.3).toFixed(1) + 's</span>' + esc(logs[i].text) + '</div>';
+    var at = typeof logs[i].at === 'number' ? logs[i].at : base;
+    html += '<div class="log-line ' + (logs[i].cls || '') + '"><span class="ts">T+' + Math.max(0, (at - base) / 1000).toFixed(1) + 's</span>' + esc(logs[i].text) + '</div>';
   }
   detail.innerHTML = html;
 }
@@ -486,8 +532,11 @@ function degradeBannerHTML(reason) {
   var detail = DEGRADED_DETAIL[reason] || '';
   var actions = '';
   if (reason === 'credential-missing') {
+    /* 本页（独立页/iframe 宿主）无 uiWorkspace 设置导航缝：按知识页「不可用
+       时降级为提示文案」口径，按钮退化为回主界面指引（措辞与 shared/
+       protocol.ts credentialHint 一致），完整路径见 db-d 提示文案。 */
     actions = '<div class="db-actions">'
-      + '<button class="btn-amber" id="goConfigBtn">' + ICONS.rightUp + ' 前往模型设置配置凭证</button>'
+      + '<button class="btn-amber" id="goConfigBtn">' + ICONS.rightUp + ' 返回主界面，前往「设置 → 模型」</button>'
       + '<button class="btn-amber" id="retryAiBtn">' + ICONS.refresh + ' 仅重试 AI 分析</button>'
       + '</div>';
   } else {
@@ -526,6 +575,15 @@ function closeEmbedded() {
 }
 
 /* ===== 主流程 ===== */
+/* 终态收尾重入门：poll 重叠、SSE 帧与轮询竞速、中断与终态帧并发时，仅首个
+   到达的终态分支执行收尾（结果区/横幅只插入一次，按钮监听不重复绑定）。
+   runSearch 每轮重置。 */
+function beginFinish() {
+  if (finishingRun) return false;
+  finishingRun = true;
+  return true;
+}
+
 async function runSearch(query) {
   var token = ++runToken;
   lastQuery = query;
@@ -534,6 +592,7 @@ async function runSearch(query) {
   detailOpen = false;
   renderedSteps = 0;
   lastStatusJson = '';
+  finishingRun = false;
   $('#initialState').style.display = 'none';
   $('#runBtn').disabled = true;
   var area = $('#dynamicArea');
@@ -541,6 +600,14 @@ async function runSearch(query) {
   renderLogs();
 
   try {
+    /* 单在途契约（知识页/jobs.ts 头注释：同一 client 重复提交先 DELETE 旧任务
+       再建新任务，host 不做隐式取消）。DELETE 幂等（未知 id 404/终态 noop），
+       结果尽力而为，不阻塞建新任务。 */
+    var prevJob = jobId;
+    jobId = null;
+    if (prevJob) {
+      try { await api('DELETE', API + '/' + encodeURIComponent(prevJob)); } catch (e) { /* 尽力而为 */ }
+    }
     var created = await api('POST', API, { query: query });
     if (token !== runToken) return;
     jobId = created.jobId;
@@ -562,6 +629,7 @@ async function runSearch(query) {
     startStatusStream(jobId, token);
   } catch (err) {
     if (token !== runToken) return;
+    if (!beginFinish()) return;
     stopTimers();
     finishFail(err);
   }
@@ -577,19 +645,22 @@ function handleStatus(status, token) {
   var progress = Array.isArray(status.progress) ? status.progress : [];
   if (progress.length !== renderedSteps) {
     var newSteps = progress.slice(renderedSteps);
-    for (var i = 0; i < newSteps.length; i++) logs.push({ text: newSteps[i].step + (newSteps[i].detail ? ': ' + newSteps[i].detail : '') });
+    for (var i = 0; i < newSteps.length; i++) logs.push({ text: newSteps[i].step + (newSteps[i].detail ? ': ' + newSteps[i].detail : ''), at: newSteps[i].at });
     if (detailOpen) renderLogs();
   }
   var phase = status.phase;
   if (phase === 'done') {
+    if (!beginFinish()) return;
     stopStatusStream();
     stopTimers();
     finishDone(status, token);
   } else if (phase === 'error') {
+    if (!beginFinish()) return;
     stopStatusStream();
     stopTimers();
     finishFail(new Error(status.message || '搜索失败'));
   } else if (phase === 'cancelled') {
+    if (!beginFinish()) return;
     stopStatusStream();
     stopTimers();
     finishCancelled();
@@ -615,7 +686,7 @@ function startStatusStream(id, token) {
     if (token !== runToken) { stopStatusStream(); return; }
     var data = null;
     try { data = JSON.parse(ev.data); } catch (e) { data = null; }
-    handleStatus(data, token);
+    handleStatus(parseJobStatus(data), token);
   });
   es.onerror = function () {
     /* 流断开：终态早已渲染（handleStatus 终态先停流）则忽略；非终态断连
@@ -633,13 +704,17 @@ async function startPolling(id, token) {
     if (token !== runToken) return;
     var status;
     try {
-      status = await api('GET', API + '/' + encodeURIComponent(id));
+      /* 载荷形状守卫（protocol.ts parseJobStatus 同源移植）：非法载荷走既有
+         轮询容错路径收尾，不进渲染。 */
+      status = parseJobStatus(await api('GET', API + '/' + encodeURIComponent(id)));
+      if (!status) throw new Error('任务状态载荷形状非法');
       pollFailCount = 0;
     } catch (err) {
       if (token !== runToken) return;
       /* 轮询容错：连续 2 次失败才判失败（与 client 半同策略） */
       pollFailCount++;
       if (pollFailCount <= 2 && !(err && err.authRequired)) return;
+      if (!beginFinish()) return;
       stopTimers();
       finishFail(err);
       return;
@@ -664,7 +739,7 @@ function finishDone(status, token) {
   var progress = Array.isArray(status.progress) ? status.progress : [];
   var doneDetail = '';
   for (var i = progress.length - 1; i >= 0; i--) { if (progress[i].step === 'done') { doneDetail = progress[i].detail || ''; break; } }
-  if (degraded) logs.push({ text: 'degraded: ' + (status.degradedReason || 'unknown') + (doneDetail ? ' · ' + doneDetail : ''), cls: 'warn' });
+  if (degraded) logs.push({ text: 'degraded: ' + (status.degradedReason || 'unknown') + (doneDetail ? ' · ' + doneDetail : ''), cls: 'warn', at: Date.now() });
   if (detailOpen) renderLogs();
   area.insertAdjacentHTML('beforeend', (degraded ? degradeBannerHTML(status.degradedReason) : '') + '<div id="resultsWrap">' + resultsHTML(Array.isArray(status.results) ? status.results : [], degraded) + '</div>');
   animateBars();
@@ -744,6 +819,7 @@ async function interrupt(token) {
   if (id) {
     try { await api('DELETE', API + '/' + encodeURIComponent(id)); } catch (e) { /* 中断尽力而为 */ }
   }
+  if (!beginFinish()) return;
   finishCancelled();
 }
 

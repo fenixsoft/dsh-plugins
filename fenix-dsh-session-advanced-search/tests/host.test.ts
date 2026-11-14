@@ -166,6 +166,7 @@ describe('装配：config 解析与缝校验', () => {
   it('非法配置 → 装载期抛 TypeError（D7 显式失败）', () => {
     const { ctx } = makeCtx({})
     expect(() => makePlugin(ctx, { maxCandidates: 0 })).toThrow(TypeError)
+    expect(() => makePlugin(ctx, { maxCandidates: 201 })).toThrow(TypeError)
     expect(() => makePlugin(ctx, { enabled: 'yes' })).toThrow(TypeError)
     expect(() => makePlugin(ctx, { llmTimeoutMs: -1 })).toThrow(TypeError)
   })

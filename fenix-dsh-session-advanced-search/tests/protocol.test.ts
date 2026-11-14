@@ -185,7 +185,10 @@ describe('parseJobStatus', () => {
     expect(parseJobStatus(status)).toEqual(status)
   })
 
-  it('degradedReason 白名单外 / progress 形状坏判假', () => {
+  it('degraded 非布尔 / degradedReason 白名单外 / progress 形状坏判假', () => {
+    expect(parseJobStatus({ jobId: 'j', phase: 'done', degraded: 'yes' })).toBeUndefined()
+    expect(parseJobStatus({ jobId: 'j', phase: 'done', degraded: 1 })).toBeUndefined()
+    expect(parseJobStatus({ jobId: 'j', phase: 'done', degraded: true })).not.toBeUndefined()
     expect(parseJobStatus({ jobId: 'j', phase: 'done', degradedReason: 'aliens' })).toBeUndefined()
     expect(parseJobStatus({ jobId: 'j', phase: 'analyzing', progress: 'nope' })).toBeUndefined()
     expect(parseJobStatus({ jobId: 'j', phase: 'analyzing', progress: [{ step: '', at: 1 }] })).toBeUndefined()

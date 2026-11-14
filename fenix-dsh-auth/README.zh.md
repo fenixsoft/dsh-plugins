@@ -9,7 +9,7 @@ dsh web 账号密码登录插件（零构建 JS，dsh 0.2.2-rc.1 实测）。
   - token 通道完整保留——有效 `/?token=` 的原生 303（铸会话 cookie）由插件捕获后原样回放，不复制签名逻辑；
   - 密码通道——`POST /auth/login` 校验通过后 303 到同源 `/?token=<launchToken>`（`authenticatedUrl` 生成），由 dsh 原生 `authorizeIndex` 铸 cookie 后 303 回干净 URL，地址栏不残留 token。
 - **设置分区**：客户端半在官方设置弹窗注册「登录」分区（`settings.section`，官方排序尾），可配置用户名/密码（含确认密码）、保存、移除账号密码（回退 token-only）。
-- **凭据存储**：经 dsh credentials 服务记录 `fenix-dsh-auth/login`（`kind: "grant"`），payload 仅含 scrypt（N=16384, r=8, p=1, keylen=64）派生哈希 + 16 字节随机盐 + 参数，不落明文。
+- **凭据存储**：经 dsh credentials 服务记录 `fenix-dsh-auth/login`（`kind: "grant"`），payload 仅含 scrypt（新写入 N=131072, r=8, p=1, keylen=64，取 OWASP 交互式登录现行建议档位）派生哈希 + 16 字节随机盐 + 参数，不落明文；校验按记录内落盘参数执行，旧记录（N=16384）继续可验。
 - **安全**：登录与凭据写端点校验 Origin/Host 同源（端口按协议默认值归一化，Origin 缺失按同源放行）；凭据接口要求已认证 owner Peer；登录失败限流 5 次/60 秒（按来源地址，进程内内存，锁 60 秒，成功清零）；登录页转义一切反射值，错误码白名单，页面不含 token/凭据。
 - **降级**：apply 阶段探测上游契约（`connection.authorizeIndex/authenticatedUrl/admit`、`webServer.register/readResource`、`credentials.modifyRecord`），任一缺失或类型不符时 warn 一次、不注册任何路由，保持 dsh 原生 token-only 行为；运行期异常捕获降级，不产生未处理异常。
 
@@ -44,6 +44,7 @@ dsh 原生 `authorizeIndex` 按 cookie 鉴权（不看信任列表），而 `adm
 - 登录页与 `/auth/*` 响应不含 launchToken、会话 cookie 值或凭据哈希。
 - HTTP 明文传输密码仅限内网/本机场景；公网/公网可达域名必须经 HTTPS 反代部署。
 - 反向代理部署 MUST 透传 Host 头（如 nginx `proxy_set_header Host $host`），否则登录 POST 的同源校验会确定性 403。
+- 失败限流按 `socket.remoteAddress` 进程内分桶（design D8），存在已知局限：经反向代理或本机聚合访问时，全部客户端共享同一来源地址桶，任一来源连输 5 次即可把该共享地址锁进 60 秒锁定（可持续续锁），表现为该地址上所有用户暂时无法登录。有意不取 `X-Forwarded-For` 按真实来源分桶（该头可伪造，是否信任属产品裁定）；触发锁定时服务端 `warn` 留痕（`/var/log/dsh-web.log`），可据此发现并处置锁死。
 
 ## 回滚
 
