@@ -24,7 +24,7 @@ import { realpath } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { targetSessionDirKey } from '../shared/rules.js'
 import type { DshSessionPersistence, DshWorkspaceRegistry, SessionId } from '../types/seam.js'
-import { appendLedger, backupDirFor, backupIntact, backupManifestPath, parseLedger, resolveDshHome, type MigrationLedgerEntry, type MigrateLogger } from './migrator.js'
+import { appendLedger, backupDirFor, backupIntact, backupManifestPath, parseLedger, resolveDshHome, resolveRootFromLogPath, type MigrationLedgerEntry, type MigrateLogger } from './migrator.js'
 import { errorMessage } from './sessionScan.js'
 
 /** 单会话回滚结果。 */
@@ -39,7 +39,7 @@ async function resolvePersistenceRoot(persistence: DshSessionPersistence): Promi
     const snapshots = await persistence.list()
     for (const snapshot of snapshots) {
       const path = await persistence.resolveCurrentLog?.(snapshot.header.id)
-      if (path !== undefined) return dirname3(path)
+      if (path !== undefined) return resolveRootFromLogPath(path)
     }
   } catch {
     // list 失败交由调用方按 failed 上报。
@@ -47,18 +47,30 @@ async function resolvePersistenceRoot(persistence: DshSessionPersistence): Promi
   return undefined
 }
 
-function dirname3(path: string): string {
-  const parts = path.split('/')
-  // <root>/<projectKey>/<sessionDir>/<file> → 去 file/sessionDir/projectKey 三段。
-  return parts.slice(0, -3).join('/') || '/'
-}
-
-/** 注册表实例索引撤销（headers/sessionPaths/invalidSessionPaths 删除该 id）。 */
-function undoRegistryIndex(registry: DshWorkspaceRegistry | undefined, sessionId: SessionId): void {
+/**
+ * 注册表实例索引撤销（headers/sessionPaths/invalidSessionPaths 删除该 id）。
+ * 容错内聚在函数内部：索引形态异常（字段为无 delete 方法的非 Map 形态等）逐
+ * 字段降级告警不外抛——同位短路分支零文件操作必然可成功收尾；备份还原分支
+ * 备份已消费，更不容索引异常把回滚打成 failed。两处调用口径由此天然一致，
+ * 不一致由下次全量重索引自愈。
+ */
+function undoRegistryIndex(registry: DshWorkspaceRegistry | undefined, sessionId: SessionId, log?: MigrateLogger): void {
   if (registry === undefined) return
-  registry.headers?.delete(sessionId)
-  registry.sessionPaths?.delete(sessionId)
-  registry.invalidSessionPaths?.delete(sessionId)
+  try {
+    registry.headers?.delete(sessionId)
+  } catch (error) {
+    log?.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 注册表 headers 索引撤销失败（待下次全量重索引自愈）：${errorMessage(error)}`)
+  }
+  try {
+    registry.sessionPaths?.delete(sessionId)
+  } catch (error) {
+    log?.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 注册表 sessionPaths 索引撤销失败（待下次全量重索引自愈）：${errorMessage(error)}`)
+  }
+  try {
+    registry.invalidSessionPaths?.delete(sessionId)
+  } catch (error) {
+    log?.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 注册表 invalidSessionPaths 索引撤销失败（待下次全量重索引自愈）：${errorMessage(error)}`)
+  }
 }
 
 /** fromCwd 与 toCwd 是否同位：逐字相同，或尾随斜杠归一/realpath（符号链接）归一后同位。 */
@@ -123,7 +135,8 @@ export async function rollbackSession(
     return { status: 'skipped', sessionId, detail: '台账中无该会话的迁移记录' }
   }
   // 前置校验：仅 migrated/pending-attach 可回滚（与 rollbackableSessionIds 同口径；
-  // status 经 String 宽化比较，台账手工编辑/未来新增状态一律拒绝而非照常删除还原）。
+  // status 经 String 宽化比较——parseLedger 保留 sessionId 形态合法但 status 未知的
+  // 行，此分支对台账手工编辑/未来新增状态真实可达，一律拒绝而非照常删除还原）。
   const latestStatus = String(latest.status)
   if (latestStatus !== 'migrated' && latestStatus !== 'pending-attach') {
     return {
@@ -141,7 +154,7 @@ export async function rollbackSession(
     //    的条目迁移时零重写、零归位，回滚同样跳过文件删除与备份还原（防陈旧备份
     //    覆盖现位产物），仅做注册表索引撤销与台账 rolled-back 标记。
     if (await sameLocation(latest.fromCwd, latest.toCwd)) {
-      undoRegistryIndex(registry, sessionId)
+      undoRegistryIndex(registry, sessionId, log)
       // 台账行不带 backupDir（与 migrator「不消费备份不写该字段」口径一致）：
       // 本分支零文件操作、未消费备份，写入的只能是既往周期遗留的陈旧备份目录，
       // 会误导排障者当作「本次回滚面对的迁移前状态」。
@@ -201,13 +214,10 @@ export async function rollbackSession(
       }
     }
     // 4) 注册表实例索引撤销（下一轮 readSessionHeader 全量重索引读回旧 header）。
-    //    还原已成事实：撤销失败不外抛（否则备份已消费而台账无从标记，重试将永远
-    //    卡在「备份目录缺失」），留痕告警即继续收尾，索引不一致由下次全量重索引自愈。
-    try {
-      undoRegistryIndex(registry, sessionId)
-    } catch (error) {
-      log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 注册表索引撤销失败（继续台账标记，待下次重索引自愈）：${errorMessage(error)}`)
-    }
+    //    还原已成事实：撤销容错已内聚于 undoRegistryIndex（不外抛、逐字段降级
+    //    告警）——否则备份已消费而台账无从标记，重试将永远卡在「备份目录缺失」；
+    //    索引不一致由下次全量重索引自愈。
+    undoRegistryIndex(registry, sessionId, log)
     // 5) 台账标记回滚（收尾最后一步）：落盘失败时磁盘已还原、备份已消费，detail
     //    注明实况，避免被 rollbackableSessionIds 误导为可原样重试。
     try {
@@ -252,6 +262,17 @@ export interface RollbackCliArgs {
   readonly dshHome?: string
 }
 
+/** 取旗标值：值缺席（落在 argv 末尾）或形如另一旗标（'--' 开头）即用法错误——
+ *  否则会把下一个旗标当值吞掉（如 `--session --all` 把 '--all' 当会话 id 送入
+ *  回滚、`--dsh-home` 落在末尾时静默回退默认 home）。 */
+function requireFlagValue(argv: readonly string[], index: number, flag: string): string {
+  const value = argv[index]
+  if (value === undefined || value.length === 0 || value.startsWith('--')) {
+    throw new Error(`${flag} 需要非空值且不能以 '--' 开头；${CLI_USAGE}`)
+  }
+  return value
+}
+
 /** 解析 CLI argv（宿主直接 `node lib/host.js ...`；`--root` 由装配层消费，此处识别跳过）。 */
 export function parseRollbackArgs(argv: readonly string[]): RollbackCliArgs {
   let mode: 'single' | 'all' | undefined
@@ -261,13 +282,13 @@ export function parseRollbackArgs(argv: readonly string[]): RollbackCliArgs {
     const arg = argv[i]
     if (arg === '--all') mode = 'all'
     else if (arg === '--session') {
-      sessionId = argv[++i]
+      sessionId = requireFlagValue(argv, ++i, '--session')
       mode = 'single'
-    } else if (arg === '--dsh-home') dshHome = argv[++i]
+    } else if (arg === '--dsh-home') dshHome = requireFlagValue(argv, ++i, '--dsh-home')
     else if (arg === '--root') i++
     else throw new Error(`未知参数 '${arg}'；${CLI_USAGE}`)
   }
-  if (mode === undefined) throw new Error('缺少 --session <sessionId> 或 --all；用法：node lib/host.js --session <sessionId> | --all [--dsh-home <dir>]')
+  if (mode === undefined) throw new Error(`缺少 --session <sessionId> 或 --all；${CLI_USAGE}`)
   if (mode === 'single' && (sessionId === undefined || sessionId.length === 0)) throw new Error('--session 需要非空会话 id')
   return { mode, sessionId, dshHome }
 }

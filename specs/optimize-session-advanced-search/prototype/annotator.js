@@ -176,6 +176,24 @@
     setStatus("已导出 feedback.json——把它交给 agent 即可回流批注。");
   }
 
+  // 失败自动导出去重：连续失败（服务器持续不可达时反复重试）会把同一内容
+  // 重复入列，若每次失败都 exportLocal 会连续下载内容重叠的 feedback.json。
+  // 用未送达条目的去重内容签名（anchor+text 种数）记录上次自动导出的覆盖面：
+  // 签名不变（仅同内容重试）则跳过自动导出；手动导出按钮不受限，随时取全量。
+  var lastAutoExportSignature = null;
+
+  function undeliveredSignature() {
+    var seen = {};
+    var count = 0;
+    for (var i = 0; i < state.pending.length; i++) {
+      var a = state.pending[i];
+      if (a.delivered === "server") continue;
+      var key = a.anchor + "|" + a.text;
+      if (!seen[key]) { seen[key] = true; count++; }
+    }
+    return count;
+  }
+
   function submit() {
     var text = textarea.value.trim();
     if (!state.selected) { setStatus("请先点选页面中的区块", true); return; }
@@ -205,8 +223,17 @@
       else if (err && err.message && err.message.indexOf("HTTP ") === 0) reason = err.message;
       else reason = "网络不可达";
       remember(annotation, false);
-      exportLocal();
-      setStatus("提交失败（" + reason + "），已导出未送达批注 feedback.json，可修正后重试。", true);
+      // 仅在本会话首次失败自动导出、或未送达内容较上次自动导出有新增时才
+      // 再导出；同内容反复重试不再重复下载，状态文案区分两种情形
+      var signature = undeliveredSignature();
+      var exported = signature !== lastAutoExportSignature;
+      if (exported) {
+        lastAutoExportSignature = signature;
+        exportLocal();
+      }
+      setStatus("提交失败（" + reason + "）。" +
+        (exported ? "已导出未送达批注 feedback.json，可修正后重试。"
+                  : "未送达批注此前已导出，未重复下载；可点导出按钮取全量。"), true);
       submitBtn.disabled = false;
     });
   }

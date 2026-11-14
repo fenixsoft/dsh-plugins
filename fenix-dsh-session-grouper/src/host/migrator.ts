@@ -79,6 +79,11 @@ export function backupDirFor(dshHome: string, sessionId: SessionId): string {
   return join(backupsDir(dshHome), sessionId)
 }
 
+/** 由会话产物日志路径回推持久化 root：`<root>/<projectKey>/<sessionDir>/<file>` 取上三级。 */
+export function resolveRootFromLogPath(path: string): string {
+  return dirname(dirname(dirname(path)))
+}
+
 /** 台账行解析（单行损坏跳过不抛：JSON 语法损坏与非对象/关键字段形态异常行均按损坏行跳过）。 */
 export function parseLedger(dshHome: string): readonly MigrationLedgerEntry[] {
   const path = ledgerPath(dshHome)
@@ -94,19 +99,23 @@ export function parseLedger(dshHome: string): readonly MigrationLedgerEntry[] {
       // 单行损坏跳过，不影响其余行。
       continue
     }
-    // 形态守卫：合法 JSON 但非对象（null/数字/数组等）或 sessionId/status 形态
-    // 不符 ⇒ 按损坏行跳过并 warn 留痕。否则坏行会以断言形态混入结果污染下游
-    // id 集（如 readMigratedSessionIds 对 null 条目访问 status 抛 TypeError，幂等
-    // 去重基准整体崩溃）；台账虽由本工具写入，部分写入/手工编辑/外部工具污染
-    // 均可能产生合法 JSON 的坏行。
+    // 形态守卫：合法 JSON 但非对象（null/数字/数组等）或 sessionId 形态不符 ⇒
+    // 按损坏行跳过并 warn 留痕。否则坏行会以断言形态混入结果污染下游 id 集
+    // （如 readMigratedSessionIds 对 null 条目访问 status 抛 TypeError，幂等去重
+    // 基准整体崩溃）；台账虽由本工具写入，部分写入/手工编辑/外部工具污染均可能
+    // 产生合法 JSON 的坏行。
     const entry = parsed as Partial<MigrationLedgerEntry> | null
-    if (
-      entry === null || typeof entry !== 'object' ||
-      typeof entry.sessionId !== 'string' || entry.sessionId.length === 0 ||
-      (entry.status !== 'migrated' && entry.status !== 'pending-attach' && entry.status !== 'rolled-back')
-    ) {
+    if (entry === null || typeof entry !== 'object' || typeof entry.sessionId !== 'string' || entry.sessionId.length === 0) {
       console.warn(`fenix-dsh-session-grouper: 台账存在形态异常行，已按损坏行跳过：${trimmed.slice(0, 200)}`)
       continue
+    }
+    // status 不在已知字面量内的行保留不丢弃：下游一律按字面量白名单消费——
+    // readMigratedSessionIds 视为非在册（撤销幂等去重基准）、rollbackableSessionIds
+    // 不列为可回滚、rollbackSession 前置拒绝——台账手工编辑/未来新增状态一律拒绝
+    // 回滚而非照常还原。若按损坏行丢弃，latest 会退化为更早的合法行，回滚反而
+    // 按陈旧 fromCwd/toCwd 执行。
+    if (entry.status !== 'migrated' && entry.status !== 'pending-attach' && entry.status !== 'rolled-back') {
+      console.warn(`fenix-dsh-session-grouper: 台账行 status '${String(entry.status)}' 非已知状态，按未知状态保留（不可回滚、不计入在册）：${trimmed.slice(0, 200)}`)
     }
     entries.push(entry as MigrationLedgerEntry)
   }
@@ -228,7 +237,8 @@ export class Migrator {
         }
 
         // (4) 备份先行（原会话目录全量复制），两阶段原子晋升：先复制到主备份区
-        // 下唯一 staging 目录，成功后 rename 晋升为正式备份目录并封存完整性清单。
+        // 下唯一 staging 目录，完整性清单在 staging 侧先行封存，随后随 rename 一并
+        // 晋升为正式备份目录。
         // cpSync 中途失败（磁盘满/个别文件不可读）时 staging 即刻清退，正式备份
         // 目录保持「无备份」状态，回滚自然走「失败发生于备份前、数据未改动」
         // 分支，绝不以残缺副本覆盖完好原目录。先清空旧备份：cpSync 对既存目录
@@ -241,10 +251,22 @@ export class Migrator {
         try {
           mkdirSync(dirname(backupDir), { recursive: true })
           cpSync(dirname(srcLog), backupStaging, { recursive: true })
+          // 清单在 staging 侧封存（相对路径键与晋升后一致），易失败的收集/落盘
+          // （磁盘满/EACCES）全部发生在晋升前，失败即整目录清退，不产生残缺晋升；
+          // 晋升只剩两次 rename 且清单先行——中途被杀残留的是「有清单无目录」
+          // （下轮 discardBackup 可全量清退），而非「有目录无清单」的不可信滞留，
+          // 使「正式备份目录存在则清单必在」的不变式在同步失败路径上成立。
+          writeFileSync(backupManifestPath(backupStaging), JSON.stringify(collectManifest(backupStaging)), 'utf8')
+          renameSync(backupManifestPath(backupStaging), backupManifestPath(backupDir))
           renameSync(backupStaging, backupDir)
-          writeFileSync(backupManifestPath(backupDir), JSON.stringify(collectManifest(backupDir)), 'utf8')
         } catch (error) {
+          // 兜底清退全部四类可能残迹（force 对缺席路径是 no-op），绝不留下
+          // 「正式备份目录存在但清单缺失」的滞留形态误导 rollbackPartialMigration
+          // 误判「备份不可信，现场保留」。
           rmSync(backupStaging, { recursive: true, force: true })
+          rmSync(backupManifestPath(backupStaging), { force: true })
+          rmSync(backupDir, { recursive: true, force: true })
+          rmSync(backupManifestPath(backupDir), { force: true })
           throw error
         }
 
@@ -309,8 +331,8 @@ export class Migrator {
   private async requireCurrentLog(id: SessionId): Promise<string> {
     const path = await this.persistence.resolveCurrentLog?.(id)
     if (path === undefined) throw new Error(`会话 ${id} 无当前 generation 产物`)
-    // srcLog 形如 <root>/<projectKey>/<sessionDir>/<file>；root 取上三级。
-    this.lastKnownRoot = dirname(dirname(dirname(path)))
+    // srcLog 形如 <root>/<projectKey>/<sessionDir>/<file>。
+    this.lastKnownRoot = resolveRootFromLogPath(path)
     return path
   }
 
@@ -353,7 +375,28 @@ export class Migrator {
     const targetSessionDir = join(root, targetSessionDirKey(toCwd, sessionId))
     // 防御：源目录与目标目录同一路径（根直属会话，cwd === 项目根）时不删。
     if (srcSessionDir === targetSessionDir) return
-    rmSync(srcSessionDir, { recursive: true, force: true })
+    // 窗口语义：closeHandle 释放写锁与本处删除之间存在窗口，持有该会话的活动
+    // 进程可重新获得写锁并向旧目录追加事件，直接 rmSync 会把这些增量静默吞掉。
+    // 与 rollback.ts 的 trash 口径一致：先 rename 挪入 trash 残目录（原子搬移，
+    // 清退失败或中途被杀时增量滞留可人工找回，而非无声丢失），再清退残目录。
+    const srcTrashDir = `${srcSessionDir}.trash-${Date.now().toString(36)}`
+    let movedToTrash = false
+    try {
+      renameSync(srcSessionDir, srcTrashDir)
+      movedToTrash = true
+    } catch {
+      // 源目录已缺席或不可挪动（无可保留的增量）：按直接删除兜底（force 对缺席
+      // 目录是 no-op）。
+    }
+    if (movedToTrash) {
+      try {
+        rmSync(srcTrashDir, { recursive: true, force: true })
+      } catch (error) {
+        this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 旧目录残迹清退失败，增量滞留于 ${srcTrashDir} 可人工找回：${errorMessage(error)}`)
+      }
+    } else {
+      rmSync(srcSessionDir, { recursive: true, force: true })
+    }
     // 旧 project 目录清空则一并移除（避免 mangled 目录残留噪音）。
     const srcProjectDir = dirname(srcSessionDir)
     try {
@@ -466,7 +509,17 @@ export class Migrator {
       }
       const targetDir = join(root, targetSessionDirKey(toCwd, sessionId))
       if (targetDir !== originalDir && existsSync(targetDir)) {
-        rmSync(targetDir, { recursive: true, force: true })
+        // 与 rollback.ts 对同一场景的 trash 口径对齐：迁移后会话通常已在目标位
+        // 继续追加事件，rmSync 会静默吞掉这部分增量——先 rename 挪入 trash 残
+        // 目录保留，递归删除只在备份已还原就位之后进行且失败仅留残迹，增量
+        // 丢失时可从 `${targetDir}.trash-<时间戳>` 人工找回。
+        const targetTrashDir = `${targetDir}.trash-${Date.now().toString(36)}`
+        renameSync(targetDir, targetTrashDir)
+        try {
+          rmSync(targetTrashDir, { recursive: true, force: true })
+        } catch (error) {
+          this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 半迁移目标目录残迹清退失败，增量滞留于 ${targetTrashDir} 可人工找回：${errorMessage(error)}`)
+        }
         // 目标 project 目录清空则一并移除（避免 mangled 目录残留噪音）。
         try {
           const targetProjectDir = dirname(targetDir)

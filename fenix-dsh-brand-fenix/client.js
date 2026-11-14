@@ -150,10 +150,13 @@
 			 * 语义不同：sidebar 顶栏图标 24px；hero 空会话品牌标 34px，不透传宿主
 			 * className——官方 fish 类挂 hover 游动动画，不适用位图） */
 			var FenixMark = function (props) {
+				/* 缺省回退 24px：对齐 sidebar.brand.mark 槽位契约尺寸（hero 槽位
+				 * 34px 仍由宿主透传），防止宿主未传 size 时按 64px 位图自然尺寸渲染撑破槽位 */
+				var size = props.size || 24
 				return react.createElement('img', {
 					src: FENIX_LOGO_URI,
-					width: props.size,
-					height: props.size,
+					width: size,
+					height: size,
 					alt: '',
 					style: { display: 'block' },
 					draggable: false,
@@ -230,11 +233,9 @@
 			return {
 				inject: ['slots'],
 				apply(ctx) {
-					var failures = []
 					var stage = function (name, err) {
 						var detail = err && err.stack ? err.stack : String(err)
 						console.warn('[fenix-dsh-brand-fenix] activation stage "' + name + '" rejected: ' + detail)
-						failures.push(name)
 					}
 					var occupy = function (slot, component) {
 						return function () {
@@ -255,7 +256,7 @@
 					}
 
 					return function dispose() {
-						/* 返回值语义对齐兄弟插件口径「清理是否实际执行」：本插件无 style 标签/监听器等本地资源需清理（槽位注册由宿主框架管理），恒返回 true；failures 仅为激活期状态，不代表清理结果 */
+						/* 返回值语义对齐兄弟插件口径「清理是否实际执行」：本插件无 style 标签/监听器等本地资源需清理（槽位注册由宿主框架管理），恒返回 true */
 						return true
 					}
 				},

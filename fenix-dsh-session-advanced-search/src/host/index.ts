@@ -212,7 +212,7 @@ export default class FenixSessionAdvancedSearch extends Service {
       if (job.controller.signal.aborted) return
       // 完成：detail = 置信度摘要或降级原因（credential-missing 附凭证引用）。
       this.jobs.appendProgress(jobId, 'done', doneDetail(analyzed, route, (provider) => this.readCredentialRef(provider)))
-      this.jobs.complete(jobId, analyzed.results, analyzed.degraded, analyzed.degradedReason)
+      this.jobs.complete(jobId, analyzed.results, analyzed.degraded, analyzed.degradedReason, analyzed.degradedDetail)
     } catch (error) {
       if (job.controller.signal.aborted) return
       this.jobs.fail(jobId, `搜索失败：${error instanceof Error ? error.message : String(error)}`)

@@ -47,7 +47,8 @@ interface SelectionStoreWatch {
 
 /** uiWorkspace 服务被消费面（均为可选：缝漂移时逐项探测降级）。 */
 interface UiWorkspaceSeam {
-  watchSelectionChange?(listener: () => void): () => void
+  /** subscribe 同步抛错时返回 undefined：缝实际未挂上，装配层按不可用降级。 */
+  watchSelectionChange?(listener: () => void): (() => void) | undefined
   openSession?(sessionId: string): void
 }
 
@@ -73,11 +74,13 @@ function resolveUiWorkspace(ctx: Context): UiWorkspaceSeam | undefined {
     const subscribe = (selection as { subscribe?: unknown }).subscribe
     if (typeof subscribe === 'function') {
       const store = selection as SelectionStoreWatch
-      seam.watchSelectionChange = (listener: () => void): (() => void) => {
+      seam.watchSelectionChange = (listener: () => void): (() => void) | undefined => {
         try {
           return subscribe.call(store, listener)
         } catch {
-          return () => {}
+          // subscribe 同步抛错 = 监听未挂上：返回 undefined（不伪造可用 dispose），
+          // 使 disposeSelectionWatch 退化为 undefined、缝被判定不可用。
+          return undefined
         }
       }
     }
@@ -179,6 +182,7 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     }
   }
 
+  // [fenix-ignore:3d7f80671ff6] v3.1 起容器挂 document.body 且 position:fixed，contentHost 仅只读矩形，从不改写宿主 inline 样式，卸载无残留可还原
   const ensureMounted = (): void => {
     if (initialized) return
     initialized = true
@@ -259,8 +263,10 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   }
 
   // Escape 关闭（iframe 内按键不冒泡到父文档，故父层监听只覆盖父页焦点态；
-  // iframe 内 Escape 由页面自身处理——独立页形态同样支持）。
+  // iframe 内 Escape 由页面自身处理——独立页形态同样支持）。IME 合成期按键
+  // 不参与：父页输入法合成中按 Esc 取候选词不得误关视图。
   const onKeyDown = (event: KeyboardEvent): void => {
+    if (event.isComposing) return
     if (event.key === 'Escape') closeView()
   }
   win.document.addEventListener('keydown', onKeyDown, true)

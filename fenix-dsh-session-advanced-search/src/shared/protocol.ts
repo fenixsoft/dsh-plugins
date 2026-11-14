@@ -88,6 +88,8 @@ export interface SearchJobStatus {
   readonly degraded?: boolean
   /** degraded=true 时的原因分类（degradedReasonText 映射中文横幅）。 */
   readonly degradedReason?: SearchDegradedReason
+  /** degraded=true 时的一句话动态原因（host 降级点拼装 provider·model·根因；横幅副行展示，向后兼容可选字段）。 */
+  readonly degradedDetail?: string
   /** 分析过程步骤流（可选字段，向后兼容；host 有界保留最近 50 条）。 */
   readonly progress?: readonly SearchProgressStep[]
   /** error/cancelled 时的简短中文原因（展示层直接呈现）。 */
@@ -177,6 +179,7 @@ export function parseJobStatus(value: unknown): SearchJobStatus | undefined {
   if (record.results !== undefined && !(record.results as unknown[]).every(isSearchCandidate)) return undefined
   if (record.degraded !== undefined && typeof record.degraded !== 'boolean') return undefined
   if (record.degradedReason !== undefined && !isSearchDegradedReason(record.degradedReason)) return undefined
+  if (record.degradedDetail !== undefined && typeof record.degradedDetail !== 'string') return undefined
   if (record.progress !== undefined) {
     if (!Array.isArray(record.progress)) return undefined
     if (!(record.progress as unknown[]).every(isSearchProgressStep)) return undefined

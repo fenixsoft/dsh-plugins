@@ -299,6 +299,7 @@ var ICONS = {
   clock: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M8.11646 4.78442V8.03442L10.6165 9.53442"/><path d="M8.11646 13.4094C11.154 13.4094 13.6165 10.947 13.6165 7.90942C13.6165 4.87186 11.154 2.40942 8.11646 2.40942C5.07889 2.40942 2.61646 4.87186 2.61646 7.90942C2.61646 10.947 5.07889 13.4094 8.11646 13.4094Z"/></svg>',
   rightUp: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M11.7256 2.77441C12.5538 2.77469 13.2256 3.44616 13.2256 4.27441V10.1416H12.2256V4.27441C12.2256 3.99844 12.0015 3.77469 11.7256 3.77441H5.7207V2.77441H11.7256Z"/><path d="M2.77441 13.2255L12.3756 3.62427"/></svg>',
   chevron: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M6 12L9.29289 8.70711C9.68342 8.31658 9.68342 7.68342 9.29289 7.29289L6 4"/></svg>',
+  /* [fenix-ignore:6c97dc4a0f16] 现行实现无 fenix-sas-spin 死类：spinner 旋转由本 path 外层 svg 的 .spinner 类 + @keyframes spin（见上方样式）单一 CSS 驱动 */
   spinner: '<svg class="spinner" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M8 1.5A6.5 6.5 0 1 1 1.5 8" stroke-linecap="round"/><circle cx="8" cy="8" r="6.5" stroke-opacity=".2"/></svg>',
   x: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M2.5 2.5L13.5 13.5"/><path d="M13.5 2.5L2.5 13.5"/></svg>'
 };
@@ -401,6 +402,7 @@ function parseJobStatus(v) {
   }
   if (v.degraded !== undefined && typeof v.degraded !== 'boolean') return null;
   if (v.degradedReason !== undefined && SEARCH_DEGRADED_REASONS.indexOf(v.degradedReason) < 0) return null;
+  if (v.degradedDetail !== undefined && typeof v.degradedDetail !== 'string') return null;
   if (v.progress !== undefined) {
     if (!Array.isArray(v.progress)) return null;
     for (var pi = 0; pi < v.progress.length; pi++) { if (!isProgressStep(v.progress[pi])) return null; }
@@ -527,8 +529,11 @@ function resultsHTML(results, degraded) {
   return head + results.map(resultCard).join('');
 }
 
-function degradeBannerHTML(reason) {
+function degradeBannerHTML(reason, degradedDetail) {
   var text = DEGRADED_TEXT[reason] || 'LLM 分析不可用，已按机械匹配排序';
+  /* 动态原因行（host 降级点拼装的 provider·model·根因 一句话）优先；静态
+     DEGRADED_DETAIL 指引（凭证缺失配置路径）保留在其后。 */
+  var cause = (typeof degradedDetail === 'string' && degradedDetail.length > 0) ? esc(degradedDetail) : '';
   var detail = DEGRADED_DETAIL[reason] || '';
   var actions = '';
   if (reason === 'credential-missing') {
@@ -544,6 +549,7 @@ function degradeBannerHTML(reason) {
   }
   return '<div class="degrade-banner">' + ICONS.warn
     + '<div class="db-body"><div class="db-t">' + esc(text) + '</div>'
+    + (cause ? '<div class="db-d">原因：' + cause + '</div>' : '')
     + (detail ? '<div class="db-d">' + esc(detail) + '</div>' : '')
     + actions + '</div></div>';
 }
@@ -609,7 +615,13 @@ async function runSearch(query) {
       try { await api('DELETE', API + '/' + encodeURIComponent(prevJob)); } catch (e) { /* 尽力而为 */ }
     }
     var created = await api('POST', API, { query: query });
-    if (token !== runToken) return;
+    if (token !== runToken) {
+      /* 过期响应（快速连续提交/提交后即中断）：本 run 已被取代，取代方登记
+         时 jobId 还是 null（本 POST 未返回）无人可 DELETE 本任务——此处删除
+         刚建成的任务，不留 host 侧在途孤儿（DELETE 幂等，尽力而为）。 */
+      try { await api('DELETE', API + '/' + encodeURIComponent(created.jobId)); } catch (e) { /* 尽力而为 */ }
+      return;
+    }
     jobId = created.jobId;
     t0 = performance.now();
     elapsedTimer = setInterval(function () {
@@ -741,7 +753,7 @@ function finishDone(status, token) {
   for (var i = progress.length - 1; i >= 0; i--) { if (progress[i].step === 'done') { doneDetail = progress[i].detail || ''; break; } }
   if (degraded) logs.push({ text: 'degraded: ' + (status.degradedReason || 'unknown') + (doneDetail ? ' · ' + doneDetail : ''), cls: 'warn', at: Date.now() });
   if (detailOpen) renderLogs();
-  area.insertAdjacentHTML('beforeend', (degraded ? degradeBannerHTML(status.degradedReason) : '') + '<div id="resultsWrap">' + resultsHTML(Array.isArray(status.results) ? status.results : [], degraded) + '</div>');
+  area.insertAdjacentHTML('beforeend', (degraded ? degradeBannerHTML(status.degradedReason, status.degradedDetail) : '') + '<div id="resultsWrap">' + resultsHTML(Array.isArray(status.results) ? status.results : [], degraded) + '</div>');
   animateBars();
   $('#runBtn').disabled = false;
   bindAreaActions();
@@ -830,10 +842,14 @@ function submit() {
   runSearch(q);
 }
 $('#runBtn').addEventListener('click', submit);
-$('#queryInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
+/* IME 合成期按键不参与（Safari 等合成期派发 key='Enter' 且 isComposing=true，
+   中文选词按 Enter 会误提交半成品 query）。 */
+$('#queryInput').addEventListener('keydown', function (e) { if (e.isComposing) return; if (e.key === 'Enter') submit(); });
 $('#backBtn').addEventListener('click', function () { closeEmbedded(); });
-/* 嵌入形态：iframe 内 Escape 关闭视图（父层 keydown 不跨 iframe 冒泡）。 */
-document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && window.self !== window.top) closeEmbedded(); });
+/* 嵌入形态：iframe 内 Escape 关闭视图（父层 keydown 不跨 iframe 冒泡）。
+   IME 合成期按键不参与：合成期按 Esc 取候选词（key='Escape'、isComposing=true）
+   不得误关视图。 */
+document.addEventListener('keydown', function (e) { if (e.isComposing) return; if (e.key === 'Escape' && window.self !== window.top) closeEmbedded(); });
 $('#queryInput').focus();
 </script>
 </body>
