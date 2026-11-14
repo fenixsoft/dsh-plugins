@@ -1,10 +1,10 @@
 # 主树散件 WIP 处置口径（maintree_stray_wip_stale）
 
-<!-- knowledge: capability=stray-wip-disposal rev=1 origin=prehistoric
-     sources=git:e570dc3-..2026-11-12 -->
+<!-- knowledge: capability=stray-wip-disposal rev=2 origin=prehistoric
+     sources=git:e570dc3-..2026-11-12, 第4度回写 admin-dsh-plugins-1794625487 2026-11-14 -->
 
-> 最后更新：2026-11-12 13:51 UTC+8
-> 来源：admin 处置轮 c97b6ddf8a51（2026-10-16 第 1 度）、298f844aee26（2026-11-12 第 2 度）、add1bdf366c0（2026-11-12 第 3 度）实证蒸馏；落地 evo-recurring-stray-remediation（框架域规则）在本项目的口径。
+> 最后更新：2026-11-14 11:11 UTC+8
+> 来源：admin 处置轮 c97b6ddf8a51（2026-10-16 第 1 度）、298f844aee26（2026-11-12 第 2 度）、add1bdf366c0（2026-11-12 第 3 度）实证蒸馏；落地 evo-recurring-stray-remediation（框架域规则）在本项目的口径。第 4 度回写见跟踪项小节（admin-dsh-plugins-1794625487，2026-11-14）。
 
 ## 信号形态
 
@@ -25,3 +25,10 @@
 - 收编对象：brand-fenix SVG lockup（用户 2026-11-07 选定概念稿 A、2026-11-10 指定副标文案）+ dashboard-bridge rightTab/wsTooltip/locate/projectSync 特征集（9 tracked + 7 untracked 兄弟，typecheck 0 错、vitest 145/145）。
 - 复查时机：同文件集第 4 度告警时，MUST NOT 再自动提交，改为**通知人类为该人工会话建立 worktree 车道**（人工直改主树是盲区根因，第 4 度起应修形态而非继续收编快照）。
 - 若散件形态变为生成物类（如构建日志），按规则反转：`untrack_stray_wip` 即为正确根治。
+
+### 第 4 度回写（2026-11-14 复查时机触发）
+
+- 告警：first_seen=2026-11-14T02:34:09Z（指纹 c07a532fef7e6a49，宽限 30.1 分钟），dashboard-bridge 5 tracked 散件：src/client/index.ts、src/client/panels.tsx、src/types/dsh-runtime.d.ts、tests/opsBadge.test.ts、tests/srcContract.test.ts——其中 4 文件与历度字面同文件，第 4 度条款成立（信号 evidence 计「历史处置 2 轮」为同指纹 bf7abdde 口径，10-16 第 1 度指纹不同未计入；知识页按同文件集口径计度）。
+- 改动内容：add-dsh-ops-alert-badge（2026-11-13 push 完结、交付物已入库）之后的策展改版——diff 注释载明「2026-11-13 用户指令：告警计数移到菜单文字后红底 pill 显示」（图标数字角标→存在圆点 + label pill，dsh-runtime.d.ts label 类型放宽 ReactNode，测试同步换血）；快照自洽实测全绿（tsc --noEmit 0 错、vitest 174/174）。
+- 处置：按第 4 度条款零触碰（未 commit/stash/untrack，处置轮 admin-dsh-plugins-1794625487），escalate 通知人类建立人工会话 worktree 车道；注册表两选项（commit_stray_wip 第 4 度禁用、untrack_stray_wip 源码禁用）均不适用，回填 suggested_choice=notify_worktree_lane 供注册表演进。
+- 复查时机（更新）：第 5 度起维持同一处置（零触碰 + 升级通知），直至人类建立车道或明示认领主树直改形态；MUST NOT 自动收编快照。
