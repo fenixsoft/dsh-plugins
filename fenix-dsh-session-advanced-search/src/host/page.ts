@@ -76,7 +76,8 @@ function handlePageRequest(req: unknown, res: unknown): void {
   const w = res as { writeHead(status: number, headers?: Record<string, string>): unknown; end(body?: string): unknown }
   if (r.method !== 'GET' && r.method !== 'HEAD') {
     const body = JSON.stringify({ error: 'method not allowed; use GET' })
-    w.writeHead(405, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(Buffer.byteLength(body)) })
+    // RFC 7231：405 响应 MUST 生成 Allow 头声明该资源支持的方法。
+    w.writeHead(405, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(Buffer.byteLength(body)), allow: 'GET, HEAD' })
     w.end(body)
     return
   }
