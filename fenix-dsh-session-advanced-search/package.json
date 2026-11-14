@@ -42,7 +42,7 @@
       "maxCandidates": {
         "type": "number",
         "default": 30,
-        "description": "机械预筛候选集上限（评分优先、同分取最近活跃截断），约束 LLM 输入规模"
+        "description": "机械预筛候选集上限（评分优先、同分取最近活跃截断），约束 LLM 输入规模；须为 1~200 的整数"
       },
       "topN": {
         "type": "number",

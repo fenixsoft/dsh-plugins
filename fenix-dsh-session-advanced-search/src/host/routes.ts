@@ -112,7 +112,8 @@ async function handleJobsCollection(deps: RouteDeps, req: WebRequest, res: WebRe
     return
   }
   if (req.method !== 'POST') {
-    writeJson(res, 405, { error: 'method not allowed; use POST' })
+    // RFC 7231：405 响应 MUST 生成 Allow 头声明该资源支持的方法。
+    writeJson(res, 405, { error: 'method not allowed; use POST' }, { allow: 'POST' })
     return
   }
   let payload: unknown
@@ -132,7 +133,7 @@ async function handleJobsCollection(deps: RouteDeps, req: WebRequest, res: WebRe
   // 立即返回 jobId；管线异步执行（fire-and-forget，异常由管线自身 fail 兜底）。
   writeJson(res, 200, { jobId: job.id } satisfies SearchJobCreated)
   void deps.runJob(job.id).catch((error) => {
-    deps.log.warn(`session-advanced-search: 任务 ${job.id} 管线异常：${error instanceof Error ? error.message : String(error)}`)
+    deps.log.warn(`fenix-dsh-session-advanced-search: 任务 ${job.id} 管线异常：${error instanceof Error ? error.message : String(error)}`)
     deps.jobs.fail(job.id, '搜索失败：内部错误')
   })
 }
@@ -175,7 +176,8 @@ function handleJobItem(deps: RouteDeps, req: WebRequest, res: WebResponse): void
     writeJson(res, 200, { cancelled: true })
     return
   }
-  writeJson(res, 405, { error: 'method not allowed; use GET or DELETE' })
+  // RFC 7231：405 响应 MUST 生成 Allow 头声明该资源支持的方法。
+  writeJson(res, 405, { error: 'method not allowed; use GET or DELETE' }, { allow: 'GET, DELETE' })
 }
 
 /**
@@ -294,13 +296,14 @@ export function readRequestBody(req: WebRequest, maxBytes: number): Promise<stri
   })
 }
 
-/** JSON 响应写出（no-store；content-length 固定）。 */
-function writeJson(res: WebResponse, status: number, data: unknown): void {
+/** JSON 响应写出（no-store；content-length 固定；extraHeaders 追加额外头，如 405 的 Allow）。 */
+function writeJson(res: WebResponse, status: number, data: unknown, extraHeaders?: Record<string, string>): void {
   const body = JSON.stringify(data)
   res.writeHead(status, {
     'cache-control': 'no-store',
     'content-type': 'application/json; charset=utf-8',
     'content-length': String(Buffer.byteLength(body)),
+    ...extraHeaders,
   })
   res.end(body)
 }

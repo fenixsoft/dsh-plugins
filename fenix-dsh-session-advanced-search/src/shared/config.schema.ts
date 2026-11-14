@@ -1,7 +1,7 @@
 /**
  * fenix-dsh-session-advanced-search loader 配置解析与校验（design D7）。
  *
- * 配置键：`enabled`(true) / `maxCandidates`(30) / `topN`(5) / `llmTimeoutMs`(120000) /
+ * 配置键：`enabled`(true) / `maxCandidates`(30，上界 200) / `topN`(5) / `llmTimeoutMs`(120000) /
  * `analyzeRoute`(可选 {provider, model}，非空串；把语义分析路由指到有凭证的
  * provider，优先级高于 profile 默认路由——design D2)。
  * 非法值（类型不符或超出范围）装载期显式抛 TypeError（session-grouper 纪律）：
@@ -17,7 +17,7 @@ export interface AnalyzeRoute {
 /** 解析后的配置（内部视角：全部字段必填、已规范化）。 */
 export interface AdvancedSearchSettings {
   readonly enabled: boolean
-  /** 预筛候选集上限（≥1）。 */
+  /** 预筛候选集上限（≥1 且 ≤MAX_CANDIDATES_LIMIT 上界）。 */
   readonly maxCandidates: number
   /** LLM 排序返回 Top-N（≥1）。 */
   readonly topN: number
@@ -49,6 +49,14 @@ export const CONFIG_DEFAULTS = {
   llmTimeoutMs: 120_000,
 } as const
 
+/**
+ * maxCandidates 装载期上界：候选集直接进 LLM 单调用 prompt（token 预算随候选
+ * 数伸缩）且分析器机械回退按候选集遍历计分，超大量级既拖垮分析成本也无检索
+ * 价值。200 倍余量于默认 30（覆盖生产实例数百会话量级）；超界装载期
+ * TypeError，与「≥1」同一显式失败纪律。
+ */
+const MAX_CANDIDATES_LIMIT = 200
+
 /** 布尔校验：真布尔才放行（loader schemastery 已给真布尔，这里兜字符串化形态）。 */
 function parseBoolean(key: string, value: unknown, fallback: boolean): boolean {
   if (value === undefined) return fallback
@@ -63,6 +71,15 @@ function parsePositiveInt(key: string, value: unknown, fallback: number): number
     throw new TypeError(`fenix-dsh-session-advanced-search: 配置 ${key} 须为 ≥1 的整数，收到 ${describe(value)}`)
   }
   return value
+}
+
+/** 带上界的正整数校验（maxCandidates：≥1 且 ≤上界，防超大候选集无界展开）。 */
+function parseBoundedPositiveInt(key: string, value: unknown, fallback: number, max: number): number {
+  const parsed = parsePositiveInt(key, value, fallback)
+  if (parsed > max) {
+    throw new TypeError(`fenix-dsh-session-advanced-search: 配置 ${key} 须为 ≥1 且 ≤${max} 的整数，收到 ${describe(value)}`)
+  }
+  return parsed
 }
 
 /** 正数校验（llmTimeoutMs：>0 的有限数）。 */
@@ -116,7 +133,7 @@ export function resolveSettings(config?: AdvancedSearchConfigInput | null): Adva
   const analyzeRoute = parseAnalyzeRoute('analyzeRoute', config?.analyzeRoute)
   return {
     enabled: parseBoolean('enabled', config?.enabled, CONFIG_DEFAULTS.enabled),
-    maxCandidates: parsePositiveInt('maxCandidates', config?.maxCandidates, CONFIG_DEFAULTS.maxCandidates),
+    maxCandidates: parseBoundedPositiveInt('maxCandidates', config?.maxCandidates, CONFIG_DEFAULTS.maxCandidates, MAX_CANDIDATES_LIMIT),
     topN: parsePositiveInt('topN', config?.topN, CONFIG_DEFAULTS.topN),
     llmTimeoutMs: parsePositiveNumber('llmTimeoutMs', config?.llmTimeoutMs, CONFIG_DEFAULTS.llmTimeoutMs),
     ...(analyzeRoute !== undefined ? { analyzeRoute } : {}),

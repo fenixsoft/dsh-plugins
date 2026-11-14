@@ -213,9 +213,11 @@ describe('POST /jobs 建任务', () => {
     expect((oversized.json() as { error: string }).error).toContain('exceeds')
   })
 
-  it('集合端点非 POST/GET → 405', async () => {
+  it('集合端点非 POST/GET → 405 且带 Allow 头（RFC 7231）', async () => {
     const { dispatch } = setup()
-    expect((await dispatch('DELETE', JOBS_PATH)).status).toBe(405)
+    const res = await dispatch('DELETE', JOBS_PATH)
+    expect(res.status).toBe(405)
+    expect(res.headers['allow']).toBe('POST')
   })
 
   it('集合端点 GET → 200 任务诊断摘要列表；未知方法 → 405', async () => {
@@ -304,11 +306,15 @@ describe('DELETE /jobs/:id 取消', () => {
     expect(jobs.status('job-1')?.phase).toBe('done')
   })
 
-  it('未知 id → 404；动态端点其余方法 → 405', async () => {
+  it('未知 id → 404；动态端点其余方法 → 405 且带 Allow 头（RFC 7231）', async () => {
     const { dispatch } = setup()
     expect((await dispatch('DELETE', `${JOBS_PATH}/ghost`)).status).toBe(404)
-    expect((await dispatch('POST', `${JOBS_PATH}/job-1`, '{}')).status).toBe(405)
-    expect((await dispatch('PUT', `${JOBS_PATH}/job-1`)).status).toBe(405)
+    const postRes = await dispatch('POST', `${JOBS_PATH}/job-1`, '{}')
+    expect(postRes.status).toBe(405)
+    expect(postRes.headers['allow']).toBe('GET, DELETE')
+    const putRes = await dispatch('PUT', `${JOBS_PATH}/job-1`)
+    expect(putRes.status).toBe(405)
+    expect(putRes.headers['allow']).toBe('GET, DELETE')
   })
 })
 

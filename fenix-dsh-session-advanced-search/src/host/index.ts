@@ -184,7 +184,9 @@ export default class FenixSessionAdvancedSearch extends Service {
         ...(this.settings.analyzeRoute !== undefined ? { routeOverride: this.settings.analyzeRoute } : {}),
       }
       const route = resolveRoute(analyzerDeps)
-      if (route !== undefined) await this.warmCredential(route.provider)
+      // 预热 await 受竞速硬界约束（缝 resolve 挂起不卡首个 collecting 推进点）；
+      // DELETE 取消先行置位时预热立即让位，下一 aborted 检查点零产出退出。
+      if (route !== undefined) await this.warmCredential(route.provider, job.controller.signal)
       if (job.controller.signal.aborted) return
 
       // collecting 开始：detail = 解析出的关键词（机械预筛计分同源 tokenize）。
@@ -264,8 +266,16 @@ export default class FenixSessionAdvancedSearch extends Service {
    * 异步——runJob 发起分析前 await 预热，probe 读快照零阻塞）。进程环境已
    * 配置的直接置 true 不查库；无凭据缝时环境即唯一凭证来源（置 false）；
    * resolve 异常移除快照让 probe 返回 true 跳过预检（不误杀）。
+   *
+   * 预热 await 受竞速硬界（resolve 与超时 marker / 外部取消 abort 竞速，任一
+   * 先到即继续）：缝 resolve 挂起时不再卡在首个 collecting 推进点之前——
+   * 超时 = 移除快照走「跳过预检不误杀」路径（warn 落日志，与缝漂移同口径）；
+   * 取消（任务 DELETE）优先于超时，让 runJob 既有 aborted 检查点尽快退出。
+   * 超时预算复用 llmTimeoutMs（与 analyzer 硬解耦同一硬界，knowledge「由硬
+   * 超时兜底」同源）；迟到败者的 rejection 装箱吸收，不产生 unhandled
+   * rejection，超时/取消让位后定时器与 abort 监听在 finally 清理。
    */
-  private async warmCredential(provider: string | undefined): Promise<void> {
+  private async warmCredential(provider: string | undefined, signal: AbortSignal): Promise<void> {
     if (provider === undefined || provider.length === 0) return
     const ref = this.readCredentialRef(provider)
     if (ref === undefined) return
@@ -279,13 +289,41 @@ export default class FenixSessionAdvancedSearch extends Service {
       this.credentialStore.set(ref, false)
       return
     }
+    // 迟到败者吸收：resolve 结果/异常装箱结算，胜者判定集中在 race 之后。
+    const resolvePromise = credentials
+      .resolve(ref)
+      .then((resolved) => ({ kind: 'resolved' as const, resolved }))
+      .catch((error: unknown) => ({ kind: 'rejected' as const, error }))
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let onAbort: (() => void) | undefined
+    const timeoutPromise = new Promise<'timeout'>((resolveTimeout) => {
+      timer = setTimeout(() => resolveTimeout('timeout'), this.settings.llmTimeoutMs)
+    })
+    const abortPromise = new Promise<'aborted'>((resolveAbort) => {
+      if (signal.aborted) {
+        resolveAbort('aborted')
+        return
+      }
+      onAbort = () => resolveAbort('aborted')
+      signal.addEventListener('abort', onAbort, { once: true })
+    })
     try {
-      const resolved = await credentials.resolve(ref)
-      const value = resolved?.value
+      const raced = await Promise.race([resolvePromise, timeoutPromise, abortPromise])
+      if (raced === 'aborted') return
+      if (raced === 'timeout') {
+        this.credentialStore.delete(ref)
+        this.logWarn(`session-advanced-search: 凭据库查询超时（llmTimeoutMs=${this.settings.llmTimeoutMs} 硬界，ref=${ref}），跳过凭证预检（不误杀）`)
+        return
+      }
+      if (raced.kind === 'rejected') throw raced.error
+      const value = raced.resolved?.value
       this.credentialStore.set(ref, typeof value === 'string' && value.length > 0)
     } catch (error) {
       this.credentialStore.delete(ref)
       this.logWarn(`session-advanced-search: 凭据库查询失败（ref=${ref}），跳过凭证预检：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+      if (onAbort !== undefined) signal.removeEventListener('abort', onAbort)
     }
   }
 
@@ -297,36 +335,29 @@ export default class FenixSessionAdvancedSearch extends Service {
     }
   }
 
-  private logDebug(message: string): void {
+  /** 统一日志实现（四个 logXxx 共用）：ctx.logger printf 调用，抛错退 console 同级回退。 */
+  private logAt(level: 'debug' | 'warn' | 'error' | 'info', message: string): void {
     try {
-      this.ctx.logger.debug('%s', message)
+      this.ctx.logger[level]('%s', message)
     } catch {
-      console.debug(message)
+      console[level](message)
     }
+  }
+
+  private logDebug(message: string): void {
+    this.logAt('debug', message)
   }
 
   private logWarn(message: string): void {
-    try {
-      this.ctx.logger.warn('%s', message)
-    } catch {
-      console.warn(message)
-    }
+    this.logAt('warn', message)
   }
 
   private logError(message: string): void {
-    try {
-      this.ctx.logger.error('%s', message)
-    } catch {
-      console.error(message)
-    }
+    this.logAt('error', message)
   }
 
   private logInfo(message: string): void {
-    try {
-      this.ctx.logger.info('%s', message)
-    } catch {
-      console.info(message)
-    }
+    this.logAt('info', message)
   }
 }
 

@@ -27,6 +27,7 @@
  */
 import type { DshSessionController, DshSessionEvent, DshSessionPersistence } from '../types/dsh-runtime.js'
 import type { SearchRequest, SearchTimeRange } from '../shared/protocol.js'
+import { errorMessage } from '../shared/errors.js'
 
 /** 单会话首条用户消息节选字节上限（design D4：2KB）。 */
 export const EXCERPT_MAX_BYTES = 2048
@@ -393,9 +394,4 @@ export function byteTruncate(text: string, maxBytes: number): string {
 function describeRange(range: SearchTimeRange | undefined): string {
   if (range === undefined) return '未提供'
   return `[${new Date(range.start).toISOString()}, ${new Date(range.end).toISOString()})`
-}
-
-/** 错误摘要。 */
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
