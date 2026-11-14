@@ -264,6 +264,8 @@ function toCandidate(row: PrefilteredSession, reason: string, confidence: number
     reason,
     confidence: Math.min(1, Math.max(0, confidence)),
     ...(degraded ? { degraded: true } : {}),
+    // 机械命中词与排序路径无关（评分期已定），AI/降级两路都贯通供结果卡 chips 行。
+    ...(row.matchedKeywords !== undefined && row.matchedKeywords.length > 0 ? { matchedKeywords: row.matchedKeywords } : {}),
   }
 }
 

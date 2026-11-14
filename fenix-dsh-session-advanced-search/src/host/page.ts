@@ -225,6 +225,10 @@ svg { display: block; flex: none; }
 .rc-meta .dot-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--n-300); }
 .rc-reason { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px; font-size: 12px; color: var(--label-secondary); }
 .rc-reason svg { color: var(--label-caption); margin-top: 2px; }
+.rc-kw { display: flex; gap: 4px; align-items: center; margin-top: 6px; }
+.rc-kw .kw-label { font-size: 11px; color: var(--label-caption); }
+.match-kw { display: inline-flex; gap: 4px; }
+.match-kw span { background: var(--n-100); border-radius: 4px; padding: 0 5px; font-size: 11px; font-family: var(--dsw-font-mono); color: var(--label-secondary); }
 .rc-empty { text-align: center; color: var(--label-tertiary); padding: 32px 0; }
 .msg-banner { background: var(--bg-base); border: 1px solid var(--divider); border-radius: var(--r-md); padding: 12px 14px; margin-bottom: 14px; color: var(--label-secondary); font-size: 12px; }
 
@@ -342,7 +346,10 @@ function fmtTime(ms) {
   var d = new Date(ms);
   var now = new Date();
   var hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
-  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) return hm;
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) return '今天 ' + hm;
+  var yest = new Date(now);
+  yest.setDate(yest.getDate() - 1);
+  if (d.getFullYear() === yest.getFullYear() && d.getMonth() === yest.getMonth() && d.getDate() === yest.getDate()) return '昨天 ' + hm;
   var md = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + hm;
   if (d.getFullYear() === now.getFullYear()) return md;
   return d.getFullYear() + '-' + md;
@@ -511,13 +518,20 @@ function resultCard(r, i) {
     ? '<span class="rc-reason">' + ICONS.search(1) + '<span>机械匹配 · ' + esc(r.reason) + '</span></span>'
     : '<span class="rc-reason">' + ICONS.sparkle + '<span>' + esc(r.reason) + '</span></span>';
   var ws = r.workspacePath || '(未归组)';
+  /* 命中关键词 chips 行（对齐定稿原型）：机械命中词非空才渲染（旧载荷无此
+     字段时省略整行，向后兼容）。 */
+  var kws = Array.isArray(r.matchedKeywords) ? r.matchedKeywords.filter(function (k) { return typeof k === 'string' && k.length > 0; }) : [];
+  var kwRow = kws.length > 0
+    ? '<div class="rc-kw"><span class="kw-label">命中</span><span class="match-kw">'
+      + kws.map(function (k) { return '<span>' + esc(k) + '</span>'; }).join('') + '</span></div>'
+    : '';
   return '<div class="result-card" data-session="' + esc(r.sessionId) + '" style="animation-delay:' + (i * 60) + 'ms">'
     + '<div class="rc-top"><span class="rc-title">' + esc(r.title || '(无标题会话)') + '</span>'
     + '<span class="' + confCls + '"><span class="c-track"><span class="c-fill" data-pct="' + pct + '"></span></span><span class="c-val">' + confVal + '</span></span></div>'
     + '<div class="rc-meta"><span class="ws-chip">' + ICONS.archive + esc(ws) + '</span>'
     + '<span class="dot-sep"></span><span>' + ICONS.clock + '</span><span>' + fmtTime(r.activityTime) + '</span>'
     + '<span class="dot-sep"></span><span>' + (degraded ? '机械匹配排序' : 'AI 相关性排序') + '</span></div>'
-    + reason + '</div>';
+    + reason + kwRow + '</div>';
 }
 
 function resultsHTML(results, degraded) {
