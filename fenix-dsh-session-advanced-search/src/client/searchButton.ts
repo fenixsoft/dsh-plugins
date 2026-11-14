@@ -45,7 +45,7 @@ const ICON_SVG = [
  * 在官方搜索框 input 之后注入「高级搜索」入口按钮，并持续维护其在位。
  * @param deps.document - 宿主 document（测试注入 jsdom 实例）。
  * @param deps.log - 日志门面。
- * @param deps.onClick - 按钮点击回调（打开弹窗）。
+ * @param deps.onClick - 按钮点击回调（在内容区打开高级搜索视图）。
  */
 export function injectSearchButton(deps: { document: Document; log: SearchButtonLog; onClick: () => void }): SearchButtonHandle {
   const doc = deps.document

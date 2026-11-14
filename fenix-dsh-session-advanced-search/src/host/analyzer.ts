@@ -62,6 +62,8 @@ export interface AnalysisOutcome {
   readonly degraded: boolean
   /** 降级原因分类（degraded=true 时有值）。 */
   readonly degradedReason?: SearchDegradedReason
+  /** degraded=true 时的一句话动态原因（降级点拼装的 provider·model·根因 文本；host 贯通轮询载荷）。 */
+  readonly degradedDetail?: string
   /** 本次解析生效的路由（空候选/未装配时不产出——未发起路由解析）。 */
   readonly route?: AnalyzerRoute
 }
@@ -247,7 +249,9 @@ function mechanicalFallback(
       true,
     ),
   )
-  return { results, degraded: true, degradedReason: reason }
+  // warnMessage 即各降级点拼装的一句话根因（凭证缺失附 provider/model、超时附
+  // 硬上限毫秒、调用失败附错误摘要），原样作为 degradedDetail 贯通轮询载荷。
+  return { results, degraded: true, degradedReason: reason, degradedDetail: warnMessage }
 }
 
 /** 统一候选行构造（analyzer 内部 → 协议候选）。 */

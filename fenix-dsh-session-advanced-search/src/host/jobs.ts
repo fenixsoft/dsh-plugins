@@ -55,6 +55,8 @@ export interface SearchJob {
   degraded?: boolean
   /** degraded=true 时的原因分类（degradedReason 贯通轮询载荷）。 */
   degradedReason?: SearchJobStatus['degradedReason']
+  /** degraded=true 时的一句话动态原因（降级点拼装；向后兼容可选字段贯通轮询载荷）。 */
+  degradedDetail?: string
   message?: string
 }
 
@@ -167,9 +169,10 @@ export class JobTable {
   /**
    * 以完成收尾（done + 结果）。终态幂等：已终态任务保持原终态不变。
    * @param degradedReason - degraded=true 时的原因分类（贯通轮询载荷）。
+   * @param degradedDetail - degraded=true 时的一句话动态原因（贯通轮询载荷，可省）。
    * @returns true = 本次生效；false = 任务缺失或已终态。
    */
-  complete(id: string, results: readonly SearchCandidate[], degraded: boolean, degradedReason?: SearchJobStatus['degradedReason']): boolean {
+  complete(id: string, results: readonly SearchCandidate[], degraded: boolean, degradedReason?: SearchJobStatus['degradedReason'], degradedDetail?: string): boolean {
     this.reclaimTerminalJobs()
     const job = this.jobs.get(id)
     if (job === undefined || TERMINAL_PHASES.includes(job.phase)) return false
@@ -178,6 +181,7 @@ export class JobTable {
     job.results = results
     job.degraded = degraded
     if (degraded && degradedReason !== undefined) job.degradedReason = degradedReason
+    if (degraded && degradedDetail !== undefined) job.degradedDetail = degradedDetail
     this.emit(id)
     return true
   }
@@ -223,6 +227,7 @@ export class JobTable {
       results: job.results,
       degraded: job.degraded,
       ...(job.degradedReason !== undefined ? { degradedReason: job.degradedReason } : {}),
+      ...(job.degradedDetail !== undefined ? { degradedDetail: job.degradedDetail } : {}),
       ...(job.progress.length > 0 ? { progress: [...job.progress] } : {}),
       message: job.message,
     }

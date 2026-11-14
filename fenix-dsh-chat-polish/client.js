@@ -45,7 +45,8 @@
  *        静默退出，不留幽灵状态；
  *      - 历史源 = useChat 快照 order→nodes 过滤 kind user/steering 按 data.seq
  *        排序，取 content 中 type:'text' 块拼接（与官方投影一致），相邻重复折叠；
- *      - 切走时未发送草稿缓存于模块内存（按会话单槽），↓ 越过最新即切回；
+ *      - 切走时未发送草稿缓存于控制器实例内存（session 作用域，随插槽卸载释放，
+ *        多 composer 并存互不串扰），↓ 越过最新即切回；
  *        跨会话/刷新的草稿持久化由宿主 SessionInputShell 自身的 persistDraft
  *        机制负责，本层不重复。
  *    宿主崩溃路径：组件异常由 SlotErrorBoundary/abdicate 兜底，事件监听在
@@ -260,20 +261,24 @@
 									return react.createElement(react.Fragment, { key: 'image:' + index },
 										props.renderMessageImages({ images: [attachment.image], align: 'end', compact: compactImages }))
 								}
+								var file = attachment.file || {}
+								/* 形状守卫：name/bytes 字段漂移时降级占位渲染，不让单条畸形附件在渲染期
+								 * 抛 TypeError 击穿整个遮蔽渲染器（宿主 abdicate 整体退位回官方纯文本），
+								 * 与 useInput/useChat、chat 快照、renderMessageImages 的显式守卫同口径 */
+								var fileName = typeof file.name === 'string' ? file.name : '未命名文件'
+								var fileMeta = [
+									fileExtension(fileName).toUpperCase().slice(0, 8),
+									typeof file.bytes === 'number' ? fileSizeText(file.bytes) : '',
+								].filter(Boolean).join(' ')
 								return react.createElement(
 									'span',
-									{ key: 'file:' + index, className: 'fdxchat-fileCard', title: attachment.file.name },
-									react.createElement(FileTypeIcon, { path: attachment.file.name, className: 'fdxchat-fileIcon' }),
+									{ key: 'file:' + index, className: 'fdxchat-fileCard', title: fileName },
+									react.createElement(FileTypeIcon, { path: fileName, className: 'fdxchat-fileIcon' }),
 									react.createElement(
 										'span',
 										{ className: 'fdxchat-fileContent' },
-										react.createElement('span', { className: 'fdxchat-fileName' }, attachment.file.name),
-										react.createElement(
-											'span',
-											{ className: 'fdxchat-fileMeta' },
-											[fileExtension(attachment.file.name).toUpperCase().slice(0, 8), fileSizeText(attachment.file.bytes)]
-												.filter(Boolean).join(' '),
-										),
+										react.createElement('span', { className: 'fdxchat-fileName' }, fileName),
+										react.createElement('span', { className: 'fdxchat-fileMeta' }, fileMeta),
 									),
 								)
 							}),
@@ -296,7 +301,10 @@
 				if (referenceLabels.length > 0) {
 					children.push(react.createElement('div', { className: 'fdxchat-referenceSummary', key: 'references' }, referenceLabels.join('、')))
 				}
-				children.push(react.createElement(CopyButton, { text: parts.text, key: 'copy' }))
+				/* 纯附件/无文本消息不追加复制按钮：避免悬停可点复制空串并误报「已复制」 */
+				if (parts.text !== '') {
+					children.push(react.createElement(CopyButton, { text: parts.text, key: 'copy' }))
+				}
 
 				return react.createElement(
 					'div',
@@ -307,10 +315,14 @@
 
 			/* ═══ 输入框历史消息导航（feature 3）══════════════════════════════════ */
 
-		/* 当前挂载的控制器引用（单 composer 实例；headless 组件挂载时登记） */
+		/* 当前挂载的控制器引用：全局捕获监听的路由目标（headless 组件挂载时登记）；
+		 * 浏览态光标与缓存草稿等会话状态收在各控制器实例 ref 内，不在此共享 */
 		var historyState = { owner: null }
-		/* 浏览态光标：pos = 从最新一条往回的步数（1=最新）；savedDraft = 进浏览态前的草稿 */
-		var nav = { browsing: false, pos: 0, savedDraft: null }
+		/* 浏览态光标（每控制器一份，随 session 作用域插槽自然隔离，多 composer 并存
+		 * 不串扰）：pos = 从最新一条往回的步数（1=最新）；savedDraft = 进浏览态前的草稿 */
+		function freshNav() {
+			return { browsing: false, pos: 0, savedDraft: null }
+		}
 		/* setDraft 触发 composer input 事件时抑制“编辑即退出”判定 */
 		var applying = false
 
@@ -434,7 +446,7 @@
 			}
 		}
 
-		function exitBrowsing(keepSaved) {
+		function exitBrowsing(nav, keepSaved) {
 			nav.browsing = false
 			nav.pos = 0
 			if (keepSaved !== true) nav.savedDraft = null
@@ -442,6 +454,7 @@
 
 		/* document 捕获阶段 keydown：先于 Lexical 命令处理 */
 		function onHistoryKeydown(e) {
+			var nav = null
 			try {
 				if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return
 				if (e.isComposing || e.keyCode === 229) return
@@ -451,11 +464,12 @@
 				if (!editorEl || editorEl.dataset.phase !== 'plain') return
 				var owner = historyState.owner
 				if (!owner) return
+				nav = owner.nav
 
 				if (e.key === 'Escape') {
 					if (!nav.browsing) return
 					var restore = nav.savedDraft
-					exitBrowsing()
+					exitBrowsing(nav)
 					applyRecall(owner, editorEl, restore || '', 'down')
 					e.preventDefault()
 					e.stopPropagation()
@@ -489,7 +503,7 @@
 					if (nav.pos <= 1) {
 						/* 越过最新 → 恢复草稿并退出浏览态 */
 						var draft = nav.savedDraft
-						exitBrowsing()
+						exitBrowsing(nav)
 						applyRecall(owner, editorEl, draft || '', 'down')
 					} else {
 						nav.pos -= 1
@@ -502,7 +516,7 @@
 				e.preventDefault()
 				e.stopPropagation()
 			} catch (err) {
-				exitBrowsing()
+				if (nav) exitBrowsing(nav)
 			}
 		}
 
@@ -510,11 +524,13 @@
 		 * input 用 applying 闸门豁免 */
 		function onHistoryInput(e) {
 			try {
-				if (applying || !nav.browsing) return
+				if (applying) return
 				var target = e.target
 				if (!(target instanceof Element)) return
 				if (!target.closest('[data-composer-input]')) return
-				exitBrowsing()
+				var owner = historyState.owner
+				if (!owner || !owner.nav.browsing) return
+				exitBrowsing(owner.nav)
 			} catch (err) { /* never */ }
 		}
 
@@ -529,6 +545,7 @@
 					actionsRef: { current: null },
 					chatRef: { current: null },
 					draftRef: { current: '' },
+					nav: freshNav(),
 				}
 			}
 			refs.current.actionsRef.current = props.inputActions || null
@@ -539,10 +556,10 @@
 				var api = refs.current
 				historyState.owner = api
 				return function () {
-					if (historyState.owner === api) {
-						historyState.owner = null
-						exitBrowsing()
-					}
+					/* 浏览态已随实例隔离：无论是否仍是 owner 都退出本人浏览态；
+					 * owner 指针仅在仍是本人时清空，避免误清新挂载的控制器 */
+					exitBrowsing(api.nav)
+					if (historyState.owner === api) historyState.owner = null
 				}
 			}, [])
 			return null
@@ -576,6 +593,10 @@
 								MarkdownUserView,
 							)
 						})
+					} catch (err) {
+						stage('slots.inject user', err)
+					}
+					try {
 						ctx.slots.inject('conversation.chat.node', function () {
 							return ctx.slots.register(
 								{ name: 'conversation.chat.node', key: 'steering', priority: -10 },
@@ -583,7 +604,7 @@
 							)
 						})
 					} catch (err) {
-						stage('slots.inject', err)
+						stage('slots.inject steering', err)
 					}
 
 					/* feature 3：输入框历史导航。headless 控制器挂 conversation.input.overlay
@@ -608,7 +629,11 @@
 						document.removeEventListener('input', onHistoryInput, true)
 						var removed = styleTag.parentNode !== null
 						if (removed) styleTag.remove()
-						return removed && failures.length === 0
+						/* 返回值口径对齐兄弟插件 fenix-dsh-brand-fenix（其 dispose 注释明示语义
+						 * 为「清理是否实际执行」，failures 仅为激活期状态）：本插件只以本地资源
+						 * 清理是否实际执行（style 标签摘除；监听器按同参 removeEventListener 恒
+						 * 成功）为返回值，激活期 failures 不参与判定 */
+						return removed
 					}
 				},
 			}
