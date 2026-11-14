@@ -90,7 +90,8 @@ async function sameLocation(a: string, b: string): Promise<boolean> {
  * 窗口 = 残迹挪入 trash 到 staging 就位之间（≤ 一次 rename；递归删除只发生在
  * 就位之后，不再拉长窗口）：窗口内进程被杀时会话目录暂缺，但数据完整滞留于
  * staging 残目录（`${originalDir}.rollback-<时间戳>`），人工挪回即恢复——
- * 不存在半还原态。备份挪出主备份区之后的失败以抛错注明滞留位置（staging），
+ * 不存在半还原态。失败以抛错注明备份当下真实滞留位置（首段 rename 失败 = 备
+ * 份仍完整滞留于主备份区原位、未做任何还原；挪出之后的失败 = 滞留于 staging），
  * 供外层 failed detail 呈现人工恢复路径。就位成功后同步清退备份同级完整性
  * 清单文件（残留会在下轮被误当在册核验基准），清理失败仅告警不影响还原结果。
  */
@@ -98,7 +99,14 @@ function restoreFromBackup(backupDir: string, originalDir: string, log?: Migrate
   const stagingDir = `${originalDir}.rollback-${Date.now().toString(36)}`
   const trashDir = `${originalDir}.trash-${Date.now().toString(36)}`
   mkdirSync(dirname(originalDir), { recursive: true })
-  renameSync(backupDir, stagingDir)
+  try {
+    renameSync(backupDir, stagingDir)
+  } catch (error) {
+    // 首段搬移失败（典型如备份区与会话 root 异文件系统触发 EXDEV、权限异常）：
+    // 备份原封未动，原目录也未触碰（现场可能另有 step 2 挪入 trash 的目标目录
+    // 残迹），须注明真实位置供外层 failed detail 指导人工处置。
+    throw new Error(`备份还原失败（首段搬移），备份仍完整滞留于 ${backupDir}，未做任何还原：${errorMessage(error)}`)
+  }
   try {
     if (existsSync(originalDir)) renameSync(originalDir, trashDir)
     renameSync(stagingDir, originalDir)
