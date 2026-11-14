@@ -123,7 +123,7 @@ svg { display: block; flex: none; }
 .icon-btn:focus-visible { outline: 2px solid var(--ds-500); outline-offset: 1px; }
 
 /* ===== 页面骨架：全页搜索视图 ===== */
-.page { height: 100vh; display: flex; flex-direction: column; background: var(--n-50); }
+.page { height: 100vh; height: 100dvh; display: flex; flex-direction: column; background: var(--n-50); }
 .page-header { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 20px; background: var(--bg-base); border-bottom: 1px solid var(--divider); }
 .page-header .ttl { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .page-header .ttl svg { color: var(--label-secondary); }
@@ -481,9 +481,22 @@ function degradeBannerHTML(reason) {
 }
 
 /* ===== 跳回会话：localStorage dsh.sessions.current + '/'（restoreSelection 缝）===== */
+/* 嵌入形态（iframe）：同源共享 localStorage；导航目标取父窗口——结果卡点击
+   让父级应用整页恢复并打开目标会话。独立页形态 window.self===window.top，
+   行为不变。 */
+function parentWin() { return (window.self !== window.top) ? window.parent : window; }
 function jumpToSession(sessionId) {
   try { localStorage.setItem('dsh.sessions.current', JSON.stringify({ sessionId: sessionId })); } catch (e) { /* 存储不可用时仍跳首页 */ }
-  window.location.href = '/';
+  parentWin().location.href = '/';
+}
+
+/* 嵌入形态关闭缝：父级 client 装配注册 window.__fenixSas.close（同源直调）；
+   未注册（异常宿主）退化为父级回首页。独立页形态不变（整页回 '/'）。 */
+function closeEmbedded() {
+  var w = parentWin();
+  var api = w && w.__fenixSas;
+  if (api && typeof api.close === 'function') { api.close(); return; }
+  w.location.href = '/';
 }
 
 /* ===== 主流程 ===== */
@@ -668,7 +681,9 @@ function submit() {
 }
 $('#runBtn').addEventListener('click', submit);
 $('#queryInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
-$('#backBtn').addEventListener('click', function () { window.location.href = '/'; });
+$('#backBtn').addEventListener('click', function () { closeEmbedded(); });
+/* 嵌入形态：iframe 内 Escape 关闭视图（父层 keydown 不跨 iframe 冒泡）。 */
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && window.self !== window.top) closeEmbedded(); });
 $('#queryInput').focus();
 </script>
 </body>
