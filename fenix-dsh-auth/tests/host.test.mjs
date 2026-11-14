@@ -34,7 +34,7 @@ import {
 
 test('hashPassword produces scrypt record with declared params', async () => {
 	const record = await hashPassword('correct horse battery staple')
-	assert.equal(record.N, 16384)
+	assert.equal(record.N, 131072)
 	assert.equal(record.r, 8)
 	assert.equal(record.p, 1)
 	assert.equal(record.keylen, 64)

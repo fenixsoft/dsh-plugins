@@ -267,12 +267,16 @@ describe('startProjectSync 同步循环', () => {
     expect(() => stop()).not.toThrow()
   })
 
-  it('默认周期为 60s；默认计时器在 node（无 window）下焦点订阅为 no-op', () => {
+  it('node 环境（无 window 且未注入 timer 桩）整体跳过：零拉取零计时器泄漏，no-op stop 安全（同 startAlertCountSync 口径）；缺省周期为 60s', async () => {
+    expect(typeof window).toBe('undefined')
+    const fetchProjects = vi.fn(async () => [] as string[])
     const stop = startProjectSync({
-      fetchProjects: async () => [],
+      fetchProjects,
       sink: recordingSink(),
       timer: undefined,
     })
+    await tick()
+    expect(fetchProjects).not.toHaveBeenCalled()
     expect(DEFAULT_POLL_INTERVAL_MS).toBe(60_000)
     expect(() => stop()).not.toThrow()
   })

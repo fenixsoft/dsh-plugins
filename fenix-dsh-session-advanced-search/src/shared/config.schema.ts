@@ -77,6 +77,7 @@ function parsePositiveNumber(key: string, value: unknown, fallback: number): num
 /**
  * analyzeRoute 校验：undefined 放行（可选键，缺省走 profile 默认路由）；
  * 对象形态且 provider/model 均为非空串才合法，否则装载期 TypeError。
+ * 返回值已 trim 归一化（校验面与产出面一致；analyzer 侧 routeOverride 同语义）。
  * 用途（design D2）：把语义分析路由指到有凭证的 provider（如 deepseek），
  * 优先级高于 profile 默认路由（agent-default-model）。
  */
@@ -91,12 +92,19 @@ function parseAnalyzeRoute(key: string, value: unknown): AnalyzeRoute | undefine
   if (typeof provider !== 'string' || provider.trim().length === 0 || typeof model !== 'string' || model.trim().length === 0) {
     throw new TypeError(`fenix-dsh-session-advanced-search: 配置 ${key}.provider / ${key}.model 均须为非空字符串`)
   }
-  return { provider, model }
+  return { provider: provider.trim(), model: model.trim() }
 }
 
-/** 非法值简述（错误信息可定位）。 */
+/** 非法值简述（错误信息可定位）：串 JSON 引用；对象/数组 JSON 序列化（循环引用兜底 String）。 */
 function describe(value: unknown): string {
   if (typeof value === 'string') return JSON.stringify(value)
+  if (typeof value === 'object' && value !== null) {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
   return String(value)
 }
 

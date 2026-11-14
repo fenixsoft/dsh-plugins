@@ -175,6 +175,7 @@ export function parseJobStatus(value: unknown): SearchJobStatus | undefined {
   if (!isSearchPhase(record.phase)) return undefined
   if (record.results !== undefined && !Array.isArray(record.results)) return undefined
   if (record.results !== undefined && !(record.results as unknown[]).every(isSearchCandidate)) return undefined
+  if (record.degraded !== undefined && typeof record.degraded !== 'boolean') return undefined
   if (record.degradedReason !== undefined && !isSearchDegradedReason(record.degradedReason)) return undefined
   if (record.progress !== undefined) {
     if (!Array.isArray(record.progress)) return undefined
@@ -201,10 +202,8 @@ export function isSearchCandidate(value: unknown): value is SearchCandidate {
 
 /** 客户端展示用的固定文案（双半共享，保持文案单一来源）。 */
 export const UI_TEXT = {
-  /** 注入按钮 hover 提示。 */
+  /** 入口按钮 hover 提示（client 注入，点击跳转独立搜索页）。 */
   buttonTitle: '高级搜索',
-  /** 弹窗标题。 */
-  dialogTitle: '高级搜索',
   /** 描述输入 placeholder。 */
   queryPlaceholder: '描述你想找的会话内容，例如「上周调试登录超时的会话」',
   /** 提交按钮。 */

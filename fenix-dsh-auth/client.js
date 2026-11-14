@@ -93,12 +93,17 @@
 				return Boolean(err) && err.name === 'AbortError'
 			}
 
-			/** 读取凭据状态；非 2xx 返回 null（由调用方按错误提示）。 */
+			/** 读取凭据状态；非 2xx 返回 null（由调用方按错误提示）。2xx 响应体
+			 * 非 JSON（网关错误页、半截响应等）时以 malformedBody 标记，与网络
+			 * 不可达区分；abort 异常原样上抛（超时文案口径不变）。 */
 			function fetchCredentials() {
 				return fetchWithTimeout('/auth/credentials', { method: 'GET' }).then(function (response) {
 					if (!response.ok) return { response: response, data: null }
 					return response.json().then(function (data) {
 						return { response: response, data: data }
+					}).catch(function (err) {
+						if (isAbortError(err)) throw err
+						return { response: response, data: null, malformedBody: true }
 					})
 				})
 			}
@@ -133,6 +138,9 @@
 
 				/* 挂载回填：GET {configured, username}；401 = 未登录（dsh 会话过期）。 */
 				useEffect(function () {
+					/* 复位卸载旗标：StrictMode 开发态 mount→cleanup→再 mount 会重跑
+					 * 本 effect，不复位则二次挂载后异步响应回调被永久跳过。 */
+					unmountedRef.current = false
 					var cancelled = false
 					fetchCredentials().then(function (result) {
 						if (cancelled) return
@@ -142,6 +150,9 @@
 							setLoading('ready')
 						} else if (result.response.status === 401) {
 							setMessage({ kind: 'error', text: '请先登录后再配置账号密码' })
+							setLoading('ready')
+						} else if (result.malformedBody) {
+							setMessage({ kind: 'error', text: '凭据状态响应格式异常（HTTP ' + result.response.status + '）' })
 							setLoading('ready')
 						} else {
 							setMessage({ kind: 'error', text: '读取登录凭据失败（HTTP ' + result.response.status + '）' })
@@ -199,7 +210,12 @@
 									'body-too-large': '请求体过大',
 									'unsupported-body': '请求格式不受支持',
 								}
-								setMessage({ kind: 'error', text: texts[data && data.error] || '校验失败（' + (data && data.error) + '）' })
+								/* 白名单取值（对齐 host 半 normalizeLoginError 的
+								 * Object.hasOwn 口径）：裸下标会命中 Object.prototype
+								 * 键（如 'constructor'），取到函数等非字符串渲染。 */
+								var rawError = data && data.error
+								var text = typeof rawError === 'string' && Object.hasOwn(texts, rawError) ? texts[rawError] : '校验失败（' + String(rawError) + '）'
+								setMessage({ kind: 'error', text: text })
 							}).catch(function () {
 								if (unmountedRef.current) return
 								setMessage({ kind: 'error', text: '校验失败（HTTP 400）' })
@@ -255,23 +271,26 @@
 				return createElement('div', { style: { maxWidth: 480, paddingBottom: 16 } },
 					createElement('h3', { style: { margin: '0 0 12px', fontSize: 15, fontWeight: 600, color: COLOR_LABEL } }, '账号密码登录'),
 					createElement('p', { style: { margin: rowStyle.margin, fontSize: 13, color: COLOR_LABEL_SECONDARY } }, statusText),
-					createElement('label', { style: labelStyle }, '用户名'),
+					createElement('label', { style: labelStyle, htmlFor: 'fenix-auth-username' }, '用户名'),
 					createElement('input', {
+						id: 'fenix-auth-username',
 						style: inputStyle,
 						value: username,
 						autoComplete: 'username',
 						onChange: function (event) { setUsername(event.target.value) },
 					}),
-					createElement('label', { style: labelStyle }, '密码（至少 8 个字符）'),
+					createElement('label', { style: labelStyle, htmlFor: 'fenix-auth-password' }, '密码（至少 8 个字符）'),
 					createElement('input', {
+						id: 'fenix-auth-password',
 						style: inputStyle,
 						type: 'password',
 						value: password,
 						autoComplete: 'new-password',
 						onChange: function (event) { setPassword(event.target.value) },
 					}),
-					createElement('label', { style: labelStyle }, '确认密码'),
+					createElement('label', { style: labelStyle, htmlFor: 'fenix-auth-confirm' }, '确认密码'),
 					createElement('input', {
+						id: 'fenix-auth-confirm',
 						style: inputStyle,
 						type: 'password',
 						value: confirm,
