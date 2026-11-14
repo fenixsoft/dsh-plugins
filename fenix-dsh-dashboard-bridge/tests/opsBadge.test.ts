@@ -1,12 +1,15 @@
 /**
- * opsBadge 单测（add-dsh-ops-alert-badge）：
- * - 元素树求值断言：count>0 渲染 circle+text 角标（红底白字）、0/尚无成功
- *   拉取隐匿、127→`99+`（超百截断）、>0 各档文案；其余 4 个固定条目图标
- *   零角标、运维条目 glyph path 本体与 svg 形态不变；
- * - 防裁剪形态断言（spec 防裁剪条款）：徽标 `<g>`（circle+text）坐标域完全
- *   落于图标 svg 24×24 viewBox 之内（元素树包含性断言，svg 内绘制天然免疫
- *   宿主祖先 overflow:hidden 裁剪）；
- * - 装配契约（apply / installOpsAlertBadge 桩上下文）：计数变更遮蔽重注册
+ * opsBadge 单测（add-dsh-ops-alert-badge → 2026-11-13 菜单文字后显示改版）：
+ * - 图标存在圆点断言：count>0 渲染无文字红圆点（OPS_BADGE_DOT 钉值）、
+ *   0/尚无成功拉取隐匿；其余 4 个固定条目图标零圆点、运维条目 glyph path
+ *   本体与 svg 形态不变；
+ * - label pill 断言（计数显示面，2026-11-13 用户指令「菜单文字后显示」）：
+ *   opsAlertLabelThunk 求值含「运维」文字 + 红底白字 pill span，计数 3→`3`、
+ *   127→`99+`（超百截断阈值 99）；0/null 回落纯文字无 pill；
+ * - 防裁剪形态断言（spec 防裁剪条款延续）：圆点 `<g>`（circle）坐标域完全
+ *   落于图标 svg 24×24 viewBox 之内（元素树包含性断言）；
+ * - 装配契约（apply / installOpsAlertBadge 桩上下文）：遮蔽注册 options.label
+ *   为 thunk（求值含「运维」+ 当前计数 pill）、计数变更遮蔽重注册
  *   （priority -10）先 dispose 旧注册至多一条在册（幂等）、同 id 二次注册
  *   不崩、register 抛错/方法缺席形状漂移降级 warn 不崩且既有条目注册不受
  *   影响、失败后计数变更自然重试、停止函数收口在册遮蔽注册。
@@ -15,12 +18,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { alertCountStore } from '../src/client/alertCount.js'
 import { FIXED_ENTRIES, apply, installOpsAlertBadge } from '../src/client/index.js'
 import {
-  OPS_BADGE_CIRCLE,
+  OPS_BADGE_DOT,
   OPS_BADGE_MAX,
   OPS_BADGE_RED,
   OPS_BADGE_TESTID,
   fixedIconComponent,
-  opsAlertBadgeElement,
+  opsAlertDotElement,
+  opsAlertLabelElement,
+  opsAlertLabelThunk,
   opsBadgeLabel,
 } from '../src/client/panels.js'
 import type { FixedEntryId } from '../src/client/panels.js'
@@ -56,6 +61,32 @@ function collectByType(node: unknown, type: string, acc: ElementLike[] = []): El
 
 function renderIcon(id: FixedEntryId, size = 16): ElementLike {
   return fixedIconComponent(id)({ size }) as ElementLike
+}
+
+/** 深度收集元素树中带 data-testid 的元素（label pill / 图标圆点锚点）。 */
+function collectByTestId(node: unknown, acc: ElementLike[] = []): ElementLike[] {
+  if (node === null || node === undefined) return acc
+  if (typeof node === 'string' || typeof node === 'number' || typeof node === 'boolean') return acc
+  if (Array.isArray(node)) {
+    for (const child of node) collectByTestId(child, acc)
+    return acc
+  }
+  if (typeof node === 'object' && 'type' in node && 'props' in node) {
+    const element = node as ElementLike
+    if (element.props?.['data-testid'] === OPS_BADGE_TESTID) acc.push(element)
+    collectByTestId(element.props?.children, acc)
+  }
+  return acc
+}
+
+/** 深度拼接元素树中的字符串 children（label「运维」文字断言）。 */
+function textOf(node: unknown): string {
+  if (node === null || node === undefined) return ''
+  if (typeof node === 'string') return node
+  if (typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map((child) => textOf(child)).join('')
+  if (typeof node === 'object' && 'props' in node) return textOf((node as ElementLike).props?.children)
+  return ''
 }
 
 function badgeOf(tree: unknown): ElementLike | undefined {
@@ -166,29 +197,42 @@ describe('徽标渲染（元素树求值断言）', () => {
     expect(OPS_BADGE_MAX).toBe(99)
   })
 
-  it('count>0 渲染 circle+text 角标（红底白字白描边），数字随计数更新', () => {
+  it('count>0 图标渲染无文字红圆点（OPS_BADGE_DOT 钉值），无 text 数字元素', () => {
     alertCountStore.setCount(3)
     const tree = renderIcon('fenix-activities')
-    const badge = badgeOf(tree)
-    expect(badge).toBeDefined()
-    const circle = collectByType(badge, 'circle')[0]
-    const text = collectByType(badge, 'text')[0]
+    const dot = badgeOf(tree)
+    expect(dot).toBeDefined()
+    const circle = collectByType(dot, 'circle')[0]
     expect(circle).toBeDefined()
-    expect(text).toBeDefined()
     expect(circle?.props?.fill).toBe(OPS_BADGE_RED)
-    expect(text?.props?.fill).toBe('#fff')
-    expect(text?.props?.stroke).toBe('#fff') // 白描边保可读
-    expect(text?.props?.children).toBe('3')
     expect(OPS_BADGE_RED).toBe('#e5484d')
-    // 计数更新后重求值（重注册触发宿主重渲染）数字随新快照。
+    // 2026-11-13 改版核心断言：图标内不再渲染任何 text 数字元素（旧角标
+    // 16-18px 图标下实高 3-6px 不可读，计数面已移 label pill）。
+    expect(collectByType(tree, 'text')).toHaveLength(0)
+    // 计数变更后重求值（重注册触发宿主重渲染）圆点仍在场（存在指示）。
     alertCountStore.setCount(42)
-    expect(collectByType(badgeOf(renderIcon('fenix-activities')), 'text')[0]?.props?.children).toBe('42')
-    // 99+ 档：三字符最小可读字号分支。
-    alertCountStore.setCount(127)
-    expect(collectByType(badgeOf(renderIcon('fenix-activities')), 'text')[0]?.props?.children).toBe('99+')
+    expect(badgeOf(renderIcon('fenix-activities'))).toBeDefined()
   })
 
-  it('零值隐匿：count=0 与尚无成功拉取（null）均不渲染任何角标元素', () => {
+  it('label thunk 求值：「运维」文字 + 红底白字计数 pill（菜单文字后显示）', () => {
+    alertCountStore.setCount(3)
+    const label = opsAlertLabelThunk('运维')()
+    expect(textOf(label)).toContain('运维')
+    const pills = collectByTestId(label)
+    expect(pills).toHaveLength(1)
+    expect(textOf(pills[0])).toBe('3')
+    expect(pills[0]?.props?.style).toMatchObject({ background: OPS_BADGE_RED, color: '#fff' })
+    // 计数更新后 thunk 重求值即新值（重注册触发宿主重读 label）。
+    alertCountStore.setCount(42)
+    expect(textOf(collectByTestId(opsAlertLabelThunk('运维')())[0])).toBe('42')
+    // 99+ 档：超百截断阈值与图标时代一致（OPS_BADGE_MAX）。
+    alertCountStore.setCount(127)
+    expect(textOf(collectByTestId(opsAlertLabelThunk('运维')())[0])).toBe('99+')
+    // 独立求值与 thunk 同形（直接构造面，count>0 pill 在场）。
+    expect(textOf(collectByTestId(opsAlertLabelElement('运维', 3))[0])).toBe('3')
+  })
+
+  it('零值隐匿：count=0 与尚无成功拉取（null）图标无圆点、label 无 pill', () => {
     const treeNone = renderIcon('fenix-activities')
     expect(badgeOf(treeNone)).toBeUndefined()
     expect(collectByType(treeNone, 'circle')).toHaveLength(0)
@@ -197,6 +241,10 @@ describe('徽标渲染（元素树求值断言）', () => {
     expect(badgeOf(treeZero)).toBeUndefined()
     expect(collectByType(treeZero, 'circle')).toHaveLength(0)
     expect(collectByType(treeZero, 'text')).toHaveLength(0)
+    // label 面同步隐匿：0 与 null 求值均回落纯文字（无 testid pill span）。
+    expect(collectByTestId(opsAlertLabelThunk('运维')())).toHaveLength(0)
+    expect(textOf(opsAlertLabelThunk('运维')())).toBe('运维')
+    expect(collectByTestId(opsAlertLabelElement('运维', null))).toHaveLength(0)
   })
 
   it('其余 4 个固定条目图标零角标；运维条目 glyph path 本体与 svg 形态不变', () => {
@@ -217,51 +265,44 @@ describe('徽标渲染（元素树求值断言）', () => {
     expect(activities).toMatchObject({ label: '运维', route: '#/activities', order: 15 })
   })
 
-  it('opsAlertBadgeElement 独立求值与组件内一致（size 缩放不改 viewBox 坐标）', () => {
+  it('opsAlertDotElement 独立求值：无参纯函数，红圆点形态与图标内一致', () => {
     alertCountStore.setCount(1)
-    const badge = badgeOf(renderIcon('fenix-activities', 18))
-    const direct = opsAlertBadgeElement(1)
-    const badge18 = badgeOf(renderIcon('fenix-activities', 18))
-    expect(collectByType(direct, 'circle')[0]?.props).toEqual(collectByType(badge, 'circle')[0]?.props)
-    expect(collectByType(badge18, 'circle')[0]?.props).toEqual(collectByType(badge, 'circle')[0]?.props)
+    const direct = opsAlertDotElement()
+    const inIcon = badgeOf(renderIcon('fenix-activities'))
+    const inIcon18 = badgeOf(renderIcon('fenix-activities', 18))
+    expect(collectByType(direct, 'circle')[0]?.props).toEqual(collectByType(inIcon, 'circle')[0]?.props)
+    expect(collectByType(inIcon18, 'circle')[0]?.props).toEqual(collectByType(inIcon, 'circle')[0]?.props)
   })
 })
 
 describe('防裁剪形态断言（spec 防裁剪条款：svg 内绘制，元素树包含性断言）', () => {
-  it('徽标 <g>（circle+text）坐标域完全落于 24×24 viewBox 之内（1/42/127 三档）', () => {
+  it('圆点 <g>（circle）坐标域完全落于 24×24 viewBox 之内', () => {
     for (const count of [1, 42, 127]) {
       alertCountStore.setCount(count)
       const tree = renderIcon('fenix-activities')
       const badge = badgeOf(tree)
-      expect(badge, `count=${count} 应渲染角标`).toBeDefined()
+      expect(badge, `count=${count} 应渲染圆点`).toBeDefined()
       const circle = collectByType(badge, 'circle')[0]
-      const text = collectByType(badge, 'text')[0]
       expect(circle).toBeDefined()
-      expect(text).toBeDefined()
       const { cx, cy, r } = circle?.props as { cx: number; cy: number; r: number }
       expect(cx - r).toBeGreaterThanOrEqual(0)
       expect(cx + r).toBeLessThanOrEqual(24)
       expect(cy - r).toBeGreaterThanOrEqual(0)
       expect(cy + r).toBeLessThanOrEqual(24)
-      const { x, y } = text?.props as { x: number; y: number }
-      expect(x).toBeGreaterThanOrEqual(0)
-      expect(x).toBeLessThanOrEqual(24)
-      expect(y).toBeGreaterThanOrEqual(0)
-      expect(y).toBeLessThanOrEqual(24)
     }
-    // 几何钉值单源：常量表与元素树一致（右上角落位；圆径覆盖 99+ em-box）。
-    expect(OPS_BADGE_CIRCLE).toEqual({ cx: 18, cy: 6, r: 6 })
+    // 几何钉值单源：常量表与元素树一致（右上角落位小圆点；计数显示面在 label pill）。
+    expect(OPS_BADGE_DOT).toEqual({ cx: 19, cy: 5, r: 3.5 })
   })
 
   it('角标位于 svg（图标盒）内部：g 是 svg 直接子元素，无 svg 外定位 DOM', () => {
     alertCountStore.setCount(1)
     const tree = renderIcon('fenix-activities')
-    // 整棵树除 svg/g/circle/text/path 外无其它元素（无绝对定位 wrapper）。
+    // 整棵树除 svg/g/circle/path 外无其它元素（无绝对定位 wrapper）。
     const all = collectByType(tree, 'svg')
     expect(all).toHaveLength(1)
     const badge = badgeOf(tree)
     expect(badge).toBeDefined()
-    // 角标 circle 覆盖域含于 viewBox ⇒ 免疫宿主祖先 overflow:hidden 裁剪
+    // 圆点 circle 覆盖域含于 viewBox ⇒ 免疫宿主祖先 overflow:hidden 裁剪
     // （svg 渲染尺寸由宿主裁到哪、viewBox 内容等比完整）。
     const { cx, cy, r } = collectByType(badge, 'circle')[0]?.props as { cx: number; cy: number; r: number }
     expect([cx - r, cy - r, cx + r, cy + r].every((v) => v >= 0 && v <= 24)).toBe(true)
@@ -269,10 +310,10 @@ describe('防裁剪形态断言（spec 防裁剪条款：svg 内绘制，元素�
 })
 
 describe('装配契约（遮蔽重注册 + 形状漂移降级 + 收口）', () => {
-  it('计数>0 遮蔽注册 priority -10 条目（order/label 同 FIXED_ENTRIES）；变更先 dispose 旧注册（slots 至多一条）', async () => {
+  it('计数>0 遮蔽注册 priority -10 条目（label 为含运维文字的 thunk）；变更先 dispose 旧注册（slots 至多一条）', async () => {
     const queue = [1, 2]
     const stub = await applied(() => Promise.resolve(queue.shift() ?? 0))
-    // 首拉 count=1：一条遮蔽注册。
+    // 首拉 count=1：一条遮蔽注册，label 为 thunk 且求值含「运维」+ 计数 pill。
     const first = shadowEntries(stub)
     expect(first).toHaveLength(1)
     expect(first[0]?.options).toMatchObject({
@@ -280,8 +321,12 @@ describe('装配契约（遮蔽重注册 + 形状漂移降级 + 收口）', () =
       id: 'fenix-activities',
       priority: -10,
       order: 15,
-      label: '运维',
     })
+    expect(typeof first[0]?.options.label).toBe('function')
+    const shadowLabel = first[0]?.options.label as () => unknown
+    alertCountStore.setCount(1)
+    expect(textOf(shadowLabel())).toContain('运维')
+    expect(textOf(collectByTestId(shadowLabel())[0])).toBe('1')
     expect(stub.live.get('list:fenix-activities')).toBeDefined()
     // 1→2（周期重拉）：先 dispose 旧注册再注册新——removed 收旧、live 仍单条。
     stub.timer.triggerInterval()

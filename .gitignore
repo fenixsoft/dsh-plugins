@@ -27,3 +27,10 @@ lib/
 !.fenix/verify.yaml
 !.fenix/verify-web-bridge.sh
 !.fenix/verify-web-bridge-proxy.py
+
+# 本地工具缓存（playwright/agent 运行时，不入库）
+.pw-home/
+.pw-shots/
+.pw*.sh
+.local/
+.claude/

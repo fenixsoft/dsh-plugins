@@ -33,7 +33,7 @@ import { buildPanelSrc, resolveBridgeConfig } from '../shared/config.js'
 import type { BridgeConfigInput } from '../shared/config.js'
 import { alertCountStore, fetchAlertCount, startAlertCountSync } from './alertCount.js'
 import type { AlertCountFetcher } from './alertCount.js'
-import { DashboardPanel, fixedIconComponent, installWorkspaceNav, projectGroupStore } from './panels.js'
+import { DashboardPanel, fixedIconComponent, installWorkspaceNav, opsAlertLabelThunk, projectGroupStore } from './panels.js'
 import type { FixedEntryId } from './panels.js'
 import { registerFileContextMenu } from './locate.js'
 import {
@@ -632,12 +632,13 @@ export function deepLinkPanels(ctx: Context): () => void {
 }
 
 /**
- * 运维条目告警徽标装配（add-dsh-ops-alert-badge）：启动计数同步循环（60s +
- * window focus，失败/超时保留现值），订阅 alertCountStore——计数变更时以
- * priority -10 遮蔽重注册 fenix-activities 条目（reorderOfficialPanels 先例
- * 形态：panellist 为 list 槽，同 id 更低 priority 胜出，旧注册被遮蔽而非
- * 卸载，无闪断）。图标组件是无 hook 纯函数（不订阅 store），重注册是让宿主
- * 重渲染图标、读入新快照的唯一触发面。
+ * 运维条目告警计数装配（add-dsh-ops-alert-badge → 2026-11-13 菜单文字后显示
+ * 改版）：启动计数同步循环（60s + window focus，失败/超时保留现值），订阅
+ * alertCountStore——计数变更时以 priority -10 遮蔽重注册 fenix-activities
+ * 条目（reorderOfficialPanels 先例形态：panellist 为 list 槽，同 id 更低
+ * priority 胜出，旧注册被遮蔽而非卸载，无闪断）。图标与 label 组件均是无
+ * hook 纯函数（不订阅 store；label 为 thunk、求值读当前快照），重注册是让
+ * 宿主重渲染图标圆点、重读 label pill 的唯一触发面。
  *
  * 重注册纪律：
  * - 有告警（count>0）：先 dispose 上一次遮蔽注册再注册（60s 轮询 + focus 下
@@ -673,7 +674,16 @@ export function installOpsAlertBadge(
     if (count === null || count <= 0) return // 零告警隐匿：dispose 即触发重渲染
     try {
       shadowDispose = ctx.slots.register(
-        { name: 'sidebar.panellist', id: entry.id, order: entry.order, priority: -10, label: entry.label },
+        {
+          name: 'sidebar.panellist',
+          id: entry.id,
+          order: entry.order,
+          priority: -10,
+          // label 用 thunk（2026-11-13 用户指令：告警计数移到菜单文字后红底
+          // pill 显示，宿主 14px 文字渲染；求值读 alertCountStore 当前快照，
+          // 本重注册即宿主重读 label/重渲染图标圆点的触发面）。
+          label: opsAlertLabelThunk(entry.label),
+        },
         icon,
       )
     } catch (error) {
@@ -719,7 +729,15 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   ctx.slots.inject('sidebar.panellist', () => {
     const disposers = FIXED_ENTRIES.map((entry) =>
       ctx.slots.register(
-        { name: 'sidebar.panellist', id: entry.id, order: entry.order, label: entry.label },
+        {
+          name: 'sidebar.panellist',
+          id: entry.id,
+          order: entry.order,
+          // 运维条目 label 用 thunk（菜单文字后告警计数 pill，2026-11-13 用户
+          // 指令）；其余条目字符串原样。基注册 thunk 与遮蔽注册同求值路径，
+          // count≤0 时求值回落纯文字（零告警隐匿）。
+          label: entry.id === 'fenix-activities' ? opsAlertLabelThunk(entry.label) : entry.label,
+        },
         fixedIconComponent(entry.id),
       ),
     )

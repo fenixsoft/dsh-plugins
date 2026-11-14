@@ -279,13 +279,17 @@ describe('条目注册（桩 slots）', () => {
       'fenix-activities',
       'fenix-help',
     ])
+    // 运维条目 label 为 thunk（2026-11-13 菜单文字后告警计数 pill；求值含
+    // 「运维」文字），其余四条仍为字符串 label。
     expect(fixed.map((entry) => entry.options.label)).toEqual([
       '概览',
       '指挥中心',
       '配置',
-      '运维',
+      expect.any(Function),
       '帮助',
     ])
+    const activitiesLabel = fixed[3]?.options.label as () => unknown
+    expect(JSON.stringify(activitiesLabel())).toContain('运维')
     // order 段位（2026-11-05 重排）：概览10 / 配置13 / 运维15 / 指挥中心16 /
     // 帮助18。视觉序由 OFFICIAL_PANEL_REORDER 遮蔽段位（14/17）合成。
     expect(fixed.map((entry) => entry.options.order)).toEqual([10, 16, 13, 15, 18])

@@ -1,0 +1,7 @@
+# fenix-dsh-clipboard-fallback
+# dsh web 非安全上下文剪贴板写降级(polyfill navigator.clipboard.writeText)。
+# 全部逻辑位于 client.js;此处仅把本插件插入 web profile 的 loader 清单。
+
+- insert:
+    - id: fenix-dsh-clipboard-fallback
+      name: fenix-dsh-clipboard-fallback

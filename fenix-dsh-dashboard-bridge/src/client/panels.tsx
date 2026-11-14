@@ -86,77 +86,106 @@ const FIXED_GLYPHS: Record<FixedEntryId, readonly string[]> = {
 /* ============ 运维条目告警徽标（add-dsh-ops-alert-badge） ============ */
 
 /**
- * 徽标圆几何（viewBox 24×24 坐标系钉值）：右上角落位，圆域
- * [cx±r, cy±r] = [12,24]×[0,12] 完全落于 viewBox 之内（闭边界包含）
- * （tests/opsBadge.test.ts 元素树断言钉值；svg 内绘制天然落在图标盒内，
- * 免疫宿主侧栏条目容器 overflow:hidden 裁剪——fenixd dashboard 侧栏徽标
- * 「绝对定位角标悬出文本盒被裁成红弧」同型缺陷的根因规避，spec 防裁剪条款）。
- * 圆径 12 单位覆盖 `99+` 三字符 em-box 全宽（真实浏览器度量，含系统字体
- * advance），文字 em-box 亦全落于圆内/svg 内（r=5.5 档实测 99+ em 右缘溢出
- * svg 0.09px 被边缘裁剪，本档位修复）。viewBox 坐标随 size 渲染尺寸等比
- * 缩放，窄态侧栏（仅显图标）同样完整。
+ * 图标存在圆点几何（viewBox 24×24 坐标系钉值）：右上角无文字小圆点，圆域
+ * [cx±r, cy±r] = [15.5,22.5]×[1.5,8.5] 完全落于 viewBox 之内（闭边界包含，
+ * tests/opsBadge.test.ts 元素树断言钉值；svg 内绘制天然落在图标盒内，免疫
+ * 宿主侧栏条目容器 overflow:hidden 裁剪——spec 防裁剪条款延续）。
+ *
+ * 2026-11-13 用户指令改版：图标角标数字在 16-18px 图标渲染尺寸下实高仅
+ * 3-6px 不可读，计数改由条目 label 文字后红底 pill 承载（opsAlertLabelElement，
+ * 宿主以 14px 文字渲染清晰可读）；图标只保留无文字存在圆点——窄态折叠侧栏
+ * （collapsed 仅显图标、不渲染 label）仍有「有告警」存在指示。原
+ * OPS_BADGE_CIRCLE cx18,cy6,r6 + opsBadgeFontSize 三档缩排已随数字角标移除。
  */
-export const OPS_BADGE_CIRCLE = { cx: 18, cy: 6, r: 6 } as const
+export const OPS_BADGE_DOT = { cx: 19, cy: 5, r: 3.5 } as const
 
-/** 徽标红底色钉值（红底白字角标，spec「徽标渲染与零值隐匿」）。 */
+/** 徽标红底色钉值（图标圆点与 label pill 共用，spec「徽标渲染与零值隐匿」）。 */
 export const OPS_BADGE_RED = '#e5484d'
 
-/** 超百截断阈值：计数 > 99 显示 `99+`。 */
+/** 超百截断阈值：计数 > 99 显示 `99+`（label pill 同阈值）。 */
 export const OPS_BADGE_MAX = 99
 
-/** 徽标角标 testid（元素树断言锚点）。 */
+/** 告警计数标识 testid（图标圆点与 label pill 共用；元素树断言锚点）。 */
 export const OPS_BADGE_TESTID = 'fenix-ops-alert-badge'
 
-/** 徽标文案：>99 显示 `99+`（spec 超百截断），其余原样十进制。 */
+/** 计数文案：>99 显示 `99+`（spec 超百截断），其余原样十进制。 */
 export function opsBadgeLabel(count: number): string {
   return count > OPS_BADGE_MAX ? '99+' : String(count)
 }
 
-/** 徽标字号（viewBox 单位）：随字符数收缩，单字符大字、`99+` 三字符最小
- * 可读（4.8 档 em 宽 ≈11 单位 < 圆径 12，em-box 全落于圆内/svg 内）。 */
-function opsBadgeFontSize(label: string): number {
-  if (label.length <= 1) return 8
-  if (label.length === 2) return 6.2
-  return 4.8
-}
-
 /**
- * 徽标 `<g>`（circle + text）元素：红底白字，文字白描边（paintOrder:stroke
- * 描边垫底）保细字在小尺寸下不断裂可读。调用方保证 count > 0（0/尚无成功
- * 拉取不产生任何角标元素——零告警隐匿）。
+ * 图标存在圆点 `<g>`（无文字）：红底，表达「有待裁决告警」存在性；具体计数
+ * 由 label pill 承载（窄态折叠侧栏不渲染 label，圆点是该形态下唯一指示）。
+ * 调用方保证 count > 0（0/尚无成功拉取不产生任何元素——零告警隐匿）。
  */
-export function opsAlertBadgeElement(count: number): ReactElement {
-  const label = opsBadgeLabel(count)
-  const { cx, cy, r } = OPS_BADGE_CIRCLE
+export function opsAlertDotElement(): ReactElement {
+  const { cx, cy, r } = OPS_BADGE_DOT
   return (
     <g data-testid={OPS_BADGE_TESTID}>
       <circle cx={cx} cy={cy} r={r} fill={OPS_BADGE_RED} stroke="none" />
-      <text
-        x={cx}
-        y={cy}
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={opsBadgeFontSize(label)}
-        fontWeight={700}
-        fill="#fff"
-        stroke="#fff"
-        strokeWidth={0.9}
-        paintOrder="stroke"
-      >
-        {label}
-      </text>
     </g>
   )
+}
+
+/**
+ * 条目 label 元素：「运维」文字 + 红底白字计数 pill（2026-11-13 用户指令：
+ * 计数移到菜单文字后清晰显示，fenixd dashboard OpsMenuName 行内 Badge 同款
+ * 形态——16px 高 / 11px 字 / minWidth 16 / 超百 `99+` 截断）。宿主侧栏把
+ * label 原样作为 14px 文字 span children 渲染（dsh-client-ui-sidebar
+ * panelTitle），pill 随文字基线 inline 排布、无绝对定位裁剪面。
+ * count≤0/尚无成功拉取回落纯文字（零告警隐匿）。
+ */
+export function opsAlertLabelElement(text: string, count: number | null): ReactElement {
+  if (count === null || count <= 0) return <span>{text}</span>
+  return (
+    <span>
+      {text}
+      <span
+        data-testid={OPS_BADGE_TESTID}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginLeft: 6,
+          minWidth: 16,
+          height: 16,
+          padding: '0 5px',
+          borderRadius: 8,
+          background: OPS_BADGE_RED,
+          color: '#fff',
+          fontSize: 11,
+          fontWeight: 600,
+          lineHeight: '16px',
+          fontVariantNumeric: 'tabular-nums',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {opsBadgeLabel(count)}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * label thunk 工厂：宿主 resolveSlotLabel 对 function label 每次 syncPanels
+ * 求值（dsh-client-ui-slots lib/index.js 契约），此处读 alertCountStore 当前
+ * 快照——计数变更经 index.ts 遮蔽重注册触发宿主重读后 pill 即新值。
+ * FIXED_ENTRIES label 保持字符串钉值（深链/order/文案契约断言不变），仅注册
+ * 面对运维条目换 thunk。
+ */
+export function opsAlertLabelThunk(text: string): () => ReactElement {
+  return () => opsAlertLabelElement(text, alertCountStore.getSnapshot().count)
 }
 
 /** 固定条目线性图标组件工厂（每个条目 id 一枚）。 */
 export function fixedIconComponent(id: FixedEntryId): (props: PanelIconProps) => ReactElement {
   const glyph = FIXED_GLYPHS[id]
   return function FixedIcon({ size = 18 }: PanelIconProps) {
-    // 运维条目叠加待裁决告警徽标（add-dsh-ops-alert-badge）：无 hook 纯函数
-    // 读 alertCountStore 快照求值——计数变更经 index.ts 遮蔽重注册触发宿主
+    // 运维条目叠加待裁决告警存在圆点（2026-11-13 用户指令改版）：无 hook 纯
+    // 函数读 alertCountStore 快照求值——计数变更经 index.ts 遮蔽重注册触发宿主
     // 重渲染后此快照即新值（组件自身不订阅，仓库纪律：服务端/测试可直接求值
-    // 元素树）。count>0 渲染角标；0 或尚无成功拉取（null）不渲染任何角标元素。
+    // 元素树）。count>0 渲染无文字圆点（具体计数在 label pill）；0 或尚无成功
+    // 拉取（null）不渲染任何元素。
     const count = id === 'fenix-activities' ? alertCountStore.getSnapshot().count : null
     return (
       <svg
@@ -173,7 +202,7 @@ export function fixedIconComponent(id: FixedEntryId): (props: PanelIconProps) =>
         {glyph.map((d) => (
           <path key={d} d={d} />
         ))}
-        {count !== null && count > 0 ? opsAlertBadgeElement(count) : null}
+        {count !== null && count > 0 ? opsAlertDotElement() : null}
       </svg>
     )
   }

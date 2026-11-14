@@ -220,8 +220,14 @@ declare module '@deepseek-ai/cordis' {
      * 2026-11-05 官方面板重排消费）。
      */
     readonly priority?: number
-    /** 行标题与可访问名：纯字符串或每次读取求值的 thunk。 */
-    readonly label?: string | (() => string)
+    /**
+     * 行标题与可访问名：纯字符串、React 节点，或每次读取求值的 thunk（求值
+     * 结果可为 React 节点）。宿主 dsh-client-ui-slots resolveSlotLabel 对
+     * function 逐次调用、结果原样作为 panelTitle span children 渲染
+     * （dsh-client-ui-sidebar lib/client.js 契约；窄态折叠不渲染 label）。
+     * 2026-11-13 运维条目告警计数 pill（opsAlertLabelThunk）消费 React 形态。
+     */
+    readonly label?: string | import('react').ReactNode | (() => string | import('react').ReactNode)
     /** 本条目文案所属词典命名空间；不声明则 label 按原样使用。 */
     readonly locale?: string
   }

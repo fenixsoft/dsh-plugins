@@ -1,0 +1,28 @@
+{
+  "name": "fenix-dsh-clipboard-fallback",
+  "version": "0.1.0",
+  "description": "dsh web 非安全上下文剪贴板写降级:纯 HTTP 访问时 navigator.clipboard 为 undefined(浏览器安全模型),官方多包裸调 writeText 抛错致「无法复制」;本插件 polyfill navigator.clipboard.writeText(textarea+execCommand 降级,Promise 语义与原生一致),对全部调用方透明,升级安全",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.0 <0.3"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  }
+}
