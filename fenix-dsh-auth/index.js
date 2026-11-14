@@ -61,6 +61,9 @@ export const CREDENTIAL_KEY = `${CREDENTIAL_SCOPE}/${CREDENTIAL_ID}`
 /** 登录 POST 请求体上限（design：8KB）。 */
 const MAX_LOGIN_BODY_BYTES = 8 * 1024
 
+/** 请求体读取超时兜底（慢速客户端不发完 body 也不该令调用方 await 永久悬挂）。 */
+const BODY_READ_TIMEOUT_MS = 30_000
+
 /** 失败限流参数（design D8：60s 窗口 5 次失败锁 60s）。 */
 const RATE_WINDOW_MS = 60_000
 const RATE_MAX_FAILS = 5
@@ -677,18 +680,26 @@ function writeRedirect(req, res, location) {
 	res.end()
 }
 
-/** 读请求体并限时（超 8KB 拒绝；SPEC：超限返回 400——拒绝 MUST NOT 销毁
- * socket，否则 400 写在已断连的 socket 上、客户端只见空回复）。导出供测试。 */
+/** 读请求体（字节上限 + 读取超时；超限/流错误/读取超时抛错由调用方 400——
+ * 超限拒绝 MUST NOT 销毁 socket，否则 400 写在已断连的 socket 上、客户端
+ * 只见空回复）。导出供测试。 */
 export function readRequestBody(req, maxBytes) {
 	return new Promise((resolve, reject) => {
 		const chunks = []
 		let total = 0
 		let settled = false
+		// 超时兜底：慢速/半开连接不发完 body 时 promise 也能 settle，由调用方 400。
+		const timer = setTimeout(() => {
+			if (settled) return
+			settled = true
+			reject(new Error(`request body read timed out after ${BODY_READ_TIMEOUT_MS}ms`))
+		}, BODY_READ_TIMEOUT_MS)
 		const onData = (chunk) => {
 			if (settled) return
 			total += chunk.length
 			if (total > maxBytes) {
 				settled = true
+				clearTimeout(timer)
 				// 摘除 data 监听丢弃余量；保留 socket 让上层 handler 把
 				// 400 送达客户端，响应完成后由 Node 关闭未读完的连接。
 				req.removeListener('data', onData)
@@ -701,11 +712,13 @@ export function readRequestBody(req, maxBytes) {
 		req.on('end', () => {
 			if (settled) return
 			settled = true
+			clearTimeout(timer)
 			resolve(Buffer.concat(chunks).toString('utf8'))
 		})
 		req.on('error', (error) => {
 			if (settled) return
 			settled = true
+			clearTimeout(timer)
 			reject(error)
 		})
 	})
