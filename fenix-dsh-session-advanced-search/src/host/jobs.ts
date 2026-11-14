@@ -3,7 +3,8 @@
  *
  * - `Map<jobId, Job>` + 每 job 独立 AbortController；**支持多在途任务并存**
  *   （跨标签页天然隔离）——「同一 client 单在途、重复提交取消旧任务」语义由
- *   client 半保证（提交前 DELETE 旧任务），host 不做隐式取消。
+ *   client 半保证（提交前 DELETE 旧任务），host 不做隐式取消；并发数量受
+ *   MAX_IN_FLIGHT_JOBS 上界（超限由路由层 429 拒绝新建，终态即腾出名额）。
  * - 状态机：collecting → filtering → analyzing → done | error | cancelled；
  *   终态（done/error/cancelled）幂等——终态后的 phase 迁移/取消/收尾一律
  *   no-op，轮询端可见状态恒定。
@@ -27,6 +28,14 @@ const TERMINAL_TTL_MS = 60 * 60 * 1000
 
 /** 终态任务容量上限：超限淘汰最老终态任务（在途任务不参与淘汰）。 */
 const MAX_TERMINAL_JOBS = 64
+
+/**
+ * 在途（非终态）任务并发上限：超过即拒绝新建（host 唯一建任务入口在路由层
+ * POST，超限映射 429）。失控客户端（轮询 bug 重试循环）不得无界并发建任务
+ * 放大 LLM 调用成本；任务到终态即腾出名额——只限数量、不做隐式取消，多标签
+ * 页多在途并存语义保留。如需按部署调优，可后续配置化（暂以常量落地）。
+ */
+export const MAX_IN_FLIGHT_JOBS = 4
 
 /** 单条分析任务记录。 */
 export interface SearchJob {

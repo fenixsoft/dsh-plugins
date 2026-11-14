@@ -1,8 +1,8 @@
 /**
  * host/routes 三端点契约测试（桩 webServer.register 缝对账）：
  * 座位注册形状（exact 集合 + prefix 动态）、POST 建任务立即返回 jobId（校验
- * 400/405/超限）、GET 轮询 phase/results/degraded 可见性、DELETE 取消（幂等/
- * 未知 404）、runJob 异常兜底 fail、注册/卸载对称。
+ * 400/405/超限/429 在途并发上界）、GET 轮询 phase/results/degraded 可见性、
+ * DELETE 取消（幂等/未知 404）、runJob 异常兜底 fail、注册/卸载对称。
  */
 import { describe, expect, it, vi } from 'vitest'
 import { JOBS_PATH } from '../src/shared/protocol.js'
@@ -238,6 +238,30 @@ describe('POST /jobs 建任务', () => {
     expect(typeof list[0]?.elapsedMs).toBe('number')
     expect(typeof list[0]?.resultCount).toBe('number')
     expect((await dispatch('PUT', JOBS_PATH)).status).toBe(405)
+  })
+
+  it('在途任务达上限 → 429 拒绝新建（中文原因）；一个终态后名额腾出可再建', async () => {
+    const { jobs, runJobs, dispatch } = setup()
+    // 桩 runJob 不推进状态机：前 4 个任务均滞留 collecting（在途）。
+    const ids: string[] = []
+    for (let i = 0; i < 4; i += 1) {
+      const res = await dispatch('POST', JOBS_PATH, JSON.stringify({ query: `q${i}` }))
+      expect(res.status, `第 ${i + 1} 个任务`).toBe(200)
+      ids.push((res.json() as { jobId: string }).jobId)
+    }
+    expect(jobs.inFlightCount()).toBe(4)
+    // 超限拒绝：429 + 中文原因，且不建任务、不触发管线。
+    const rejected = await dispatch('POST', JOBS_PATH, JSON.stringify({ query: '超限' }))
+    expect(rejected.status).toBe(429)
+    expect((rejected.json() as { error: string }).error).toContain('在途任务已达上限')
+    expect(jobs.inFlightCount()).toBe(4)
+    expect(runJobs).toHaveLength(4)
+    // 一个任务到终态 → 名额腾出，新建放行（并存语义保留，非隐式取消）。
+    jobs.complete(ids[0]!, [], false)
+    const ok = await dispatch('POST', JOBS_PATH, JSON.stringify({ query: '腾出后再试' }))
+    expect(ok.status).toBe(200)
+    expect((ok.json() as { jobId: string }).jobId).toBe('job-5')
+    expect(jobs.inFlightCount()).toBe(4)
   })
 
   it('runJob 异常 → 任务 fail 收尾（error + 中文原因）', async () => {
