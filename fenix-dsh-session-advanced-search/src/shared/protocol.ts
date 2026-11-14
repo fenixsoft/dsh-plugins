@@ -15,6 +15,9 @@
 /** API 路径前缀（design D2：带插件命名空间避免与官方/其它插件路由冲突）。 */
 export const API_PREFIX = '/api/session-advanced-search'
 
+/** 独立高级搜索页 exact 路由（host 注册 serve、client 入口按钮跳转目标）。 */
+export const PAGE_PATH = '/session-advanced-search'
+
 /** 发起分析任务端点。 */
 export const JOBS_PATH = `${API_PREFIX}/jobs`
 

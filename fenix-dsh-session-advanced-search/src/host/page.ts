@@ -28,9 +28,10 @@
  * 实现约束：模板串内不得出现反引号与 ${（页面 JS 全部单引号+拼接），保证
  * TS 模板字面量零转义；所有插值经 esc() 出 HTML。
  */
+import { PAGE_PATH } from '../shared/protocol.js'
 
-/** 页面 exact 路由路径（无尾斜杠；与 API 前缀区分开）。 */
-export const PAGE_ROUTE = '/session-advanced-search'
+/** 页面 exact 路由路径（常量收口在 shared/protocol，client 入口按钮同源引用）。 */
+export const PAGE_ROUTE = PAGE_PATH
 
 /** 页面路由依赖（log 门面；测试桩对账面）。 */
 export interface PageRouteDeps {
