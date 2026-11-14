@@ -246,6 +246,28 @@ describe('rankCandidates 降级矩阵', () => {
     expect(outcome.results[2]?.reason).toContain('最近活跃')
   })
 
+  it('matchedKeywords 贯通：AI 与降级两路候选均带机械命中词（无命中省略）', async () => {
+    const withKw: PrefilteredSession = { ...row('s1', 2), matchedKeywords: ['fenix', '修复'] }
+    const withoutKw = row('s2', 1)
+    const llm = stubLlm(JSON.stringify({ results: [{ id: 's1', reason: 'r', confidence: 0.9 }] }))
+    const ai = await rankCandidates(
+      { llm, agentDefaultModel: ROUTE, log: makeLog(), timeoutMs: 1000, topN: 5 },
+      'q',
+      [withKw, withoutKw],
+      SIGNAL,
+    )
+    expect(ai.results.map((row) => row.sessionId)).toEqual(['s1'])
+    expect(ai.results[0]?.matchedKeywords).toEqual(['fenix', '修复'])
+    const degraded = await rankCandidates(
+      { llm: failingLlm(new Error('x')), agentDefaultModel: ROUTE, log: makeLog(), timeoutMs: 1000, topN: 5 },
+      'q',
+      [withKw, withoutKw],
+      SIGNAL,
+    )
+    expect(degraded.results.find((row) => row.sessionId === 's1')?.matchedKeywords).toEqual(['fenix', '修复'])
+    expect(degraded.results.find((row) => row.sessionId === 's2')?.matchedKeywords).toBeUndefined()
+  })
+
   it('任务取消（外部 signal）→ 中断且不降级不产出', async () => {
     const controller = new AbortController()
     const log = makeLog()

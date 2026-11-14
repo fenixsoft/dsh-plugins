@@ -88,9 +88,10 @@ describe('isSearchCandidate', () => {
     confidence: 0.9,
   }
 
-  it('接受完整候选行与可选 degraded', () => {
+  it('接受完整候选行与可选 degraded/matchedKeywords', () => {
     expect(isSearchCandidate(base)).toBe(true)
     expect(isSearchCandidate({ ...base, degraded: true })).toBe(true)
+    expect(isSearchCandidate({ ...base, matchedKeywords: ['登录', 'fenix'] })).toBe(true)
   })
 
   it('拒绝缺字段/坏类型/越域 confidence', () => {
@@ -99,6 +100,8 @@ describe('isSearchCandidate', () => {
     expect(isSearchCandidate({ ...base, confidence: -0.1 })).toBe(false)
     expect(isSearchCandidate({ ...base, activityTime: Number.NaN })).toBe(false)
     expect(isSearchCandidate({ ...base, degraded: 'yes' })).toBe(false)
+    expect(isSearchCandidate({ ...base, matchedKeywords: '登录' })).toBe(false)
+    expect(isSearchCandidate({ ...base, matchedKeywords: ['登录', 1] })).toBe(false)
     expect(isSearchCandidate(null)).toBe(false)
   })
 })
