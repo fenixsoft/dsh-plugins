@@ -6,13 +6,13 @@ dsh web 会话高级搜索插件（**独立页形态**）：host 半在 `/sessio
 
 界面（页面骨架 / 步骤流 / 降级横幅 / composer 卡）以 `specs/optimize-session-advanced-search/prototype/`（`index.html` + 截图）为真相源。
 
-> 形态沿革：v1 为会话界面注入（搜索框按钮 + 内容区视图），因官方 DOM 缝脆弱且干扰会话输入区，已按需求转向独立页。当前形态：会话界面唯一触碰点 = 官方搜索框旁「高级搜索」入口按钮（点击整页跳转独立页），搜索 UI 全部在独立页（`dsh.client.inject` 为空数组——零服务依赖；`src/client/` 仅保留入口按钮装配）。
+> 形态沿革：v1 会话界面注入（React 内容区视图）→ v2 独立页整页跳转 → 当前 v3：入口按钮开合**内容区 iframe 嵌入**——侧栏/菜单保留，搜索 UI 即独立页本体（iframe 文档隔离，物理上不触碰会话 composer；`dsh.client.inject=[]` 零服务依赖）。
 
 ## 机制
 
 ### 入口（`src/client/index.ts` + `src/client/searchButton.ts`）
 
-会话界面唯一触碰点：官方侧栏搜索框（`input[class*="searchInput"]` 之后）注入「高级搜索」入口按钮（官方 IconSearchOutlineMedium 几何，MutationObserver 持续维护在位）。点击整页跳转独立页 `GET /session-advanced-search`——无覆盖层、不触碰会话 composer；独立页「返回会话」或浏览器后退回到主界面。锚点失配 warn 限流一次并放弃注入（不影响会话界面）。
+会话界面唯一触碰点：官方侧栏搜索框（`input[class*="searchInput"]` 之后）注入「高级搜索」入口按钮（官方 IconSearchOutlineMedium 几何，MutationObserver 持续维护在位）。点击在**内容区**（侧栏相邻兄弟锚点）开合 iframe 嵌入独立页 `GET /session-advanced-search`——侧栏/菜单完全可见可交互；关闭路径三重：页内「返回会话」（同源直调 `parent.__fenixSas.close`）/ 会话切换（selection 快照店订阅主缝 + 侧栏点击捕获兜底）/ Escape（父层与 iframe 内双侧）。关闭仅 display:none（iframe 保活，重开无闪白）；锚失配降级 fixed 抽屉（避让侧栏实测宽度）。锚点失配 warn 限流一次并放弃注入（不影响会话界面）。
 
 ### host 半
 
