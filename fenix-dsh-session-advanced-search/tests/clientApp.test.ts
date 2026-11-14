@@ -5,7 +5,8 @@
  * - 面板挂 document.body（React 重渲染不可达 → iframe 保活 = 重开保留结果）；
  * - 位置取内容区锚点矩形（覆盖内容区避让侧栏）；失配降级抽屉；
  * - __fenixSas：close 收视图 + openSession 服务缝（ctx.uiWorkspace 提供）；
- * - 会话切换收视图（selection 订阅主缝 / 侧栏点击捕获兜底）。
+ * - 会话切换收视图：selection 订阅缝（存在即挂）+ click-away 捕获兜底（恒注册，
+ *   与缝形状解耦——m01846 用户实报「点所有会话都显示搜索页」即缝失效场景）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply, inject } from '../src/client/index.js'
@@ -102,6 +103,36 @@ describe('client 装配（v3.1 body 挂载嵌入）', () => {
     sidebar.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(viewRoot().style.display).toBe('none')
     stop()
+  })
+
+  it('click-away 兜底恒注册：任意非豁免点击即收视图（含 selection 缝在场时）', () => {
+    mountSkeleton()
+    let listener: (() => void) | undefined
+    const subscribe = (fn: () => void): (() => void) => {
+      listener = fn
+      return () => {
+        listener = undefined
+      }
+    }
+    // selection 缝在场（旧实现此时不注册兜底；新实现恒注册）。
+    const stop = apply({ uiWorkspace: { selection: { subscribe } } } as never, { host: window })
+    document.querySelector('button.fenix-sas-entry')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(viewRoot().style.display).toBe('')
+    // 任意位置点击（顶栏/主区/空白）→ 收视图。
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(viewRoot().style.display).toBe('none')
+    // 容器自身点击（滚动条/边框触摸）不收。
+    document.querySelector('button.fenix-sas-entry')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(viewRoot().style.display).toBe('')
+    viewRoot().dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(viewRoot().style.display).toBe('')
+    stop()
+    // 卸载后 click-away 不再收（监听已移除，开视图后 body 点击不关闭）。
+    const stop2 = apply({} as never, { host: window })
+    document.querySelector('button.fenix-sas-entry')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    stop2()
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.querySelector('div[data-fenix-sas-view-root]')).toBeNull()
   })
 
   it('selection 快照店订阅主缝：回调即收视图', () => {

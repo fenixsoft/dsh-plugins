@@ -200,6 +200,34 @@ describe('rankCandidates 降级矩阵', () => {
     expect(log.warns.some((m) => m.includes('调用失败') && m.includes('network down'))).toBe(true)
   })
 
+  it('瞬时调用失败重试一次：第二次成功 → degraded=false（有限重试）', async () => {
+    const log = makeLog()
+    const calls: { user: string }[] = []
+    const valid = JSON.stringify({ results: [{ id: 's1', reason: '命中', confidence: 0.9 }] })
+    let n = 0
+    const flaky = stubLlm((_user: string) => {
+      n += 1
+      if (n === 1) throw new Error('transient 429')
+      return valid
+    }, calls)
+    const outcome = await rankCandidates({ llm: flaky, agentDefaultModel: ROUTE, log, timeoutMs: 1000, topN: 5 }, 'q', CANDIDATES, SIGNAL)
+    expect(outcome.degraded).toBe(false)
+    expect(outcome.results[0]).toMatchObject({ sessionId: 's1' })
+    expect(calls).toHaveLength(2)
+    expect(log.warns.some((m) => m.includes('重试中'))).toBe(true)
+  })
+
+  it('解析失败重试一次仍零行 → parse-failed（重试不无限）', async () => {
+    const log = makeLog()
+    const calls: { user: string }[] = []
+    const garbage = stubLlm(() => '我觉得没有匹配的会话。', calls)
+    const outcome = await rankCandidates({ llm: garbage, agentDefaultModel: ROUTE, log, timeoutMs: 1000, topN: 5 }, 'q', CANDIDATES, SIGNAL)
+    expect(outcome.degraded).toBe(true)
+    expect(outcome.degradedReason).toBe('parse-failed')
+    expect(calls).toHaveLength(2)
+    expect(log.warns.filter((m) => m.includes('解析失败')).length).toBeGreaterThanOrEqual(2)
+  })
+
   it('解析失败（非 JSON/零有效行）→ 机械回退 + 分类 warn（parse-failed）', async () => {
     const log = makeLog()
     const garbage = stubLlm('我觉得没有匹配的会话。')

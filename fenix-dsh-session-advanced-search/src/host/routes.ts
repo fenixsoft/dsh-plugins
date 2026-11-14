@@ -3,6 +3,7 @@
  *
  * 端点（`/api/session-advanced-search` 前缀避免与官方/其它插件路由冲突）：
  *   POST   /api/session-advanced-search/jobs           建任务，立即返回 {jobId}
+ *   GET    /api/session-advanced-search/jobs           任务诊断摘要列表（排障用）
  *   GET    /api/session-advanced-search/jobs/:id       轮询 {phase, results?, degraded?,
  *                                                      degradedReason?, progress?}
  *   DELETE /api/session-advanced-search/jobs/:id       取消（幂等；未知 id 404）
@@ -101,8 +102,15 @@ export function registerSearchRoutes(webServer: WebServerSeam, deps: RouteDeps):
   }
 }
 
-/** 任务集合端点：POST 建任务（立即返回 jobId）；其余方法 405。 */
+/**
+ * 任务集合端点：POST 建任务（立即返回 jobId）；GET 任务诊断摘要列表
+ * （排障观测用，不进页面 UI）；其余方法 405。
+ */
 async function handleJobsCollection(deps: RouteDeps, req: WebRequest, res: WebResponse): Promise<void> {
+  if (req.method === 'GET') {
+    writeJson(res, 200, deps.jobs.list())
+    return
+  }
   if (req.method !== 'POST') {
     writeJson(res, 405, { error: 'method not allowed; use POST' })
     return

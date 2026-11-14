@@ -16,7 +16,7 @@
  *   appendProgress 追加（有界 50 条），GET 快照携带 progress 与
  *   degradedReason（向后兼容可选字段）。
  */
-import type { SearchCandidate, SearchJobStatus, SearchPhase, SearchProgressStep, SearchRequest } from '../shared/protocol.js'
+import type { SearchCandidate, SearchJobStatus, SearchPhase, SearchProgressStep, SearchRequest, SearchJobSummary } from '../shared/protocol.js'
 import { PROGRESS_MAX_STEPS } from '../shared/protocol.js'
 
 /** 终态集合（状态机迁移门）。 */
@@ -217,6 +217,30 @@ export class JobTable {
       ...(job.progress.length > 0 ? { progress: [...job.progress] } : {}),
       message: job.message,
     }
+  }
+
+  /**
+   * 全部任务诊断摘要（GET /jobs 列表；创建时间升序）。不携带 results/progress
+   * 全量载荷——列表仅用于排障观测（「AI 分析仍然会失败」类反馈的现场还原）。
+   */
+  list(now: number = Date.now()): SearchJobSummary[] {
+    this.reclaimTerminalJobs(now)
+    const summaries: SearchJobSummary[] = []
+    for (const job of this.jobs.values()) {
+      const end = job.completedAt ?? now
+      summaries.push({
+        jobId: job.id,
+        phase: job.phase,
+        createdAt: job.createdAt,
+        elapsedMs: Math.max(0, end - job.createdAt),
+        resultCount: job.results?.length ?? 0,
+        ...(job.degraded !== undefined ? { degraded: job.degraded } : {}),
+        ...(job.degradedReason !== undefined ? { degradedReason: job.degradedReason } : {}),
+        ...(job.message !== undefined ? { message: job.message } : {}),
+      })
+    }
+    summaries.sort((a, b) => a.createdAt - b.createdAt)
+    return summaries
   }
 
   /**

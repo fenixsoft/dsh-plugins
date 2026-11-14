@@ -37,6 +37,29 @@ describe('JobTable 多在途并存', () => {
   })
 })
 
+describe('JobTable list（诊断摘要）', () => {
+  it('创建序升序、终态耗时与结果数可见、degraded 字段按需出现', () => {
+    const jobs = new JobTable(seqIds())
+    const a = jobs.create(REQUEST)
+    const b = jobs.create(REQUEST)
+    jobs.setPhase(a.id, 'analyzing')
+    jobs.complete(a.id, RESULTS, false)
+    jobs.fail(b.id, '调用失败')
+    const list = jobs.list()
+    expect(list.map((s) => s.jobId)).toEqual([a.id, b.id])
+    const done = list[0]!
+    expect(done.phase).toBe('done')
+    expect(done.resultCount).toBe(RESULTS.length)
+    expect(done.degraded).toBe(false)
+    expect('degradedReason' in done).toBe(false)
+    expect(done.elapsedMs).toBeGreaterThanOrEqual(0)
+    const failed = list[1]!
+    expect(failed.phase).toBe('error')
+    expect(failed.message).toBe('调用失败')
+    expect(failed.resultCount).toBe(0)
+  })
+})
+
 describe('JobTable 状态机', () => {
   it('按 collecting→filtering→analyzing 顺序推进', () => {
     const jobs = new JobTable(seqIds())

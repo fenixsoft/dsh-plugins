@@ -113,79 +113,107 @@ export async function rankCandidates(
   ].join('')
   const user = buildUserPrompt(query, candidates)
 
-  // 超时硬解耦（design D1）：流消费 promise 与超时 marker 竞速——deadline
-  // 到点 race 必定结算，不依赖底层流闭合。三参与者：
+  // 有限重试（call-failed / parse-failed 各重试一次）：provider 瞬时故障
+  //（429/5xx/网络抖动）与单次坏输出（采样随机性）重试一次即可显著降低
+  // 误降级率；timeout 不重试（重试等价于双倍等待，用户已嫌慢）；取消随时
+  // 即刻让路。attempt 计数同时是重试日志的依据。
+  const MAX_ATTEMPTS = 2
+
+  // 单次调用（超时硬解耦 design D1）：流消费 promise 与超时 marker 竞速——
+  // deadline 到点 race 必定结算，不依赖底层流闭合。三参与者：
   //   streamPromise  流消费（挂 .catch 吸收败者错误防 unhandled rejection）
   //   timeoutPromise deadline abort（定时器到点）→ reject marker
   //   cancelPromise  外部取消（任务 DELETE）→ resolve 哨兵（优先于超时，不降级）
-  const deadline = new AbortController()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    const onDeadlineAbort = () => reject(new TimeoutMarker())
-    if (deadline.signal.aborted) {
-      onDeadlineAbort()
-      return
-    }
-    deadline.signal.addEventListener('abort', onDeadlineAbort, { once: true })
-  })
-  // 超时 marker 的拒绝吸收为哨兵：race 以值结算（胜者判定集中在 race 之后），
-  // 败者的迟到 reject 也被本 catch 消费，无 unhandled rejection。
-  const timeoutSentinel = timeoutPromise.catch(() => 'timeout' as const)
-  let resolveCancel: (() => void) | undefined
-  // 外部取消：置取消哨兵并同步 abort deadline（真实流据此停止底层 HTTP
-  // 调用；挂起 stub 不观察也无妨——取消哨兵已让 race 立即结算）。
-  const onOuterAbort = (): void => {
-    deadline.abort()
-    resolveCancel?.()
-  }
-  const cancelPromise = new Promise<'cancelled'>((resolve) => {
-    resolveCancel = () => resolve('cancelled')
-    if (signal.aborted) resolve('cancelled')
-  })
-  timer = setTimeout(() => deadline.abort(), Math.max(1, deps.timeoutMs))
-  signal.addEventListener('abort', onOuterAbort, { once: true })
-
-  let streamError: { error: unknown } | undefined
-  let settled: { raw: string } | 'timeout' | 'cancelled'
-  try {
-    const streamPromise = streamText(
-      deps.llm,
-      { provider: route.provider, model: route.model, system, user, maxTokens: resolveMaxTokens(candidates.length) },
-      deadline.signal,
-    ).catch((error: unknown) => {
-      // 败者流错误吸收：超时/取消胜出后流 promise 仍可能在后台 reject，
-      // 记账供 race 胜出时分类，绝不外泄为 unhandled rejection。
-      streamError = { error }
-      return ''
+  // 返回 'timeout' | 'cancelled' | { error } | { raw }。
+  const callOnce = async (): Promise<'timeout' | 'cancelled' | { error: unknown } | { raw: string }> => {
+    const deadline = new AbortController()
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      const onDeadlineAbort = () => reject(new TimeoutMarker())
+      if (deadline.signal.aborted) {
+        onDeadlineAbort()
+        return
+      }
+      deadline.signal.addEventListener('abort', onDeadlineAbort, { once: true })
     })
-    settled = await Promise.race([streamPromise.then((raw) => ({ raw })), timeoutSentinel, cancelPromise])
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
-    signal.removeEventListener('abort', onOuterAbort)
+    // 超时 marker 的拒绝吸收为哨兵：race 以值结算（胜者判定集中在 race 之后），
+    // 败者的迟到 reject 也被本 catch 消费，无 unhandled rejection。
+    const timeoutSentinel = timeoutPromise.catch(() => 'timeout' as const)
+    let resolveCancel: (() => void) | undefined
+    // 外部取消：置取消哨兵并同步 abort deadline（真实流据此停止底层 HTTP
+    // 调用；挂起 stub 不观察也无妨——取消哨兵已让 race 立即结算）。
+    const onOuterAbort = (): void => {
+      deadline.abort()
+      resolveCancel?.()
+    }
+    const cancelPromise = new Promise<'cancelled'>((resolve) => {
+      resolveCancel = () => resolve('cancelled')
+      if (signal.aborted) resolve('cancelled')
+    })
+    const timer = setTimeout(() => deadline.abort(), Math.max(1, deps.timeoutMs))
+    signal.addEventListener('abort', onOuterAbort, { once: true })
+    let streamError: { error: unknown } | undefined
+    try {
+      const llm = deps.llm
+      if (llm === undefined || typeof llm.stream !== 'function') return { error: new Error('llm seam missing') }
+      const streamPromise = streamText(
+        llm,
+        { provider: route.provider, model: route.model, system, user, maxTokens: resolveMaxTokens(candidates.length) },
+        deadline.signal,
+      ).catch((error: unknown) => {
+        // 败者流错误吸收：超时/取消胜出后流 promise 仍可能在后台 reject，
+        // 记账供 race 胜出时分类，绝不外泄为 unhandled rejection。
+        streamError = { error }
+        return ''
+      })
+      const raced = await Promise.race([streamPromise.then((raw) => ({ raw })), timeoutSentinel, cancelPromise])
+      // race 胜者为流错误时（非超时/取消路径）：按 call-failed 结算。
+      if (streamError !== undefined && typeof raced === 'object' && 'raw' in raced) return streamError
+      return raced
+    } finally {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onOuterAbort)
+    }
   }
 
-  // 外部取消优先（不降级不产出——取消语义由任务层收尾）；超时次之
-  //（deadline 到点立即降级，不依赖底层流闭合）。
-  if (signal.aborted || settled === 'cancelled') return { results: [], degraded: false, route }
-  if (settled === 'timeout' || deadline.signal.aborted) {
-    return { ...mechanicalFallback(deps, candidates, 'timeout', `LLM 调用超时（${deps.timeoutMs}ms 硬上限）`), route }
-  }
-  if (streamError !== undefined) {
-    return { ...mechanicalFallback(deps, candidates, 'call-failed', `LLM 调用失败：${errorMessage(streamError.error)}`), route }
-  }
-  const raw = settled.raw
+  let attempt = 0
+  while (attempt < MAX_ATTEMPTS) {
+    attempt += 1
+    const settled = await callOnce()
 
-  // 宽容 JSON 解析（对象/顶层数组/备选键名/数值形态容错）+ id 白名单锚定 + topN 截取；
-  // 零有效行回退分类『解析失败』并附原始输出片段（截断 200 字符）辅助诊断。
-  const rows = parseLlmRanking(raw, new Set(candidates.map((row) => row.sessionId)))
-  if (rows.length === 0) {
+    // 外部取消优先（不降级不产出——取消语义由任务层收尾）。
+    if (signal.aborted || settled === 'cancelled') return { results: [], degraded: false, route }
+    // 超时：deadline 到点立即降级，不重试不依赖底层流闭合。
+    if (settled === 'timeout') {
+      return { ...mechanicalFallback(deps, candidates, 'timeout', `LLM 调用超时（${deps.timeoutMs}ms 硬上限）`), route }
+    }
+    if ('error' in settled) {
+      if (attempt < MAX_ATTEMPTS) {
+        deps.log.warn(`session-advanced-search: LLM 调用失败（第 ${attempt} 次，重试中）：${errorMessage(settled.error)}`)
+        continue
+      }
+      return { ...mechanicalFallback(deps, candidates, 'call-failed', `LLM 调用失败：${errorMessage(settled.error)}`), route }
+    }
+    const raw = settled.raw
+
+    // 宽容 JSON 解析（对象/顶层数组/备选键名/数值形态容错）+ id 白名单锚定 + topN 截取；
+    // 零有效行重试一次（坏输出常为采样随机性），仍失败回退分类『解析失败』并
+    // 附原始输出片段（截断 200 字符）辅助诊断。
+    const rows = parseLlmRanking(raw, new Set(candidates.map((row) => row.sessionId)))
+    if (rows.length > 0) {
+      const byId = new Map(candidates.map((row) => [row.sessionId, row]))
+      const results = rows.slice(0, Math.max(1, deps.topN)).map((row) => toCandidate(byId.get(row.id) as PrefilteredSession, row.reason, row.confidence, false))
+      deps.log.debug(`session-advanced-search: LLM 排序完成（${rows.length} 行，取 topN=${deps.topN}，路由 ${route.provider}/${route.model}，第 ${attempt} 次尝试）`)
+      return { results, degraded: false, route }
+    }
+    if (attempt < MAX_ATTEMPTS) {
+      deps.log.warn(`session-advanced-search: LLM 输出解析失败（零有效排名行，第 ${attempt} 次，重试中），原始输出片段：${raw.slice(0, 200)}`)
+      continue
+    }
     deps.log.warn(`session-advanced-search: LLM 输出解析失败（零有效排名行），原始输出片段：${raw.slice(0, 200)}`)
     return { ...mechanicalFallback(deps, candidates, 'parse-failed', 'LLM 输出解析失败（零有效排名行）'), route }
   }
-  const byId = new Map(candidates.map((row) => [row.sessionId, row]))
-  const results = rows.slice(0, Math.max(1, deps.topN)).map((row) => toCandidate(byId.get(row.id) as PrefilteredSession, row.reason, row.confidence, false))
-  deps.log.debug(`session-advanced-search: LLM 排序完成（${rows.length} 行，取 topN=${deps.topN}，路由 ${route.provider}/${route.model}）`)
-  return { results, degraded: false, route }
+  // 循环必经 return（MAX_ATTEMPTS≥1）；此行仅为 TS 控制流收窄。
+  return { ...mechanicalFallback(deps, candidates, 'call-failed', 'LLM 调用失败'), route }
 }
 
 /** 超时 marker（仅作 race 败者信号；错误体不被消费）。 */

@@ -236,24 +236,26 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   }
   winAny.__fenixSas = sasApi
 
-  // 会话切换即收视图（缺陷 a96b3dc 同源策略）：主缝 selection 快照店订阅
-  // （subscribe 不立即回调，装配时初始态不误关）；缝缺失 → document 捕获
-  // 阶段侧栏点击兜底（仅覆盖鼠标路径）。
+  // 会话切换即收视图，双保险：
+  // ① selection 快照店订阅（缝存在即挂；subscribe 不立即回调，初始态不误关）。
+  //    注意：该缝在真实 app 的生效性无法离线证明（m01846 用户仍报「点所有会话
+  //    都显示搜索页」）——故②不再以①缺失为前提，恒注册。
+  // ② click-away 兜底（恒注册，document 捕获阶段）：凡点击不落在本视图容器、
+  //    也不落在入口按钮上，一律收视图。会话切换/顶栏/侧栏任何交互都必然触发，
+  //    与缝形状彻底解耦。
   const disposeSelectionWatch = uiWorkspace?.watchSelectionChange?.(closeView) ?? undefined
-  let disposeSidebarFallback: (() => void) | undefined
-  if (disposeSelectionWatch === undefined) {
-    const onSidebarClick = (event: MouseEvent): void => {
-      const target = event.target
-      if (!(target instanceof Element)) return
-      // 入口按钮本身在侧栏内：捕获阶段先于按钮 handler 执行，需豁免（否则
-      // toggle 语义被破坏：先关后开净效果恒为开）。
-      if (target.closest('button.fenix-sas-entry') !== null) return
-      if (target.closest(SIDEBAR_SELECTOR) !== null) closeView()
-    }
-    win.document.addEventListener('click', onSidebarClick, true)
-    disposeSidebarFallback = (): void => {
-      win.document.removeEventListener('click', onSidebarClick, true)
-    }
+  const onAwayClick = (event: MouseEvent): void => {
+    const target = event.target
+    if (!(target instanceof Element)) return
+    // 入口按钮在侧栏内且捕获先于按钮 handler：豁免，否则 toggle 语义被破坏
+    // （先关后开净效果恒为开）。视图容器内的点击（iframe 触摸/滚动条）不收。
+    if (target.closest('button.fenix-sas-entry') !== null) return
+    if (target.closest('[data-fenix-sas-view-root]') !== null) return
+    closeView()
+  }
+  win.document.addEventListener('click', onAwayClick, true)
+  const disposeSidebarFallback = (): void => {
+    win.document.removeEventListener('click', onAwayClick, true)
   }
 
   // Escape 关闭（iframe 内按键不冒泡到父文档，故父层监听只覆盖父页焦点态；

@@ -99,6 +99,22 @@ export interface SearchJobCreated {
   readonly jobId: string
 }
 
+/**
+ * 任务诊断摘要（GET /jobs 列表载荷；运维/排障用，不进页面 UI）。
+ * phase/degraded/degradedReason 与 SearchJobStatus 同义；elapsedMs 为终态
+ * 任务完成耗时（非终态为至今耗时）。
+ */
+export interface SearchJobSummary {
+  readonly jobId: string
+  readonly phase: SearchPhase
+  readonly createdAt: number
+  readonly elapsedMs: number
+  readonly resultCount: number
+  readonly degraded?: boolean
+  readonly degradedReason?: SearchDegradedReason
+  readonly message?: string
+}
+
 /** 提取请求文本块（未守卫输入）。 */
 function trimQuery(value: unknown): string | undefined {
   return typeof value === 'string' ? value.trim() : undefined

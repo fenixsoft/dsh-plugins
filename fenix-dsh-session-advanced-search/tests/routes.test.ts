@@ -213,10 +213,29 @@ describe('POST /jobs 建任务', () => {
     expect((oversized.json() as { error: string }).error).toContain('exceeds')
   })
 
-  it('集合端点非 POST → 405', async () => {
+  it('集合端点非 POST/GET → 405', async () => {
     const { dispatch } = setup()
-    expect((await dispatch('GET', JOBS_PATH)).status).toBe(405)
     expect((await dispatch('DELETE', JOBS_PATH)).status).toBe(405)
+  })
+
+  it('集合端点 GET → 200 任务诊断摘要列表；未知方法 → 405', async () => {
+    const { jobs, dispatch } = setup()
+    await dispatch('POST', JOBS_PATH, JSON.stringify({ query: '诊断列表' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const list = (await dispatch('GET', JOBS_PATH)).json() as {
+      jobId: string
+      phase: string
+      createdAt: number
+      elapsedMs: number
+      resultCount: number
+    }[]
+    expect(Array.isArray(list)).toBe(true)
+    expect(list).toHaveLength(jobs.list().length)
+    expect(list[0]?.jobId).toBeTruthy()
+    expect(typeof list[0]?.createdAt).toBe('number')
+    expect(typeof list[0]?.elapsedMs).toBe('number')
+    expect(typeof list[0]?.resultCount).toBe('number')
+    expect((await dispatch('PUT', JOBS_PATH)).status).toBe(405)
   })
 
   it('runJob 异常 → 任务 fail 收尾（error + 中文原因）', async () => {
