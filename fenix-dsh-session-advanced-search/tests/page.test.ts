@@ -72,6 +72,15 @@ describe('registerPageRoute（独立高级搜索页）', () => {
     expect(html).toContain(JOBS_PATH)
     expect(html).toContain('dsh.sessions.current')
     expect(html).toContain('degradedReason')
+    // SSE 优先数据面（m01577 闪烁修复）：EventSource + /events 端点 + 轮询兜底。
+    expect(html).toContain('EventSource')
+    expect(html).toContain("/events'");
+    expect(html).toContain('startPolling')
+    // 增量步骤渲染（不再整体 innerHTML 重建）。
+    expect(html).toContain('insertAdjacentHTML')
+    // 跳转服务缝优先（__fenixSas.openSession），localStorage 兜底保留。
+    expect(html).toContain('__fenixSas')
+    expect(html).toContain('openSession')
     expect((res.headers['content-length'] ?? '')).toBe(String(Buffer.byteLength(html)))
     expect(html.length).toBeLessThan(200 * 1024)
   })

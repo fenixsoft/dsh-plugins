@@ -108,6 +108,13 @@ export interface WebRequest {
 export interface WebResponse {
   writeHead(status: number, headers?: Record<string, string>): unknown
   end(body?: Buffer | string): unknown
+  /**
+   * SSE 流式写（真实宿主为 Node ServerResponse；仅 /events 端点消费）。
+   * 可选：宿主类型收窄时（测试桩/异常宿主）缺失则调用方退化为一次性快照。
+   */
+  write?(chunk: string): unknown
+  /** 连接关闭事件（SSE 订阅清理用；可选，理由同上）。 */
+  on?(event: 'close', listener: () => void): unknown
 }
 
 /** 会话持久化 header 的被消费面（安装包 SessionHeader 结构子集）。 */

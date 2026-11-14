@@ -210,3 +210,47 @@ describe('JobTable GET 载荷新字段（optimize 轮 2.5）', () => {
     expect(second[0]?.step).toBe('collecting')
   })
 })
+
+describe('JobTable 变更订阅（SSE 推送面）', () => {
+  it('appendProgress/setPhase/complete/fail/cancel 均以 jobId 触发监听器', () => {
+    const jobs = new JobTable(seqIds())
+    const seen: string[] = []
+    jobs.subscribe((id) => seen.push(id))
+    const job = jobs.create(REQUEST)
+    jobs.appendProgress(job.id, 'collecting', '关键词：登录')
+    jobs.setPhase(job.id, 'filtering')
+    jobs.complete(job.id, RESULTS, false)
+    expect(seen).toEqual([job.id, job.id, job.id])
+    // 终态后 fail/cancel 不再变更 → 不触发。
+    jobs.fail(job.id, 'x')
+    jobs.cancel(job.id)
+    expect(seen).toEqual([job.id, job.id, job.id])
+  })
+
+  it('退订后不再接收；监听器抛错被隔离、写路径不受影响', () => {
+    const jobs = new JobTable(seqIds())
+    const seen: string[] = []
+    const unsubscribe = jobs.subscribe((id) => seen.push(id))
+    const job = jobs.create(REQUEST)
+    jobs.appendProgress(job.id, 'collecting')
+    unsubscribe()
+    unsubscribe() // 幂等
+    jobs.setPhase(job.id, 'filtering')
+    expect(seen).toEqual([job.id])
+    jobs.subscribe(() => {
+      throw new Error('listener boom')
+    })
+    expect(() => jobs.appendProgress(job.id, 'analyzing')).not.toThrow()
+    expect(jobs.get(job.id)?.progress).toHaveLength(2)
+  })
+
+  it('dispose 清空监听器（卸载后无泄漏发射）', () => {
+    const jobs = new JobTable(seqIds())
+    const seen: string[] = []
+    jobs.subscribe((id) => seen.push(id))
+    const job = jobs.create(REQUEST)
+    jobs.dispose()
+    jobs.appendProgress(job.id, 'collecting') // 任务已清，no-op
+    expect(seen).toEqual([])
+  })
+})

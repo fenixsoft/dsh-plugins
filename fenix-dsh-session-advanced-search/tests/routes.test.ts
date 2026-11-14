@@ -4,7 +4,7 @@
  * 400/405/超限）、GET 轮询 phase/results/degraded 可见性、DELETE 取消（幂等/
  * 未知 404）、runJob 异常兜底 fail、注册/卸载对称。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { JOBS_PATH } from '../src/shared/protocol.js'
 import { MAX_BODY_BYTES, registerSearchRoutes } from '../src/host/routes.js'
 import { JobTable } from '../src/host/jobs.js'
@@ -290,5 +290,93 @@ describe('DELETE /jobs/:id 取消', () => {
     expect((await dispatch('DELETE', `${JOBS_PATH}/ghost`)).status).toBe(404)
     expect((await dispatch('POST', `${JOBS_PATH}/job-1`, '{}')).status).toBe(405)
     expect((await dispatch('PUT', `${JOBS_PATH}/job-1`)).status).toBe(405)
+  })
+})
+
+/** SSE 响应记账桩（write/on('close') 面）。 */
+class StreamRes extends FakeRes {
+  readonly chunks: string[] = []
+  private readonly closeListeners: (() => void)[] = []
+
+  write(chunk: string): this {
+    this.chunks.push(chunk)
+    return this
+  }
+
+  on(event: 'close', listener: () => void): this {
+    if (event === 'close') this.closeListeners.push(listener)
+    return this
+  }
+
+  emitClose(): void {
+    for (const listener of [...this.closeListeners]) listener()
+  }
+
+  frames(): string {
+    return this.chunks.join('')
+  }
+}
+
+describe('GET /jobs/:id/events 任务状态 SSE 流', () => {
+  it('连接即推 retry + 快照帧；任务变更即推新帧；close 退订后无泄漏帧', async () => {
+    vi.useFakeTimers()
+    try {
+      const { server, jobs } = (() => {
+        const s = new StubWebServer()
+        let seq = 0
+        const jt = new JobTable(() => `job-${(seq += 1)}`)
+        registerSearchRoutes(s, { jobs: jt, runJob: () => Promise.resolve(), log: { warn: () => {} } })
+        return { server: s, jobs: jt }
+      })()
+      const job = jobs.create({ query: 'q' })
+      const req = new FakeReq('GET', `${JOBS_PATH}/${job.id}/events`)
+      const res = new StreamRes()
+      const handled = server.dispatch(req, res)
+      await handled
+      expect(res.status).toBe(200)
+      expect(res.headers['content-type']).toContain('text/event-stream')
+      expect(res.headers['cache-control']).toBe('no-store')
+      expect(res.chunks[0]).toBe('retry: 3000\n\n')
+      expect(res.chunks[1]).toContain('event: status')
+      expect(res.chunks[1]).toContain('"phase":"collecting"')
+      // 变更 → 新帧（进度追加 + 阶段推进各一帧）。
+      jobs.appendProgress(job.id, 'collecting', '关键词：q')
+      jobs.setPhase(job.id, 'filtering')
+      expect(res.frames().match(/event: status/g)?.length).toBe(3)
+      expect(res.frames()).toContain('"phase":"filtering"')
+      // 其它任务的变更不串流。
+      const other = jobs.create({ query: 'other' })
+      jobs.appendProgress(other.id, 'collecting')
+      expect(res.frames().match(/event: status/g)?.length).toBe(3)
+      // 心跳：15s 一次注释帧。
+      const before = res.chunks.length
+      vi.advanceTimersByTime(15_000)
+      expect(res.chunks.length).toBe(before + 1)
+      expect(res.chunks[res.chunks.length - 1]).toBe(':hb\n\n')
+      // 连接关闭 → 退订 + 停心跳：后续变更不再写帧。
+      res.emitClose()
+      jobs.appendProgress(job.id, 'filtering', '30 候选')
+      vi.advanceTimersByTime(60_000)
+      expect(res.chunks.length).toBe(before + 1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('unknown id → 404 JSON（流模式同样命中 job not found）', async () => {
+    const { dispatch } = setup()
+    const res = await dispatch('GET', `${JOBS_PATH}/ghost/events`)
+    expect(res.status).toBe(404)
+    expect(res.json()).toEqual({ error: 'job not found' })
+  })
+
+  it('宿主响应缺 write/on 面 → 退化为一次性快照 JSON（类型收窄桩/异常宿主自守）', async () => {
+    const { jobs, dispatch } = setup()
+    const created = await dispatch('POST', JOBS_PATH, JSON.stringify({ query: 'q' }))
+    const { jobId } = created.json() as { jobId: string }
+    const res = await dispatch('GET', `${JOBS_PATH}/${jobId}/events`)
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toContain('application/json')
+    expect(res.json()).toMatchObject({ jobId, phase: 'collecting' })
   })
 })

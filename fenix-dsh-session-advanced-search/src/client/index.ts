@@ -1,32 +1,41 @@
 /**
- * fenix-dsh-session-advanced-search client 半装配（内容区嵌入形态）。
+ * fenix-dsh-session-advanced-search client 半装配（内容区嵌入形态 v3.1）。
  *
  * 需求演进（用户指令）：
  *   - m00937「转向独立定制的高级搜索页面，不要再会话界面上修改元素」
  *     → 搜索 UI 收敛为独立页（host 半 exact 路由直出自包含 HTML）；
  *   - m01459「高级搜索的页面应当是嵌入在右侧的内容区域，不能把菜单也占掉了」
- *     → 入口按钮不再整页跳转，而是在**内容区**挂载 iframe 容器嵌入独立页
- *       ——侧栏/菜单完全可见可交互，搜索 UI 与定稿原型逐像素一致（iframe
- *       内即独立页本体），且 iframe 文档隔离保证不触碰会话 composer。
+ *     → 入口按钮开合内容区 iframe 嵌入（侧栏/菜单完全可见可交互）；
+ *   - m01577 修「重新点高级搜索没保留原搜索结果」
+ *     → 容器改挂 **document.body** 固定定位（不再挂进 React 管理的内容区
+ *       节点——React 重渲染会摘除外来子节点，令缓存容器失连成孤儿；body
+ *       挂载点 React 不可达，iframe 天然保活，重开即原样恢复）。位置用内容
+ *       区锚点矩形计算（覆盖内容区、避让侧栏），resize/布局变化时同步。
+ *   - m01577 修「搜索结果点击没有正确跳转到被搜索到的会话」
+ *     → 恢复 v1 的 `ctx.uiWorkspace.openSession(sessionId)` 服务缝（官方侧
+ *       栏搜索结果打开会话同走此缝）：iframe 页点结果卡 → 同源直调
+ *       `parent.__fenixSas.openSession(id)` → 应用内导航（不整页刷新）。
+ *       localStorage + 首页导航（restoreSelection 缝）保留为服务缝缺失时
+ *       的兜底（独立页形态无父级服务，天然走兜底）。
  *
- * 生命周期：按钮点击 → 惰性挂载（判定一次并缓存）+ 显示；关闭路径三重
- *   ① 页内「返回会话」→ window.parent.__fenixSas.close()（同源直调）；
- *   ② 会话切换（selection 快照店订阅主缝 + 侧栏点击捕获兜底）；
- *   ③ Escape 键。
+ * 生命周期：按钮点击 → 惰性挂载（判定一次并缓存）+ 同步位置 + 显示；关闭
+ * 路径三重 ① 页内「返回会话」→ window.parent.__fenixSas.close()（同源直
+ * 调）② 会话切换（selection 快照店订阅主缝 + 侧栏点击捕获兜底）③ Escape。
  * 关闭 = display:none 隐藏容器（iframe 保活，重开无闪白）；卸载对称清理。
  *
  * 模块体经 `window.__ModuleLoader__.load({ id, factory })` 注册（tsdown
  * banner/footer 包装），dsh plugin-manager 消费 `inject` 服务键 + `apply(ctx)`
- * 停止函数。`inject` 为空数组：uiWorkspace 仅机会式探测（跳转缝增强），
- * 非硬依赖。apply 在无 document 环境自守跳过不抛错。
+ * 停止函数。`inject` 声明 uiWorkspace（跳转服务缝）；缝运行期缺失仍自守
+ * （跳转走兜底、切会话收视图走侧栏点击兜底）。apply 在无 document 环境
+ * 自守跳过不抛错。
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { PAGE_PATH } from '../shared/protocol.js'
 import { injectSearchButton, ANCHOR } from './searchButton.js'
 import type { SearchButtonHandle } from './searchButton.js'
 
-/** 本插件消费的 client 服务键：嵌入形态零硬依赖（uiWorkspace 机会式探测）。 */
-export const inject: readonly string[] = []
+/** 本插件消费的 client 服务键（uiWorkspace：openSession 跳转缝 + selection 收视图缝）。 */
+export const inject: readonly string[] = ['uiWorkspace']
 
 /** 侧栏容器锚点（结构化缝：搜索框 input 的最近侧栏祖先；失配降级抽屉）。 */
 const SIDEBAR_SELECTOR = '[class*="sidebar"]'
@@ -36,39 +45,55 @@ interface SelectionStoreWatch {
   subscribe(listener: () => void): () => void
 }
 
+/** uiWorkspace 服务被消费面（均为可选：缝漂移时逐项探测降级）。 */
+interface UiWorkspaceSeam {
+  watchSelectionChange?(listener: () => void): () => void
+  openSession?(sessionId: string): void
+}
+
 /** client 侧日志门面（消息自带插件前缀）。 */
 const log = {
   warn: (message: string) => console.warn(message),
   debug: (message: string) => console.debug(message),
 }
 
-/** uiWorkspace 安全探测（机会式：仅用于会话切换即收视图的主缝增强）。 */
-function resolveUiWorkspace(ctx: Context): { watchSelectionChange?(listener: () => void): () => void } | undefined {
+/** uiWorkspace 安全探测（逐缝独立：selection 订阅与 openSession 互不绑定）。 */
+function resolveUiWorkspace(ctx: Context): UiWorkspaceSeam | undefined {
+  let ui: unknown
   try {
-    const ui: unknown = (ctx as unknown as Record<string, unknown>).uiWorkspace
-    if (ui === null || typeof ui !== 'object') return undefined
-    const selection = (ui as { selection?: unknown }).selection
-    if (selection === null || typeof selection !== 'object') return undefined
+    ui = (ctx as unknown as Record<string, unknown>).uiWorkspace
+  } catch {
+    return undefined
+  }
+  if (ui === null || typeof ui !== 'object') return undefined
+  const seam: UiWorkspaceSeam = {}
+  const source = ui as { selection?: unknown; openSession?: unknown }
+  const selection = source.selection
+  if (selection !== null && typeof selection === 'object') {
     const subscribe = (selection as { subscribe?: unknown }).subscribe
-    if (typeof subscribe !== 'function') return undefined
-    const store = selection as SelectionStoreWatch
-    return {
-      watchSelectionChange: (listener: () => void): (() => void) => {
+    if (typeof subscribe === 'function') {
+      const store = selection as SelectionStoreWatch
+      seam.watchSelectionChange = (listener: () => void): (() => void) => {
         try {
           return subscribe.call(store, listener)
         } catch {
           return () => {}
         }
-      },
+      }
     }
-  } catch {
-    return undefined
   }
+  if (typeof source.openSession === 'function') {
+    const open = source.openSession as (this: unknown, sessionId: string) => void
+    seam.openSession = (sessionId: string): void => {
+      open.call(ui, sessionId)
+    }
+  }
+  return seam.watchSelectionChange !== undefined || seam.openSession !== undefined ? seam : undefined
 }
 
 /**
- * 内容区挂载点判定（首次显示执行一次）：搜索框所在侧栏的相邻兄弟元素视为
- * 内容区；失配返回 undefined（调用方走右侧抽屉降级）。
+ * 内容区锚点判定（结构性：搜索框所在侧栏的相邻兄弟元素）。v3.1 起仅用于
+ * **取位置矩形**（容器挂 body 固定定位），不再作为 DOM 挂载点。
  */
 function resolveContentHost(doc: Document): HTMLElement | undefined {
   const input = doc.querySelector(ANCHOR.inputSelector)
@@ -79,13 +104,34 @@ function resolveContentHost(doc: Document): HTMLElement | undefined {
   return content instanceof HTMLElement ? content : undefined
 }
 
-/** 抽屉容器样式（fixed 右侧、左边界避让侧栏实测宽度；避让失败退 0 全屏宽）。 */
-function drawerStyle(doc: Document): string {
+/**
+ * 嵌入面板定位：优先内容区锚点矩形（left/top/width/height 精确覆盖内容区，
+ * 侧栏与顶栏完全可见）；失配退化为右侧抽屉（left=侧栏实测宽，余全屏）。
+ * @returns 定位样式串 + 观察目标（锚点命中时为内容区元素，供 ResizeObserver）。
+ */
+function panelLayout(doc: Document): { style: string; observe?: Element } {
+  const host = resolveContentHost(doc)
+  if (host !== undefined) {
+    const rect = host.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) {
+      const round = (n: number): number => Math.round(n)
+      return {
+        style:
+          `position:fixed;top:${round(rect.top)}px;left:${round(rect.left)}px;` +
+          `width:${round(rect.width)}px;height:${round(rect.height)}px;z-index:900;` +
+          'background:var(--dsh-bg,#fff);box-shadow:-8px 0 24px rgba(0,0,0,.12);',
+        observe: host,
+      }
+    }
+  }
+  // 抽屉降级：left=侧栏右边界（避让失败退 0 全屏宽）。
   const input = doc.querySelector(ANCHOR.inputSelector)
   const sidebar = input !== null ? input.closest(SIDEBAR_SELECTOR) : null
   const width = sidebar instanceof HTMLElement ? sidebar.getBoundingClientRect().width : 0
   const left = Number.isFinite(width) && width > 0 ? Math.round(width) : 0
-  return `position:fixed;top:0;bottom:0;left:${left}px;right:0;z-index:900;background:var(--dsh-bg,#fff);box-shadow:-8px 0 24px rgba(0,0,0,.12);`
+  return {
+    style: `position:fixed;top:0;left:${left}px;right:0;bottom:0;z-index:900;background:var(--dsh-bg,#fff);box-shadow:-8px 0 24px rgba(0,0,0,.12);`,
+  }
 }
 
 /** 装配选项（host 仅供测试注入；缺省真实 window）。 */
@@ -95,8 +141,8 @@ export interface ClientPluginOptions {
 }
 
 /**
- * client 插件装配体：注入入口按钮 + 内容区 iframe 嵌入独立页。
- * @returns 停止函数（按钮 observer/按钮移除 + 容器清理 + 监听退订）。
+ * client 插件装配体：注入入口按钮 + body 挂载 iframe 嵌入面板（覆盖内容区）。
+ * @returns 停止函数（按钮 observer/按钮移除 + 容器清理 + 监听/观察退订）。
  */
 export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   if (typeof document === 'undefined') {
@@ -106,16 +152,32 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   const win = options?.host ?? window
 
   const uiWorkspace = resolveUiWorkspace(ctx)
-  if (uiWorkspace === undefined) {
+  if (uiWorkspace?.openSession === undefined) {
+    log.debug('fenix-dsh-session-advanced-search: uiWorkspace.openSession 缝不可用，结果卡跳转走 localStorage 兜底')
+  }
+  if (uiWorkspace?.watchSelectionChange === undefined) {
     log.debug('fenix-dsh-session-advanced-search: uiWorkspace selection 缝不可用，会话切换即收视图走侧栏点击兜底')
   }
 
-  // 挂载态（惰性首次显示初始化；判定结果缓存，开合复用同一容器/iframe）。
+  // 挂载态（惰性首次显示初始化；判定结果缓存，开合复用同一容器/iframe——
+  // 状态（上次搜索结果）随之保留，直至整页刷新）。
   let initialized = false
   let open = false
   let container: HTMLDivElement | undefined
   let iframe: HTMLIFrameElement | undefined
-  let drawerWarned = false
+  let observer: ResizeObserver | undefined
+  let layoutWarned = false
+
+  /** 同步面板位置（内容区矩形随窗口/侧栏宽度变化时对齐）。 */
+  const syncPosition = (): void => {
+    if (container === undefined) return
+    const layout = panelLayout(win.document)
+    container.style.cssText = layout.style
+    if (layout.observe !== undefined && typeof ResizeObserver === 'function' && observer === undefined) {
+      observer = new ResizeObserver(syncPosition)
+      observer.observe(layout.observe)
+    }
+  }
 
   const ensureMounted = (): void => {
     if (initialized) return
@@ -129,23 +191,14 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     iframe.title = '高级搜索'
     iframe.style.cssText = 'display:block;width:100%;height:100%;border:none;background:transparent;'
     container.append(iframe)
-
-    const contentHost = resolveContentHost(doc)
-    if (contentHost !== undefined) {
-      // 内容区模式：容器占满内容区（关闭即还原会话视图，无遮罩）。
-      container.style.cssText += 'position:absolute;inset:0;z-index:5;'
-      if (doc.defaultView !== null && doc.defaultView !== undefined && getComputedStyle(contentHost).position === 'static') {
-        contentHost.style.position = 'relative'
-      }
-      contentHost.append(container)
-      log.debug('fenix-dsh-session-advanced-search: 高级搜索视图（iframe）挂载内容区（侧栏相邻兄弟锚点命中）')
-      return
-    }
-    // 抽屉降级：fixed 右侧 + 避让侧栏实测宽度；warn 限流一次。
-    container.style.cssText += drawerStyle(doc)
+    // body 挂载：React 重渲染不可达（内容区挂载会被摘除成孤儿——上一形态
+    // 「重开不保留结果」根因），iframe 状态天然保活。
+    syncPosition()
     doc.body.append(container)
-    if (!drawerWarned) {
-      drawerWarned = true
+    if (layoutWarned) return
+    const anchored = resolveContentHost(doc) !== undefined
+    if (!anchored) {
+      layoutWarned = true
       log.warn(`fenix-dsh-session-advanced-search: 内容区锚点失配（input.closest('${SIDEBAR_SELECTOR}').nextElementSibling 不存在），高级搜索视图降级右侧抽屉；官方 UI 升级后请按 README「已知限制」修缝`)
     }
   }
@@ -153,6 +206,7 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   const showView = (): void => {
     ensureMounted()
     open = true
+    syncPosition()
     if (container !== undefined) container.style.display = ''
   }
 
@@ -162,9 +216,25 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     if (container !== undefined) container.style.display = 'none'
   }
 
-  // 页内嵌沟通缝：iframe 独立页「返回会话」按钮经同源直调关闭视图。
+  /** 会话跳转服务缝：uiWorkspace.openSession（官方「搜索结果打开会话」同缝）。 */
+  const openSessionViaService = uiWorkspace?.openSession
+
+  // 页内嵌沟通缝：iframe 独立页「返回会话」→ close；结果卡点击 →
+  // openSession（应用内导航；服务缝缺失不暴露，页面走 localStorage 兜底）。
   const winAny = win as unknown as Record<string, unknown>
-  winAny.__fenixSas = { close: closeView }
+  const sasApi: { close: () => void; openSession?: (sessionId: string) => void } = { close: closeView }
+  if (openSessionViaService !== undefined) {
+    sasApi.openSession = (sessionId: string): void => {
+      try {
+        openSessionViaService(sessionId)
+        closeView()
+      } catch (error) {
+        log.warn(`fenix-dsh-session-advanced-search: uiWorkspace.openSession 打开会话 ${sessionId} 抛错，交由页面兜底路径：${error instanceof Error ? error.message : String(error)}`)
+        throw error
+      }
+    }
+  }
+  winAny.__fenixSas = sasApi
 
   // 会话切换即收视图（缺陷 a96b3dc 同源策略）：主缝 selection 快照店订阅
   // （subscribe 不立即回调，装配时初始态不误关）；缝缺失 → document 捕获
@@ -203,11 +273,19 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     },
   })
 
+  // 窗口尺寸变化时重对齐（面板 fixed 定位不随文档流）。
+  const onResize = (): void => {
+    if (open) syncPosition()
+  }
+  win.addEventListener?.('resize', onResize)
+
   return () => {
     button.dispose()
+    observer?.disconnect()
     disposeSelectionWatch?.()
     disposeSidebarFallback?.()
     win.document.removeEventListener('keydown', onKeyDown, true)
+    win.removeEventListener?.('resize', onResize)
     delete winAny.__fenixSas
     container?.remove()
   }

@@ -49,6 +49,9 @@ export interface SearchJob {
   message?: string
 }
 
+/** 任务变更监听器（SSE 推送用；参数为发生变更任务的 jobId）。 */
+export type JobChangeListener = (jobId: string) => void
+
 /** 取消结果：missing=任务不存在；noop=已终态（幂等）；cancelled=本次取消。 */
 export type CancelOutcome = 'missing' | 'noop' | 'cancelled'
 
@@ -64,8 +67,32 @@ export type JobIdGenerator = () => string
 /** 进程内任务表。 */
 export class JobTable {
   private readonly jobs = new Map<string, JobRecord>()
+  /** 变更监听器（SSE 订阅；发射失败隔离，不影响写路径）。 */
+  private readonly listeners = new Set<JobChangeListener>()
 
   constructor(private readonly nextId: JobIdGenerator = defaultJobId) {}
+
+  /**
+   * 订阅任务变更（appendProgress/setPhase/complete/fail/cancel 触发）。
+   * @returns 退订函数（幂等，重复调用安全）。
+   */
+  subscribe(listener: JobChangeListener): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  /** 广播变更（监听器异常逐一吞掉并 warn 一次语义交由调用方日志；写路径永不被打断）。 */
+  private emit(jobId: string): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(jobId)
+      } catch {
+        /* 监听器异常隔离：SSE 断连竞态等不影响任务管线。 */
+      }
+    }
+  }
 
   /**
    * 新建任务（立即返回，不动任何既有任务——多在途并存）。
@@ -102,6 +129,7 @@ export class JobTable {
     if (job.progress.length > PROGRESS_MAX_STEPS) {
       job.progress.splice(0, job.progress.length - PROGRESS_MAX_STEPS)
     }
+    this.emit(id)
   }
 
   /** 当前在途（非终态）任务数（可观测）。 */
@@ -123,6 +151,7 @@ export class JobTable {
     // 非法迁移（终态目标 / 回退 / 跳级）：no-op，调用方异常路径各自走 fail()。
     if (to < 0 || to !== from + 1) return 'noop'
     job.phase = phase
+    this.emit(id)
     return 'advanced'
   }
 
@@ -140,6 +169,7 @@ export class JobTable {
     job.results = results
     job.degraded = degraded
     if (degraded && degradedReason !== undefined) job.degradedReason = degradedReason
+    this.emit(id)
     return true
   }
 
@@ -154,6 +184,7 @@ export class JobTable {
     job.phase = 'error'
     job.completedAt = Date.now()
     job.message = message
+    this.emit(id)
     return true
   }
 
@@ -168,6 +199,7 @@ export class JobTable {
     job.phase = 'cancelled'
     job.completedAt = Date.now()
     job.controller.abort()
+    this.emit(id)
     return 'cancelled'
   }
 
@@ -207,7 +239,7 @@ export class JobTable {
     }
   }
 
-  /** 装卸载清理：abort 全部在途任务并清表（注册/卸载对称）。 */
+  /** 装卸载清理：abort 全部在途任务并清表（注册/卸载对称）；SSE 订阅一并清空。 */
   dispose(): void {
     for (const job of this.jobs.values()) {
       if (!TERMINAL_PHASES.includes(job.phase)) {
@@ -216,6 +248,7 @@ export class JobTable {
       }
     }
     this.jobs.clear()
+    this.listeners.clear()
   }
 }
 

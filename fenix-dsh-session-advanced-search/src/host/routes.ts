@@ -2,10 +2,12 @@
  * host 半 HTTP 路由（design D2，webServer.register 同源 API）。
  *
  * 端点（`/api/session-advanced-search` 前缀避免与官方/其它插件路由冲突）：
- *   POST   /api/session-advanced-search/jobs        建任务，立即返回 {jobId}
- *   GET    /api/session-advanced-search/jobs/:id    轮询 {phase, results?, degraded?,
- *                                                   degradedReason?, progress?}
- *   DELETE /api/session-advanced-search/jobs/:id    取消（幂等；未知 id 404）
+ *   POST   /api/session-advanced-search/jobs           建任务，立即返回 {jobId}
+ *   GET    /api/session-advanced-search/jobs/:id       轮询 {phase, results?, degraded?,
+ *                                                      degradedReason?, progress?}
+ *   DELETE /api/session-advanced-search/jobs/:id       取消（幂等；未知 id 404）
+ *   GET    /api/session-advanced-search/jobs/:id/events 任务状态 SSE 流（连接即推
+ *                                                      快照，变更即推全量帧）
  *
  * GET 轮询载荷为向后兼容扩展：`degradedReason`（降级原因分类）与 `progress`
  * （过程步骤流，client 守卫 parseJobStatus 按形状校验后放行）均为可选字段，
@@ -35,6 +37,12 @@ const BODY_READ_TIMEOUT_MS = 30_000
 
 /** 动态任务端点的 id 提取（prefix 座位收到完整路径）。 */
 const JOB_ID_PATTERN = /\/api\/session-advanced-search\/jobs\/([^/?#]+)/
+
+/** SSE 流端点（GET /jobs/:id/events；id 后必须紧跟 /events 收尾）。 */
+const JOB_STREAM_PATTERN = /\/api\/session-advanced-search\/jobs\/([^/?#]+)\/events(?:[/?#].*)?$/
+
+/** SSE 心跳间隔（保活穿透代理空闲超时；纯注释帧客户端自动忽略）。 */
+const STREAM_HEARTBEAT_MS = 15_000
 
 /** 路由层依赖（host 装配注入；测试用桩对账）。 */
 export interface RouteDeps {
@@ -121,9 +129,19 @@ async function handleJobsCollection(deps: RouteDeps, req: WebRequest, res: WebRe
   })
 }
 
-/** 单任务端点：GET 轮询 / DELETE 取消；未知 id 404。 */
+/** 单任务端点：GET 轮询（/events 后缀转 SSE 流）/ DELETE 取消；未知 id 404。 */
 function handleJobItem(deps: RouteDeps, req: WebRequest, res: WebResponse): void {
   const url = typeof req.url === 'string' ? req.url : ''
+  const streamMatch = JOB_STREAM_PATTERN.exec(url)
+  if (streamMatch !== null) {
+    const streamJobId = streamMatch[1]
+    if (streamJobId === undefined || streamJobId.length === 0) {
+      writeJson(res, 404, { error: 'job not found' })
+      return
+    }
+    handleJobStream(deps, streamJobId, res)
+    return
+  }
   const match = JOB_ID_PATTERN.exec(url)
   const jobId = match?.[1]
   if (jobId === undefined || jobId.length === 0) {
@@ -150,6 +168,80 @@ function handleJobItem(deps: RouteDeps, req: WebRequest, res: WebResponse): void
     return
   }
   writeJson(res, 405, { error: 'method not allowed; use GET or DELETE' })
+}
+
+/**
+ * SSE 任务状态流（GET /jobs/:id/events）：连接即推当前快照，此后任务每次
+ * 变更（进度追加/阶段推进/终态收尾）推一帧 `event: status` 全量 JSON——
+ * 页面按帧渲染替代 700ms 轮询（用户反馈：过程记录轮询刷新闪烁）。
+ *
+ * 生命周期：unknown id 404 JSON；宿主缺 write/on（类型收窄的测试桩/异常
+ * 宿主）退化为一次性快照 JSON；连接 close 时退订监听并停心跳（注册/清理
+ * 对称，杜绝监听器泄漏）。心跳 `:hb` 15s 保活穿透代理空闲超时；任务表
+ * 惰性回收后快照 undefined → 服务端主动 end（客户端 EventSource 自然
+ * onerror，此时任务早已终态渲染完成，无副作用）。
+ */
+function handleJobStream(deps: RouteDeps, jobId: string, res: WebResponse): void {
+  if (typeof res.write !== 'function' || typeof res.on !== 'function') {
+    // 流式面缺失：退化为一次性快照（客户端 onerror 后自行转轮询兜底）。
+    const status = deps.jobs.status(jobId)
+    if (status === undefined) {
+      writeJson(res, 404, { error: 'job not found' })
+      return
+    }
+    writeJson(res, 200, status satisfies SearchJobStatus)
+    return
+  }
+  const initial = deps.jobs.status(jobId)
+  if (initial === undefined) {
+    writeJson(res, 404, { error: 'job not found' })
+    return
+  }
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+    // 置信提示反代禁缓冲（nginx X-Accel-Buffering 惯例；直连场景无副作用）。
+    'x-accel-buffering': 'no',
+  })
+  // 收窄后的写面（守卫已过；局部捕获令 TS 确认非可选，闭包内免重复判型）。
+  const writeRaw = res.write.bind(res) as (chunk: string) => unknown
+  const write = (chunk: string): void => {
+    try {
+      writeRaw(chunk)
+    } catch {
+      /* 连接竞态：写失败按断连处理（close 事件随后清理）。 */
+    }
+  }
+  // 清理面（先声明后赋值，规避 sendFrame 首帧路径的 TDZ 竞态）。
+  let cleaned = false
+  let unsubscribe: () => void = () => {}
+  let heartbeat: ReturnType<typeof setInterval> | undefined
+  const cleanup = (): void => {
+    if (cleaned) return
+    cleaned = true
+    if (heartbeat !== undefined) clearInterval(heartbeat)
+    unsubscribe()
+  }
+  const sendFrame = (): void => {
+    const status = deps.jobs.status(jobId)
+    if (status === undefined) {
+      // 任务已被惰性回收：终结流（客户端终态早已渲染，重连无意义）。
+      cleanup()
+      res.end()
+      return
+    }
+    write(`event: status\ndata: ${JSON.stringify(status satisfies SearchJobStatus)}\n\n`)
+  }
+  write('retry: 3000\n\n')
+  sendFrame()
+  unsubscribe = deps.jobs.subscribe((changed) => {
+    if (changed === jobId) sendFrame()
+  })
+  heartbeat = setInterval(() => {
+    write(':hb\n\n')
+  }, STREAM_HEARTBEAT_MS)
+  res.on('close', cleanup)
 }
 
 /** 读取请求体（字节上限；超限/流错误/读取超时抛错由调用方 400）。 */

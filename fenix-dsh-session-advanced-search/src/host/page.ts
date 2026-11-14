@@ -371,6 +371,7 @@ async function api(method, path, body) {
 function stopTimers() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  stopStatusStream();
 }
 
 function renderAiPanel() {
@@ -398,26 +399,44 @@ function stepHTML(icon, l1, l2, cls, at) {
     + time + '</span></div>';
 }
 
-/* 按 host 推进点顺序重放 progress[]：已推进的 ok，最后一格 run（终态前）。 */
+/* 按 host 推进点顺序渲染 progress[]：**增量协调**——已有行原位更新（类名/
+   图标/标题/detail），仅新增行追加 DOM，绝不整体重建（整体 innerHTML 重建
+   会重启 spinner CSS 动画 = 用户反馈的过程记录闪烁）。行与 progress 条目
+   按下标一一对应（appendProgress 只追加不回写）。 */
 function renderProgress(progress, finished, failed) {
   var steps = $('#aiSteps');
   if (!steps) return;
-  var html = '';
+  while (steps.children.length > progress.length) steps.removeChild(steps.lastChild);
   for (var i = 0; i < progress.length; i++) {
     var p = progress[i];
-    var title = STEP_TITLES[p.step] || p.step;
     var isLast = i === progress.length - 1;
-    var cls = 'ok';
-    var icon = ICONS.check;
-    if (!finished && !failed && isLast) { cls = 'run'; icon = ICONS.spinner; }
-    if (failed && isLast) { cls = 'fail'; icon = ICONS.x; }
-    var detail = p.detail ? esc(p.detail) : '';
-    if (p.step === 'analyzing' && !finished && !failed && isLast) {
+    var inFlight = !finished && !failed && isLast;
+    var failing = failed && isLast;
+    var title = STEP_TITLES[p.step] || p.step;
+    var cls = failing ? 'fail' : (inFlight ? 'run' : 'ok');
+    var icon = failing ? ICONS.x : (inFlight ? ICONS.spinner : ICONS.check);
+    if (p.step === 'analyzing' && inFlight) {
       title = '调用 AI 语义分析<span class="streaming-dots"><i></i><i></i><i></i></span>';
     }
-    html += stepHTML(icon, title, detail, cls, p.at);
+    var detail = p.detail ? esc(p.detail) : '';
+    var row = steps.children[i];
+    if (!row) {
+      steps.insertAdjacentHTML('beforeend', stepHTML(icon, title, detail, cls, p.at));
+      continue;
+    }
+    /* 原位同步：仅变更字段落 DOM（比较后写，避免无谓重排/动画重启）。 */
+    var wantCls = 'step ' + cls;
+    if (row.className !== wantCls) row.className = wantCls;
+    var ic = row.querySelector('.st-ic');
+    if (ic && ic.innerHTML !== icon) ic.innerHTML = icon;
+    var l1 = row.querySelector('.st-l1');
+    if (l1 && l1.innerHTML !== title) l1.innerHTML = title;
+    var l2 = row.querySelector('.st-l2');
+    if (detail) {
+      if (l2) { if (l2.innerHTML !== detail) l2.innerHTML = detail; }
+      else row.querySelector('.st-body').insertAdjacentHTML('beforeend', '<span class="st-l2">' + detail + '</span>');
+    }
   }
-  steps.innerHTML = html;
   renderedSteps = progress.length;
   var pct = finished ? 100 : Math.min(12 + progress.length * 22, 90);
   var bar = $('#aiProgress');
@@ -480,12 +499,19 @@ function degradeBannerHTML(reason) {
     + actions + '</div></div>';
 }
 
-/* ===== 跳回会话：localStorage dsh.sessions.current + '/'（restoreSelection 缝）===== */
-/* 嵌入形态（iframe）：同源共享 localStorage；导航目标取父窗口——结果卡点击
-   让父级应用整页恢复并打开目标会话。独立页形态 window.self===window.top，
-   行为不变。 */
+/* ===== 跳回会话：父级 uiWorkspace.openSession 服务缝优先 ===== */
+/* 嵌入形态（iframe）：同源直调父级 window.__fenixSas.openSession(sessionId)
+   ——由 client 半从 ctx.uiWorkspace 服务解析（官方侧栏搜索结果打开会话同走
+   此缝），应用内导航、不整页刷新、跨工作区由服务内部处理。服务缝缺失（独立
+   页/异常宿主）退化为 localStorage dsh.sessions.current + 首页导航
+   （restoreSelection 缝）。 */
 function parentWin() { return (window.self !== window.top) ? window.parent : window; }
 function jumpToSession(sessionId) {
+  var w = parentWin();
+  var api = w && w.__fenixSas;
+  if (api && typeof api.openSession === 'function') {
+    try { api.openSession(sessionId); return; } catch (e) { /* 服务缝抛错走兜底 */ }
+  }
   try { localStorage.setItem('dsh.sessions.current', JSON.stringify({ sessionId: sessionId })); } catch (e) { /* 存储不可用时仍跳首页 */ }
   parentWin().location.href = '/';
 }
@@ -507,6 +533,7 @@ async function runSearch(query) {
   logs = [];
   detailOpen = false;
   renderedSteps = 0;
+  lastStatusJson = '';
   $('#initialState').style.display = 'none';
   $('#runBtn').disabled = true;
   var area = $('#dynamicArea');
@@ -530,50 +557,97 @@ async function runSearch(query) {
       if (d) d.style.display = detailOpen ? 'block' : 'none';
     });
 
-    var pollFailCount = 0;
-    var poll = async function () {
-      if (token !== runToken) return;
-      var status;
-      try {
-        status = await api('GET', API + '/' + encodeURIComponent(jobId));
-        pollFailCount = 0;
-      } catch (err) {
-        if (token !== runToken) return;
-        /* 轮询容错：连续 2 次失败才判失败（与 client 半同策略） */
-        pollFailCount++;
-        if (pollFailCount <= 2 && !(err && err.authRequired)) return;
-        stopTimers();
-        finishFail(err);
-        return;
-      }
-      if (token !== runToken || !status) return;
-      var progress = Array.isArray(status.progress) ? status.progress : [];
-      if (progress.length !== renderedSteps) {
-        var newSteps = progress.slice(renderedSteps);
-        for (var i = 0; i < newSteps.length; i++) logs.push({ text: newSteps[i].step + (newSteps[i].detail ? ': ' + newSteps[i].detail : '') });
-        if (detailOpen) renderLogs();
-      }
-      var phase = status.phase;
-      if (phase === 'done') {
-        stopTimers();
-        finishDone(status, token);
-      } else if (phase === 'error') {
-        stopTimers();
-        finishFail(new Error(status.message || '搜索失败'));
-      } else if (phase === 'cancelled') {
-        stopTimers();
-        finishCancelled();
-      } else {
-        renderProgress(progress, false, false);
-      }
-    };
-    pollTimer = setInterval(poll, 700);
-    await poll();
+    /* SSE 优先（用户反馈：轮询刷新令过程记录闪烁）——任务变更即推帧，有新
+       内容才更新；EventSource 不可用/连接失败退化为 700ms 轮询兜底。 */
+    startStatusStream(jobId, token);
   } catch (err) {
     if (token !== runToken) return;
     stopTimers();
     finishFail(err);
   }
+}
+
+/* ===== 状态接收（SSE 帧与轮询共用）：去重 + 单点渲染分派 ===== */
+var lastStatusJson = '';
+function handleStatus(status, token) {
+  if (token !== runToken || !status) return;
+  var json = JSON.stringify(status);
+  if (json === lastStatusJson) return;   /* 重复帧/相同轮询载荷：跳过渲染 */
+  lastStatusJson = json;
+  var progress = Array.isArray(status.progress) ? status.progress : [];
+  if (progress.length !== renderedSteps) {
+    var newSteps = progress.slice(renderedSteps);
+    for (var i = 0; i < newSteps.length; i++) logs.push({ text: newSteps[i].step + (newSteps[i].detail ? ': ' + newSteps[i].detail : '') });
+    if (detailOpen) renderLogs();
+  }
+  var phase = status.phase;
+  if (phase === 'done') {
+    stopStatusStream();
+    stopTimers();
+    finishDone(status, token);
+  } else if (phase === 'error') {
+    stopStatusStream();
+    stopTimers();
+    finishFail(new Error(status.message || '搜索失败'));
+  } else if (phase === 'cancelled') {
+    stopStatusStream();
+    stopTimers();
+    finishCancelled();
+  } else {
+    renderProgress(progress, false, false);
+  }
+}
+
+/* ===== SSE 状态流（/jobs/:id/events；失败退化轮询）===== */
+var statusSource = null;
+function stopStatusStream() {
+  if (statusSource) { try { statusSource.close(); } catch (e) { /* 已关闭 */ } statusSource = null; }
+}
+function startStatusStream(id, token) {
+  /* 不在此处 stopTimers：调用方 runSearch 入口已清理旧计时器/旧流；此处再清
+     会误杀刚启动的计时 pill（elapsedTimer）——真实缺陷，勿回加。 */
+  if (typeof EventSource !== 'function') { startPolling(id, token); return; }
+  var es;
+  try { es = new EventSource(API + '/' + encodeURIComponent(id) + '/events'); } catch (e) { startPolling(id, token); return; }
+  statusSource = es;
+  var failed = false;
+  es.addEventListener('status', function (ev) {
+    if (token !== runToken) { stopStatusStream(); return; }
+    var data = null;
+    try { data = JSON.parse(ev.data); } catch (e) { data = null; }
+    handleStatus(data, token);
+  });
+  es.onerror = function () {
+    /* 流断开：终态早已渲染（handleStatus 终态先停流）则忽略；非终态断连
+       （代理空闲/网络抖动）转轮询兜底，去重逻辑保证无闪烁。 */
+    if (token !== runToken) return;
+    failed = true;
+    stopStatusStream();
+    startPolling(id, token);
+  };
+}
+async function startPolling(id, token) {
+  if (token !== runToken) return;
+  var pollFailCount = 0;
+  var poll = async function () {
+    if (token !== runToken) return;
+    var status;
+    try {
+      status = await api('GET', API + '/' + encodeURIComponent(id));
+      pollFailCount = 0;
+    } catch (err) {
+      if (token !== runToken) return;
+      /* 轮询容错：连续 2 次失败才判失败（与 client 半同策略） */
+      pollFailCount++;
+      if (pollFailCount <= 2 && !(err && err.authRequired)) return;
+      stopTimers();
+      finishFail(err);
+      return;
+    }
+    handleStatus(status, token);
+  };
+  pollTimer = setInterval(poll, 700);
+  await poll();
 }
 
 function finishDone(status, token) {

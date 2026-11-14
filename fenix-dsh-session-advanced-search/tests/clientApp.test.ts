@@ -1,99 +1,145 @@
 /**
  * @vitest-environment jsdom
  *
- * client 半装配测试（独立页形态）：入口按钮注入 + 点击跳转独立页。
- * （旧内容区视图/跳转缝测试随 searchView/jump 删除一起移除——独立页形态
- * 会话界面唯一触碰点是入口按钮。）
+ * client 半装配测试（v3.1 body 挂载嵌入形态）：
+ * - 面板挂 document.body（React 重渲染不可达 → iframe 保活 = 重开保留结果）；
+ * - 位置取内容区锚点矩形（覆盖内容区避让侧栏）；失配降级抽屉；
+ * - __fenixSas：close 收视图 + openSession 服务缝（ctx.uiWorkspace 提供）；
+ * - 会话切换收视图（selection 订阅主缝 / 侧栏点击捕获兜底）。
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply, inject } from '../src/client/index.js'
 import { PAGE_PATH } from '../src/shared/protocol.js'
 
-function ctx(): unknown {
-  return {}
+/** 标准侧栏/内容区骨架（锚点命中）。 */
+function mountSkeleton(): { sidebar: HTMLElement; content: HTMLElement } {
+  const input = document.createElement('input')
+  input.className = 'abc_searchInput'
+  const sidebar = document.createElement('div')
+  sidebar.className = 'abc_sidebar'
+  const content = document.createElement('div')
+  sidebar.append(input)
+  document.body.append(sidebar, content)
+  return { sidebar, content }
+}
+
+function sasApi(): { close(): void; openSession?(id: string): void } {
+  return (window as unknown as Record<string, unknown>).__fenixSas as never
+}
+
+function viewRoot(): HTMLElement {
+  return document.querySelector('div[data-fenix-sas-view-root]') as HTMLElement
 }
 
 afterEach(() => {
   document.body.innerHTML = ''
+  vi.restoreAllMocks()
 })
 
-describe('client 装配（独立页形态）', () => {
-  it('inject 为空：独立页形态零服务依赖', () => {
-    expect(inject).toEqual([])
+describe('client 装配（v3.1 body 挂载嵌入）', () => {
+  it('inject 声明 uiWorkspace（openSession 跳转缝 + selection 收视图缝）', () => {
+    expect(inject).toEqual(['uiWorkspace'])
   })
 
-  it('apply 注入入口按钮，点击在内容区挂 iframe 并显示，再点收起；卸载清理', () => {
-    const input = document.createElement('input')
-    input.className = 'abc_searchInput'
-    const sidebar = document.createElement('div')
-    sidebar.className = 'abc_sidebar'
-    const content = document.createElement('div')
-    sidebar.append(input)
-    document.body.append(sidebar, content)
+  it('点击挂 body 固定面板（不在内容区节点内）并显示，再点收起；iframe 保活', () => {
+    mountSkeleton()
     const stop = apply({} as never, { host: window })
     const button = document.querySelector('button.fenix-sas-entry')
     expect(button).not.toBeNull()
-    // 首次点击：惰性挂载 + 显示。
     button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    const root = content.querySelector('div[data-fenix-sas-view-root]') as HTMLElement | null
+    const root = viewRoot()
     expect(root).not.toBeNull()
-    expect(root!.style.display).toBe('')
-    const iframe = root!.querySelector('iframe')
+    expect(root.parentElement).toBe(document.body)
+    expect(root.style.display).toBe('')
+    expect(root.style.position).toBe('fixed')
+    const iframe = root.querySelector('iframe')
     expect(iframe?.getAttribute('src')).toBe(PAGE_PATH)
-    expect((window as unknown as Record<string, unknown>).__fenixSas).toBeDefined()
-    // 再点收起（iframe 保活）。
+    expect(sasApi()).toBeDefined()
+    // 再点收起（iframe 仍在 DOM = 保活）。
     button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(root!.style.display).toBe('none')
+    expect(root.style.display).toBe('none')
+    expect(root.isConnected).toBe(true)
+    expect(root.querySelector('iframe')).not.toBeNull()
     // __fenixSas.close 同源缝复现关闭。
     button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    ;((window as unknown as Record<string, unknown>).__fenixSas as { close(): void }).close()
-    expect(root!.style.display).toBe('none')
-    // 卸载清理。
+    sasApi().close()
+    expect(root.style.display).toBe('none')
     stop()
-    expect(content.querySelector('div[data-fenix-sas-view-root]')).toBeNull()
+    expect(document.querySelector('div[data-fenix-sas-view-root]')).toBeNull()
     expect((window as unknown as Record<string, unknown>).__fenixSas).toBeUndefined()
   })
 
-  it('会话切换（侧栏点击捕获兜底）即收视图', () => {
-    const input = document.createElement('input')
-    input.className = 'abc_searchInput'
-    const sidebar = document.createElement('div')
-    sidebar.className = 'abc_sidebar'
-    const content = document.createElement('div')
-    sidebar.append(input)
-    document.body.append(sidebar, content)
+  it('ctx.uiWorkspace 提供 openSession 时暴露 __fenixSas.openSession（先开话后收面板）', () => {
+    mountSkeleton()
+    const openSession = vi.fn()
+    const stop = apply({ uiWorkspace: { openSession, selection: {} } } as never, { host: window })
+    document.querySelector('button.fenix-sas-entry')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(viewRoot().style.display).toBe('')
+    sasApi().openSession!('sess-9')
+    expect(openSession).toHaveBeenCalledWith('sess-9')
+    expect(viewRoot().style.display).toBe('none')
+    // 服务缝抛错：透传给页面（页面走 localStorage 兜底），不吞错。
+    const boom = vi.fn(() => {
+      throw new Error('boom')
+    })
+    stop()
+    const stop2 = apply({ uiWorkspace: { openSession: boom } } as never, { host: window })
+    expect(() => sasApi().openSession!('sess-x')).toThrow('boom')
+    expect(boom).toHaveBeenCalledWith('sess-x')
+    stop2()
+  })
+
+  it('uiWorkspace 缺失：openSession 不暴露（页面走兜底），侧栏点击兜底收视图仍生效', () => {
+    const { sidebar } = mountSkeleton()
     const stop = apply({} as never, { host: window })
-    const button = document.querySelector('button.fenix-sas-entry')!
-    button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    const root = content.querySelector('div[data-fenix-sas-view-root]') as HTMLElement
-    expect(root.style.display).toBe('')
-    // 侧栏内点击 → 关闭；内容区点击不受影响。
+    expect(sasApi().openSession).toBeUndefined()
+    document.querySelector('button.fenix-sas-entry')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(viewRoot().style.display).toBe('')
+    // 侧栏内点击 → 关闭；入口按钮豁免（toggle 语义不被兜底破坏）。
     sidebar.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(root.style.display).toBe('none')
-    button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    content.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(root.style.display).toBe('')
+    expect(viewRoot().style.display).toBe('none')
+    document.querySelector('button.fenix-sas-entry')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    sidebar.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(viewRoot().style.display).toBe('none')
     stop()
   })
 
-  it('内容区锚失配 → 降级 fixed 抽屉挂 body', () => {
+  it('selection 快照店订阅主缝：回调即收视图', () => {
+    mountSkeleton()
+    let listener: (() => void) | undefined
+    const subscribe = (fn: () => void): (() => void) => {
+      listener = fn
+      return () => {
+        listener = undefined
+      }
+    }
+    const stop = apply({ uiWorkspace: { selection: { subscribe } } } as never, { host: window })
+    document.querySelector('button.fenix-sas-entry')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(viewRoot().style.display).toBe('')
+    listener!()
+    expect(viewRoot().style.display).toBe('none')
+    stop()
+    expect(listener).toBeUndefined()
+  })
+
+  it('内容区锚失配 → 抽屉降级（left=0 全屏宽）；有侧栏则避让侧栏宽度', () => {
     const input = document.createElement('input')
     input.className = 'abc_searchInput'
-    document.body.append(input) // 无侧栏祖先 → closest 失配
+    document.body.append(input) // 无侧栏祖先 → 锚点失配
     const stop = apply({} as never, { host: window })
     document.querySelector('button.fenix-sas-entry')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    const root = document.body.querySelector('div[data-fenix-sas-view-root]') as HTMLElement
-    expect(root).not.toBeNull()
+    const root = viewRoot()
     expect(root.style.position).toBe('fixed')
+    expect(root.style.left).toBe('0px')
     stop()
-    expect(document.body.querySelector('div[data-fenix-sas-view-root]')).toBeNull()
+    expect(document.querySelector('div[data-fenix-sas-view-root]')).toBeNull()
   })
 
   it('无 document 环境跳过装配并返回空停止函数（node 直载自守）', () => {
     const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'document')
     Object.defineProperty(globalThis, 'document', { value: undefined, configurable: true })
     try {
-      const stop = apply(ctx() as never)
+      const stop = apply({} as never)
       expect(typeof stop).toBe('function')
       expect(() => stop()).not.toThrow()
     } finally {
