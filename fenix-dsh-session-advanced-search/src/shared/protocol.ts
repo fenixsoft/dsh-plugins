@@ -58,6 +58,8 @@ export interface SearchCandidate {
   readonly confidence: number
   /** 降级标注：true = LLM 分析不可用，已按机械匹配排序。 */
   readonly degraded?: boolean
+  /** 机械命中词（评分期命中标题/路径的 token；去重保序、≤6；无命中或缺省省略，向后兼容）。 */
+  readonly matchedKeywords?: readonly string[]
 }
 
 /** 降级原因分类（LLM 排序回退机械评分时的机器可读根因；optimize-session-advanced-search 起贯通）。 */
@@ -200,6 +202,7 @@ export function isSearchCandidate(value: unknown): value is SearchCandidate {
   if (typeof record.confidence !== 'number' || !Number.isFinite(record.confidence)) return false
   if (record.confidence < 0 || record.confidence > 1) return false
   if (record.degraded !== undefined && typeof record.degraded !== 'boolean') return false
+  if (record.matchedKeywords !== undefined && !(Array.isArray(record.matchedKeywords) && record.matchedKeywords.every((row) => typeof row === 'string'))) return false
   return true
 }
 

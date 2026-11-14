@@ -61,6 +61,8 @@ export interface PrefilteredSession {
   readonly activityTime: number
   /** 机械计分（关键词命中；无命中 0）。 */
   readonly score: number
+  /** 机械命中词（命中标题/路径的 token，去重保序、≤6；无命中缺省省略，供结果卡 chips 行）。 */
+  readonly matchedKeywords?: readonly string[]
   /** 首条用户消息节选（≤2KB；读取失败为空串）。 */
   readonly excerpt: string
 }
@@ -285,7 +287,12 @@ interface ScoredRow {
   readonly workspacePath: string
   readonly activityTime: number
   readonly score: number
+  /** 命中标题/路径的 token（去重保序、≤6；空数组表示无命中）。 */
+  readonly matchedKeywords: readonly string[]
 }
+
+/** 结果卡 chips 行单卡命中词上限（超长 query 的 2-gram 命中可远超展示容量）。 */
+const MATCHED_KEYWORDS_MAX = 6
 
 /** 关键词计分：标题命中 +2/词、工作区路径命中 +1/词（大小写不敏感）。 */
 function scoreSessions(
@@ -301,11 +308,16 @@ function scoreSessions(
     const workspacePath = header.cwd ?? ''
     const activityTime = enriched?.updatedAt ?? header.createdAt
     let score = 0
+    const matched: string[] = []
     for (const token of tokens) {
+      if (title.toLowerCase().includes(token) || workspacePath.toLowerCase().includes(token)) {
+        // 去重保序（同 token 双面命中只记一次），超上限截断（计分不受影响）。
+        if (matched.length < MATCHED_KEYWORDS_MAX && !matched.includes(token)) matched.push(token)
+      }
       if (title.toLowerCase().includes(token)) score += 2
       if (workspacePath.toLowerCase().includes(token)) score += 1
     }
-    return { sessionId: header.id, title, workspacePath, activityTime, score }
+    return { sessionId: header.id, title, workspacePath, activityTime, score, matchedKeywords: matched }
   })
 }
 

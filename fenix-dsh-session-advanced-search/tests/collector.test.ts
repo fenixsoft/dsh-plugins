@@ -187,6 +187,21 @@ describe('collectCandidates 时间范围过滤', () => {
     expect(outcome.candidates[0]?.title).toBe('标题甲')
   })
 
+  it('命中词贯通候选（去重保序；标题/路径双面命中只记一次）', async () => {
+    const persistence = new FakePersistence([snapshot('s1', 100, '/root/fenixd')], new Map())
+    const controller: DshSessionController = {
+      list: () => Promise.resolve({ items: [summary('s1', 5_000, 'fenix 修复')] }),
+    }
+    const outcome = await collectCandidates(
+      { persistence, sessionController: controller, log: makeLog() },
+      { query: 'fenix 修复' },
+      30,
+      new AbortController().signal,
+    )
+    // 'fenix' 同时命中标题与路径只记一次；'修复' 命中标题；按 token 首现序。
+    expect(outcome.candidates[0]?.matchedKeywords).toEqual(['fenix', '修复'])
+  })
+
   it('无时间范围时全部通过', async () => {
     const persistence = new FakePersistence([snapshot('s1', 1), snapshot('s2', 2)], new Map())
     const outcome = await collectCandidates(
