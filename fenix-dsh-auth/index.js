@@ -68,6 +68,8 @@ const BODY_READ_TIMEOUT_MS = 30_000
 const RATE_WINDOW_MS = 60_000
 const RATE_MAX_FAILS = 5
 const RATE_LOCK_MS = 60_000
+/** 限流哨兵键：取不到远端地址的连接（unix socket/部分代理形态）共享同一计数桶，保持 fail-closed。 */
+const RATE_LIMIT_UNKNOWN_ADDRESS = '(unknown)'
 
 /** 登录页错误码白名单（服务端只渲染白名单文案，其余反射值一律忽略）。 */
 const LOGIN_ERROR_MESSAGES = Object.freeze({
@@ -94,8 +96,12 @@ export async function hashPassword(password, saltHex) {
 	if (saltHex === undefined) {
 		salt = randomBytes(16)
 	} else {
-		salt = Buffer.from(String(saltHex), 'hex')
-		if (salt.length === 0) throw new TypeError('salt must be a non-empty hex string')
+		/* 整串校验后再解码：Buffer.from(x, 'hex') 在首个非法字符处静默截断
+		 * （'abzz' 只留 'ab'、奇数长度丢尾字节），短盐派生结果与传入值不一致
+		 * 且重派生时难排查，故非法/空串一律显式报错。 */
+		const hex = String(saltHex)
+		if (!/^([0-9A-Fa-f]{2})+$/.test(hex)) throw new TypeError('salt must be a non-empty hex string')
+		salt = Buffer.from(hex, 'hex')
 	}
 	const hash = await scrypt(password, salt, SCRYPT_PARAMS.keylen, {
 		N: SCRYPT_PARAMS.N,
@@ -576,14 +582,24 @@ function activate(ctx, services, log) {
 		return () => {}
 	}
 
-	let disposers
+	const disposers = []
 	try {
-		disposers = [
-			disposeRoute(webServer.register({ kind: 'exact', path: '/', handler: createIndexHandler({ connection, webServer, credentials, limiter, log }) }), '/'),
-			disposeRoute(webServer.register({ kind: 'exact', path: '/auth/login', handler: createLoginHandler({ connection, credentials, limiter, webServer, log }) }), '/auth/login'),
-			disposeRoute(webServer.register({ kind: 'exact', path: '/auth/credentials', handler: createCredentialsHandler({ connection, credentials, limiter, webServer, log }) }), '/auth/credentials'),
-		]
+		/* 逐个注册、成功一项立即收编 disposer：数组字面量串行求值时后续注册
+		 * 抛错会让已注册路由的 disposer 随局部变量一起丢失，停用时无法注销。 */
+		for (const [path, handler] of [
+			['/', createIndexHandler({ connection, webServer, credentials, limiter, log })],
+			['/auth/login', createLoginHandler({ connection, credentials, limiter, webServer, log })],
+			['/auth/credentials', createCredentialsHandler({ connection, credentials, limiter, webServer, log })],
+		]) {
+			disposers.push(disposeRoute(webServer.register({ kind: 'exact', path, handler }), path))
+		}
 	} catch (error) {
+		/* 回滚已注册项（登录页接管不残留到宿主 reload），再降级返回空 disposer。 */
+		for (const dispose of disposers.splice(0)) {
+			try {
+				dispose()
+			} catch {}
+		}
 		log('warn', `route registration failed (${error?.message ?? error}); keeping native token-only behavior`)
 		return () => {}
 	}
@@ -612,13 +628,14 @@ function writeNativeUnauthorized(req, res) {
 	res.end(req.method === 'HEAD' ? undefined : 'dsh web authentication required; reopen the URL printed by dsh web.\n')
 }
 
-/** 写登录页（HEAD 只写头；no-store + referrer same-origin）。 */
+/** 写登录页（HEAD 只写头；no-store + referrer same-origin + frame-ancestors 防嵌套）。 */
 function writeLoginPage(req, res, errorCode) {
 	const html = renderLoginPage(errorCode)
 	res.writeHead(200, {
 		'cache-control': 'no-store',
 		'content-type': 'text/html; charset=utf-8',
 		'referrer-policy': 'same-origin',
+		'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
 		'content-length': Buffer.byteLength(html),
 	})
 	res.end(req.method === 'HEAD' ? undefined : html)
@@ -631,6 +648,7 @@ function writeUntrustedHostPage(req, res, details) {
 		'cache-control': 'no-store',
 		'content-type': 'text/html; charset=utf-8',
 		'referrer-policy': 'same-origin',
+		'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
 		'content-length': Buffer.byteLength(html),
 	})
 	res.end(req.method === 'HEAD' ? undefined : html)
@@ -878,7 +896,10 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 			}
 
 			const remoteAddress = req.socket?.remoteAddress ?? ''
-			if (limiter.isLocked(remoteAddress)) {
+			/* 空地址归一到哨兵键：limiter 对空串直接放行，会让取不到远端地址的
+			 * 连接整体绕过失败锁定（无限次尝试口令）。 */
+			const rateLimitAddress = remoteAddress === '' ? RATE_LIMIT_UNKNOWN_ADDRESS : remoteAddress
+			if (limiter.isLocked(rateLimitAddress)) {
 				return writeRedirect(req, res, '/auth/login?error=locked')
 			}
 
@@ -900,7 +921,7 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 			 * 限流计数），不靠响应时序区分哪个字段错。 */
 			const usernameOk = verifyUsername(parsed.username, payload)
 			if (!passwordOk || !usernameOk) {
-				const locked = limiter.fail(remoteAddress)
+				const locked = limiter.fail(rateLimitAddress)
 				if (locked) {
 					/* 锁定留痕：限流按 remoteAddress 分桶，反代/本机聚合部署下任一
 					 * 来源可把共享地址锁死——先从日志可见（局限说明见 README
@@ -910,7 +931,7 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 				return writeRedirect(req, res, '/auth/login?error=invalid')
 			}
 
-			limiter.reset(remoteAddress)
+			limiter.reset(rateLimitAddress)
 			/* Host 为请求方可控头，铸 token 的重定向 base 直接取自它。上方信任
 			 * 预检只拦「确定不受信」（probeUntrusted === true），isTrusted 缺失或
 			 * 抛错时返回 undefined 即放行——DNS rebinding / 改写 Host 的反向代理
