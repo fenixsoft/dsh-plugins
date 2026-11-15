@@ -1,0 +1,73 @@
+# dsh-plugins 发布流水线：打 tag（v*）→ 构建 tsdown 插件 → 打包全插件 zip → GitHub Release。
+# 消费方（install.md §6）从 Release 下载制品，插件 lib/ 已预构建——
+# 免 Node 工具链即可完成 `dsh plugin add` 装配（源码构建仅为开发者路径）。
+#
+# 注意：本仓库为私库，Release 资产下载需带 token（手册 §3 已写明）。
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # 仅构建声明了 build 脚本的插件（tsdown 形态，5 个）；
+      # source-form 插件（index.js/client.js 直出）无需构建，随包分发。
+      - name: Build tsdown plugins
+        run: |
+          set -e
+          built=0; plain=0
+          for d in */; do
+            d="${d%/}"
+            [ -f "${d}/package.json" ] || continue
+            if node -e "const p=require('./${d}/package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
+              echo "── build ${d} ──"
+              (cd "${d}" && pnpm install --no-frozen-lockfile --silent && pnpm build)
+              test -f "${d}/lib/index.js"
+              built=$((built+1))
+            else
+              echo "── source-form ${d}（免构建）──"
+              plain=$((plain+1))
+            fi
+          done
+          echo "built=${built} plain=${plain}"
+
+      - name: Package（tag 名作版本号，全插件 zip + sha256）
+        run: |
+          set -e
+          V="${GITHUB_REF_NAME}"
+          rm -rf "pkg/dsh-plugins-${V}" && mkdir -p "pkg/dsh-plugins-${V}" pkg/out
+          for d in */; do
+            d="${d%/}"
+            [ -f "${d}/package.json" ] || continue
+            (cd "${d}" && tar -cf - --exclude='node_modules' --exclude='.git' .) \
+              | (cd "pkg/dsh-plugins-${V}/${d}" && tar -xf -)
+          done
+          cd pkg
+          zip -qry "out/dsh-plugins-${V}.zip" "dsh-plugins-${V}"
+          sha256sum "out/dsh-plugins-${V}.zip" > "out/dsh-plugins-${V}.sha256"
+          mv out/*.zip out/*.sha256 ../
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dsh-plugins-*.zip
+            dsh-plugins-*.sha256
+          generate_release_notes: true
