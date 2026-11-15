@@ -142,18 +142,19 @@ export async function rollbackSession(
   if (latest === undefined) {
     return { status: 'skipped', sessionId, detail: '台账中无该会话的迁移记录' }
   }
-  // 前置校验：仅 migrated/pending-attach 可回滚（与 rollbackableSessionIds 同口径；
-  // status 经 String 宽化比较——parseLedger 保留 sessionId 形态合法但 status 未知的
-  // 行，此分支对台账手工编辑/未来新增状态真实可达，一律拒绝而非照常删除还原）。
-  const latestStatus = String(latest.status)
-  if (latestStatus !== 'migrated' && latestStatus !== 'pending-attach') {
+  // 前置校验：仅 migrated/pending-attach 可回滚（与 rollbackableSessionIds 同口径，
+  // 严格 string === 而非 String 宽化——String 形态异常值（如 ["migrated"]）宽化后
+  // 恰等于白名单字面量，会放行 parseLedger 已告警不可回滚的行；parseLedger 保留
+  // sessionId 形态合法但 status 未知的行，此分支对台账手工编辑/未来新增状态真实
+  // 可达，一律拒绝而非照常删除还原）。
+  if (latest.status !== 'migrated' && latest.status !== 'pending-attach') {
     return {
       status: 'skipped',
       sessionId,
       detail:
-        latestStatus === 'rolled-back'
+        latest.status === 'rolled-back'
           ? '台账最新状态已是 rolled-back（幂等跳过）'
-          : `台账最新状态为 '${latestStatus}'，仅 migrated/pending-attach 可回滚（与 rollbackableSessionIds 同口径）`,
+          : `台账最新状态为 '${String(latest.status)}'，仅 migrated/pending-attach 可回滚（与 rollbackableSessionIds 同口径）`,
     }
   }
   const backupDir = backupDirFor(dshHome, sessionId)
@@ -293,7 +294,7 @@ export function parseRollbackArgs(argv: readonly string[]): RollbackCliArgs {
       sessionId = requireFlagValue(argv, ++i, '--session')
       mode = 'single'
     } else if (arg === '--dsh-home') dshHome = requireFlagValue(argv, ++i, '--dsh-home')
-    else if (arg === '--root') i++
+    else if (arg === '--root') requireFlagValue(argv, ++i, '--root')
     else throw new Error(`未知参数 '${arg}'；${CLI_USAGE}`)
   }
   if (mode === undefined) throw new Error(`缺少 --session <sessionId> 或 --all；${CLI_USAGE}`)
