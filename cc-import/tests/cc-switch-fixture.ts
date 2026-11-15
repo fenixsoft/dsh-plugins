@@ -5,7 +5,7 @@
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 /** 一行 fixture provider。settingsConfig 允许传对象（自动 JSON 序列化）、原始
@@ -56,11 +56,14 @@ export function createFixtureDb(rows: readonly FixtureRow[]): string {
   return dbPath
 }
 
-/** 删除 fixture db（或其临时目录）及其所在目录；对文件与目录都安全。 */
+/** 删除 fixture db（或其临时目录）及其所在目录；对文件与目录都安全。所在目录
+ * 仅限本夹具自建的 `cc-import-*` 临时目录——调用方把临时目录本身传进来时
+ * （host-scan 的 afterAll），其父目录是共享 tmpdir，无条件递归清除会清空 /tmp
+ * 全体并在并发写入下抛 ENOTEMPTY（回归 parse_error 的根因）。 */
 export function removeFixtureDb(dbPath: string): void {
   rmSync(dbPath, { force: true, recursive: true })
   const dir = dbPath.slice(0, dbPath.lastIndexOf('/'))
-  if (dir.length > 0) rmSync(dir, { force: true, recursive: true })
+  if (dir.length > 0 && basename(dir).startsWith('cc-import-')) rmSync(dir, { force: true, recursive: true })
 }
 
 /** 一个完整可导入的 claude env 块（[1M] 模型走 DEFAULT_OPUS 回退键）。 */
