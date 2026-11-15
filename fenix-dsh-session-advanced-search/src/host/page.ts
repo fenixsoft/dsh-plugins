@@ -337,11 +337,14 @@ var t0 = 0;
 var lastQuery = '';
 var logs = [];
 var detailOpen = false;
-var renderedSteps = 0;
+/* 日志增量对账键（最后一条已入 logs 的 progress 条目 step|detail|at）：
+   host 对 progress[] 有界保留最近 50 条（protocol.ts PROGRESS_MAX_STEPS），
+   淘汰启动后数组整体滑动、长度恒 50，数组下标对账在此场景失效。 */
+var lastLogKey = '';
 var finishingRun = false;
 
 function $(sel) { return document.querySelector(sel); }
-function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 function pad(n) { return n < 10 ? '0' + n : '' + n; }
 function fmtTime(ms) {
   var d = new Date(ms);
@@ -453,8 +456,11 @@ function stepHTML(icon, l1, l2, cls, at) {
 
 /* 按 host 推进点顺序渲染 progress[]：**增量协调**——已有行原位更新（类名/
    图标/标题/detail），仅新增行追加 DOM，绝不整体重建（整体 innerHTML 重建
-   会重启 spinner CSS 动画 = 用户反馈的过程记录闪烁）。行与 progress 条目
-   按下标一一对应（appendProgress 只追加不回写）。 */
+   会重启 spinner CSS 动画 = 用户反馈的过程记录闪烁）。host 对 progress[]
+   有界保留最近 50 条（protocol.ts PROGRESS_MAX_STEPS）：淘汰启动后数组
+   整体滑动，本函数全字段比较后写的原位同步使行内容随滑移整体刷新，行为
+   仍为「显示最近 50 条」；日志收集的对账（handleStatus）按条目内容键而非
+   数组下标，滑移不冻结。 */
 function renderProgress(progress, finished, failed) {
   var steps = $('#aiSteps');
   if (!steps) return;
@@ -489,7 +495,6 @@ function renderProgress(progress, finished, failed) {
       else row.querySelector('.st-body').insertAdjacentHTML('beforeend', '<span class="st-l2">' + detail + '</span>');
     }
   }
-  renderedSteps = progress.length;
   var pct = finished ? 100 : Math.min(12 + progress.length * 22, 90);
   var bar = $('#aiProgress');
   if (bar) bar.style.width = pct + '%';
@@ -578,21 +583,31 @@ function degradeBannerHTML(reason, degradedDetail) {
 function parentWin() { return (window.self !== window.top) ? window.parent : window; }
 function jumpToSession(sessionId) {
   var w = parentWin();
-  var api = w && w.__fenixSas;
+  /* 服务缝读取包 try：跨源宿主（页面被跨源页 iframe 嵌套）下读父窗口属性
+     直接抛 SecurityError，不捕获会使「缝缺失退化为 localStorage + 首页
+     导航」对跨域宿主不成立。读取失败一律走下方兜底。 */
+  var api = null;
+  try { api = w && w.__fenixSas; } catch (e) { /* 跨域宿主：缝不可得 */ }
   if (api && typeof api.openSession === 'function') {
     try { api.openSession(sessionId); return; } catch (e) { /* 服务缝抛错走兜底 */ }
   }
   try { localStorage.setItem('dsh.sessions.current', JSON.stringify({ sessionId: sessionId })); } catch (e) { /* 存储不可用时仍跳首页 */ }
-  parentWin().location.href = '/';
+  try { parentWin().location.href = '/'; } catch (e) { /* 跨域宿主：父窗口 location 不可写，导航兜底也不可得 */ }
 }
 
 /* 嵌入形态关闭缝：父级 client 装配注册 window.__fenixSas.close（同源直调）；
    未注册（异常宿主）退化为父级回首页。独立页形态不变（整页回 '/'）。 */
 function closeEmbedded() {
   var w = parentWin();
-  var api = w && w.__fenixSas;
-  if (api && typeof api.close === 'function') { api.close(); return; }
-  w.location.href = '/';
+  /* 服务缝读取与 close 调用、导航兜底各自包 try：跨源宿主下读父窗口属性/
+     写父窗口 location 均抛 SecurityError，全程无捕获会使 Escape 关闭与
+     返回会话按钮在这种宿主下毫无响应。 */
+  var api = null;
+  try { api = w && w.__fenixSas; } catch (e) { /* 跨域宿主：缝不可得 */ }
+  if (api && typeof api.close === 'function') {
+    try { api.close(); return; } catch (e) { /* 服务缝抛错走兜底 */ }
+  }
+  try { w.location.href = '/'; } catch (e) { /* 跨域宿主：无法导航父窗口 */ }
 }
 
 /* ===== 主流程 ===== */
@@ -611,7 +626,7 @@ async function runSearch(query) {
   stopTimers();
   logs = [];
   detailOpen = false;
-  renderedSteps = 0;
+  lastLogKey = '';
   lastStatusJson = '';
   finishingRun = false;
   $('#initialState').style.display = 'none';
@@ -649,6 +664,9 @@ async function runSearch(query) {
       detailOpen = !detailOpen;
       var d = $('#detailBody');
       if (d) d.style.display = detailOpen ? 'block' : 'none';
+      /* 展开时补渲染当前全量日志：终态后轮询与 SSE 均已停、不再有新帧触发
+         renderLogs，此处不补则此时才点开的详情面板恒为空/陈旧。 */
+      if (detailOpen) renderLogs();
     });
 
     /* SSE 优先（用户反馈：轮询刷新令过程记录闪烁）——任务变更即推帧，有新
@@ -664,15 +682,28 @@ async function runSearch(query) {
 
 /* ===== 状态接收（SSE 帧与轮询共用）：去重 + 单点渲染分派 ===== */
 var lastStatusJson = '';
+/* progress 条目对账键（step+detail+at 组合）：host 有界保留最近 50 条的
+   淘汰滑动后数组下标不再稳定，条目自身字段才稳定（at 为 epoch ms 推进打点，
+   同 step 同 at 同 detail 重复概率可忽略）。 */
+function progressKey(p) { return p.step + '|' + (p.detail || '') + '|' + p.at; }
 function handleStatus(status, token) {
   if (token !== runToken || !status) return;
   var json = JSON.stringify(status);
   if (json === lastStatusJson) return;   /* 重复帧/相同轮询载荷：跳过渲染 */
   lastStatusJson = json;
   var progress = Array.isArray(status.progress) ? status.progress : [];
-  if (progress.length !== renderedSteps) {
-    var newSteps = progress.slice(renderedSteps);
-    for (var i = 0; i < newSteps.length; i++) logs.push({ text: newSteps[i].step + (newSteps[i].detail ? ': ' + newSteps[i].detail : ''), at: newSteps[i].at });
+  /* 日志增量按条目内容键对账而非数组下标：progress[] 只追加/头部淘汰（host
+     保留最近 50 条），自尾部定位上次入账条目，其后全部为新条目；定位不到
+     （首轮 / 单帧推进超窗口，后者协议侧本就只留 50 条无从补齐）整帧追加。 */
+  var logged = 0;
+  for (var i = progress.length - 1; i >= 0; i--) {
+    if (progressKey(progress[i]) === lastLogKey) { logged = i + 1; break; }
+  }
+  if (logged < progress.length) {
+    for (var j = logged; j < progress.length; j++) {
+      logs.push({ text: progress[j].step + (progress[j].detail ? ': ' + progress[j].detail : ''), at: progress[j].at });
+      lastLogKey = progressKey(progress[j]);
+    }
     if (detailOpen) renderLogs();
   }
   var phase = status.phase;
@@ -852,6 +883,10 @@ async function interrupt(token) {
 
 /* ===== 装配 ===== */
 function submit() {
+  /* 在途即拒绝：与 runBtn disabled（runSearch 入口置位、终态收尾复位）同
+     一信号同一语义，防止运行中 Enter 静默 DELETE 旧任务重启分析——按钮
+     禁用与快捷键口径统一（重试走降级横幅 retryAiBtn 直调 runSearch，不受此限）。 */
+  if ($('#runBtn').disabled) return;
   var q = $('#queryInput').value.trim();
   if (!q) { $('#queryInput').focus(); return; }
   runSearch(q);
