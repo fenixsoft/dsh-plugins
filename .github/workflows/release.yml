@@ -56,6 +56,7 @@ jobs:
           for d in */; do
             d="${d%/}"
             [ -f "${d}/package.json" ] || continue
+            mkdir -p "pkg/dsh-plugins-${V}/${d}"
             (cd "${d}" && tar -cf - --exclude='node_modules' --exclude='.git' .) \
               | (cd "pkg/dsh-plugins-${V}/${d}" && tar -xf -)
           done
