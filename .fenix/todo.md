@@ -623,6 +623,7 @@
 
 ### 浪费
 - **周期审查 run 三成 API 往返停滞，7 分钟墙钟空耗**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：周期代码审查 run 有 87% 的墙钟耗在 API 往返停滞上：9 个请求往返中 3 次超 60 秒（占 33%）、合计空等 418.8 秒、单次最长 240.9 秒，全程 481.6 秒；停滞轮不计 token（input_tokens=0），纯等待使本轮审查与其后的 code-fix 修复链顺延约 7 分钟交付。
   - 证据：fenixd.log 18427 行「API round-trip stall: 240.9s (round #2 > 120s)」与 18430 行聚合「9 rounds, median 0.5s, p90 137.5s, max 240.9s, stalls>60s=3 (33%)」，provider=bigmodel.cn；数据摘要第 6 节 api-stall 聚合（stalls=3 total=418.8s max=240.9s）同值；run code-review-1794762140（周期代码审查 run，11 turns、$1.39、终态 success）。
   - 调查评估：问题源是周期代码审查车道（非 SPEC 实现车道）。已核实：run 终态 success（归档 code-review-1794762140.jsonl 尾帧 subtype=success），停滞指标来自 agent_runner 的 run_metrics（框架逐 run 延迟聚合）；同窗口另两个 code-fix run 停滞均为 0（latency_stalls=0），属单 run 离群而非窗口常态。归因边界：证据只覆盖停滞形态（往返时长分布、provider 字段标签），不足以裁决网络链路还是模型服务端负载，根因未定。编排层处置仅有 grade=info 记录——admin_infra_breaker.json（基础设施熔断登记）仅注册 spec-review 一类，API 停滞无任何升级或换道通道，停滞全额转嫁为墙钟；历史口径：全量日志 585 条 run_metrics 停滞聚合中 311 条（53%）至少 1 次停滞，该环境特征长期存在但从未进入告警视野。
@@ -630,12 +631,14 @@
 
 ### 失误
 - **cc-import 测试夹具递归删除直指共享 tmp，潜伏 32 天绊倒修复链**
+  - 自进化：问题部分成立 / 建议部分合理 / — 不需要
   - 影响：cc-import 测试夹具的清理函数把递归删除目标指向了共享 /tmp：调用方传入临时目录本身时父目录被解析成 /tmp 并递归 rm，并发写入下抛 ENOTEMPTY 使本轮 code-review 修复链多烧 1 轮重试（run code-fix-1794762988：228.7 秒、$0.97）；若并发时序不同可能实删系统临时文件，属危险敞口未遂。
   - 证据：commit ef774a4（11-16 01:19，自述「父目录解析成共享 /tmp 递归 rm……上一轮回归 parse_error 的真实根因」，cc-import 定向验证 53/53 通过）；隐患由 commit 26b41c6（10-14 12:09 测试套件首版）引入；fenixd.log 重试轮处置记录同口径「清单外存量测试缺陷」。
   - 调查评估：问题源是 code-review 修复车道（spec=code-review-fix）。已核实：首轮批内 3 笔提交（ef40f81/984ffc4/d21c468，11-16 01:15）只触及 session-grouper、session-advanced-search、auth 三插件，均未碰 cc-import——缺陷为存量而非本轮引入，框架诊断同口径。根因：removeFixtureDb 只按「传 db 文件路径」常态设计，对「传目录本身」形态（host-scan 的 afterAll）无作用域防御，潜伏 32 天直到本轮 code-fix 回归门全量跑套件才暴露——回归门工作正常，代价 1 轮重试，属已被防住的执行层失误。与存量工作关系：spec/archive/2026-10-30-add-cc-import-plugin 已归档收口，无在飞 SPEC 覆盖测试夹具安全面。
   - 建议：两类动作：(1) 同类夹具清理函数一律把删除作用域约束到自建前缀目录（cc-import-* 模式，ef774a4 已成范式）；(2) 防复发敞口：在 code-fix/验证轮套件检查中加静态守卫——递归 rmSync 的目标不得解析到系统共享目录（如 /tmp 根），单 SPEC 量级。
 
 - **release 流水线首版 tar 解包缺 mkdir，首跑即败**
+  - 自进化：问题部分成立 / 建议合理 / — 不需要
   - 影响：新增的制品发布流水线首跑即败：tar 管道解包不创建中间目录导致 cd ENOENT，发布可用性延迟 3 分钟、CI 失败 1 次，同窗口内补 1 行 mkdir 闭环，无制品损坏。
   - 证据：两笔 commit 相邻 3 分钟：5125277（11-15 20:58「新增制品发布流水线——tag v* 构建 tsdown 插件并打全插件 zip」）→ 303c106（21:01「打包循环补 mkdir 插件子目录（tar 管道解包不建中间目录致 cd ENOENT）」，.github/workflows/release.yml +1 行）。
   - 调查评估：问题源是发布车道（新流水线首版）。已核实（git show 两笔，diff 仅 +1 行 mkdir）。根因：curl | tar x 管道解包不创建嵌套中间目录是 tar 既定行为，流水线入库前无干跑/冒烟预检——一次性编码疏失，非系统性缺口；同窗口内自愈闭环、未复发，代价可忽略。
@@ -643,6 +646,7 @@
 
 ### 可改进
 - **蒸馏重试台账欠账 17 天只提醒无消费，幂等被重启击穿**
+  - 自进化：问题成立 / 建议合理 / — 不需要
   - 影响：一条蒸馏重试欠账空转 17 天无人消费：10-30 登记的 add-dsh-dashboard-bridge 蒸馏（知识页自动蒸馏任务）至今未重试，dashboard-bridge 能力域知识页整域缺失（spec/knowledge/domains/ 现仅 3 域）；窗口内 5 条欠账提醒 warning 信号全部 handled=false，纯噪音无产出。
   - 证据：fenixd.log 11039-11043 行（10-30 三轮校验违规→「放弃产出……登重试台账」）；core/knowledge.py:1446 check_retry_ledger_age（蒸馏重试台账龄期扫描）文档自述「每日至多一条提醒……以 daemon 进程内当日标记（模块属性）承载」；窗口内 5 条提醒中 4 条与 daemon 陈旧自愈（stale_code，持旧代码空闲期自动重启装载新代码）重启一一对应——重启 18:47/19:45/20:40/11-15 16:47 → 提醒约 5 分钟后 18:52/19:50/20:45/16:52（UTC）；todo.md 381 行重试条目仍未勾选。
   - 调查评估：问题源是 knowledge-distill 车道（10-30 归档 add-dsh-dashboard-bridge 的蒸馏）。已核实根因链：三轮失败是蒸馏 agent 反复用 markdown 链接引用 spec/archive/2026-10-30-add-dsh-dashboard-bridge/，而校验器相对 .md 所在目录解析且禁越出 spec/knowledge/ 真相源（core/knowledge.py:333-353）——该引用形态在真相源目录内结构性不可满足，合规形态是页首 sources=git: 注释（现行三域能力页均此形态）；如今归档目录已在库（e5edd76，10-30 20:29 归档入库），按合规形态补蒸馏预计一轮可过。与既有条目对账：todo.md 381 行（10-30 登记）与 11-04 既有回顾条目（458 行：单日 18 次重复发射、指纹累计 25 次）已覆盖「欠账未清、提醒空转」症状，不重复立项；本条新增增量有二——(a) 幂等失效机制核实：设计意图「每日至多一条」的标记存于 daemon 进程内，陈旧自愈重启常态化清零标记，提醒实发率=每重启一条；(b) 队列系统性缺口：knowledge.py:1290 自述「给人看的队列，不进任务门禁」，17 天无任何自动消费或重派通道。
