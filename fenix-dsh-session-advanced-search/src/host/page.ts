@@ -85,6 +85,12 @@ function handlePageRequest(req: unknown, res: unknown): void {
   w.writeHead(200, {
     'cache-control': 'no-store',
     'content-type': 'text/html; charset=utf-8',
+    /* 与 fenix-dsh-auth 直出页同口径加固：本页含内联脚本/样式与动态插值，
+       CSP 作第二道防线；数据面仅同源 fetch/EventSource（connect-src），无
+       外链资源与图片；预期被同源 iframe 嵌入，故 frame-ancestors 'self'。 */
+    'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; frame-ancestors 'self'",
+    'referrer-policy': 'same-origin',
+    'x-content-type-options': 'nosniff',
     'content-length': String(Buffer.byteLength(html)),
   })
   w.end(r.method === 'HEAD' ? undefined : html)
@@ -493,6 +499,10 @@ function renderProgress(progress, finished, failed) {
     if (detail) {
       if (l2) { if (l2.innerHTML !== detail) l2.innerHTML = detail; }
       else row.querySelector('.st-body').insertAdjacentHTML('beforeend', '<span class="st-l2">' + detail + '</span>');
+    } else if (l2) {
+      /* 数组下标复用的行可能换成了无 detail 的条目：必须移除旧详情节点，
+         否则滑动窗口滑移后会残留上一条目的详情（张冠李戴）。 */
+      l2.remove();
     }
   }
   var pct = finished ? 100 : Math.min(12 + progress.length * 22, 90);
@@ -739,7 +749,6 @@ function startStatusStream(id, token) {
   var es;
   try { es = new EventSource(API + '/' + encodeURIComponent(id) + '/events'); } catch (e) { startPolling(id, token); return; }
   statusSource = es;
-  var failed = false;
   es.addEventListener('status', function (ev) {
     if (token !== runToken) { stopStatusStream(); return; }
     var data = null;
@@ -748,18 +757,19 @@ function startStatusStream(id, token) {
   });
   es.onerror = function () {
     /* 流断开：终态早已渲染（handleStatus 终态先停流）则忽略；非终态断连
-       （代理空闲/网络抖动）转轮询兜底，去重逻辑保证无闪烁。 */
-    if (token !== runToken) return;
-    failed = true;
+       （代理空闲/网络抖动）转轮询兜底，去重逻辑保证无闪烁。终态后服务端
+       关流会再触发一次 error 任务，finishingRun（beginFinish 置位）守住
+       该迟到事件，避免重启永不停止的轮询。 */
+    if (token !== runToken || finishingRun) return;
     stopStatusStream();
     startPolling(id, token);
   };
 }
 async function startPolling(id, token) {
-  if (token !== runToken) return;
+  if (token !== runToken || finishingRun) return;
   var pollFailCount = 0;
   var poll = async function () {
-    if (token !== runToken) return;
+    if (token !== runToken || finishingRun) return;
     var status;
     try {
       /* 载荷形状守卫（protocol.ts parseJobStatus 同源移植）：非法载荷走既有

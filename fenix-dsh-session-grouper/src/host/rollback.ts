@@ -7,9 +7,9 @@
  *     操作：仅注册表索引撤销 + 台账标记（迁移本就零重写零归位，防陈旧备份覆盖现位
  *     产物）；
  *   - 其余：先按封存清单核验备份完整性（不可信即拒绝还原，保留现场）；目标会话
- *     目录（mangled(toCwd)）rename 挪入 trash 残目录保留（迁移后目标位可能已被
- *     继续追加事件，递归删除会静默吞掉增量；无迁移时点 revision 可自动比对，残余
- *     风险由 trash 保留兜底 + 人工核对）；备份产物（`<DSH_HOME>/session-grouper-backups/<id>/`，
+ *     目录（mangled(toCwd)）rename 挪入 trash 残目录（迁移后目标位可能已被继续追加
+ *     事件，递归删除会静默吞掉增量）：还原后以台账迁移时刻判定，trash 内存在更晚
+ *     写入则保留并在结果中给出路径供人工核对找回，无更晚写入才清退；备份产物（`<DSH_HOME>/session-grouper-backups/<id>/`，
  *     即迁移前原目录的全量副本，header.cwd 仍为原值）经 staging 中转 + rename 原子
  *     还原回 `mangled(fromCwd)` 会话目录；
  *   - 注册表实例索引撤销（headers/sessionPaths 删除该 id → readSessionHeader
@@ -19,7 +19,7 @@
  *
  * 回滚只做文件层恢复与索引撤销，不解释会话产物内容（备份即原物，无需重写）。
  */
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync, rmSync, statSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { targetSessionDirKey } from '../shared/rules.js'
@@ -29,7 +29,7 @@ import { errorMessage } from './sessionScan.js'
 
 /** 单会话回滚结果。 */
 export type RollbackOutcome =
-  | { readonly status: 'rolled-back'; readonly sessionId: SessionId; readonly fromCwd: string }
+  | { readonly status: 'rolled-back'; readonly sessionId: SessionId; readonly fromCwd: string; readonly trashDir?: string }
   | { readonly status: 'skipped'; readonly sessionId: SessionId; readonly detail: string }
   | { readonly status: 'failed'; readonly sessionId: SessionId; readonly detail: string }
 
@@ -85,17 +85,32 @@ async function sameLocation(a: string, b: string): Promise<boolean> {
 }
 
 /**
+ * trash（或任意目录树）内是否存在晚于 sinceMs 写入的文件：用于判定迁移后目标位
+ * 是否又追加了事件。无法枚举/读取交由调用方按「保留现场」保守处理。
+ */
+function hasWritesAfter(dir: string, sinceMs: number): boolean {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (hasWritesAfter(full, sinceMs)) return true
+    } else if (entry.isFile() && statSync(full).mtimeMs > sinceMs) return true
+  }
+  return false
+}
+
+/**
  * 备份还原（原子口径）：备份 rename 入 staging 中转 → 原目录残迹 rename 挪入
  * trash（原子搬移代替递归删除）→ staging rename 就位 → 删 trash。会话目录缺席
  * 窗口 = 残迹挪入 trash 到 staging 就位之间（≤ 一次 rename；递归删除只发生在
  * 就位之后，不再拉长窗口）：窗口内进程被杀时会话目录暂缺，但数据完整滞留于
  * staging 残目录（`${originalDir}.rollback-<时间戳>`），人工挪回即恢复——
  * 不存在半还原态。失败以抛错注明备份当下真实滞留位置（首段 rename 失败 = 备
- * 份仍完整滞留于主备份区原位、未做任何还原；挪出之后的失败 = 滞留于 staging），
- * 供外层 failed detail 呈现人工恢复路径。就位成功后同步清退备份同级完整性
- * 清单文件（残留会在下轮被误当在册核验基准），清理失败仅告警不影响还原结果。
+ * 份仍完整滞留于主备份区原位、未做还原，原目标位内容已在 targetTrashDir 中，
+ * 路径随错误一并呈现；挪出之后的失败 = 滞留于 staging），供外层 failed detail
+ * 呈现人工恢复路径。就位成功后同步清退备份同级完整性清单文件（残留会在下轮被
+ * 误当在册核验基准），清理失败仅告警不影响还原结果。
  */
-function restoreFromBackup(backupDir: string, originalDir: string, log?: MigrateLogger): void {
+function restoreFromBackup(backupDir: string, originalDir: string, log?: MigrateLogger, targetTrashDir?: string): void {
   const stagingDir = `${originalDir}.rollback-${Date.now().toString(36)}`
   const trashDir = `${originalDir}.trash-${Date.now().toString(36)}`
   mkdirSync(dirname(originalDir), { recursive: true })
@@ -103,9 +118,9 @@ function restoreFromBackup(backupDir: string, originalDir: string, log?: Migrate
     renameSync(backupDir, stagingDir)
   } catch (error) {
     // 首段搬移失败（典型如备份区与会话 root 异文件系统触发 EXDEV、权限异常）：
-    // 备份原封未动，原目录也未触碰（现场可能另有 step 2 挪入 trash 的目标目录
-    // 残迹），须注明真实位置供外层 failed detail 指导人工处置。
-    throw new Error(`备份还原失败（首段搬移），备份仍完整滞留于 ${backupDir}，未做任何还原：${errorMessage(error)}`)
+    // 备份原封未动；原目录未触碰，但 step 2 可能已把目标位目录挪入
+    // targetTrashDir——须注明该真实位置供外层 failed detail 指导人工找回。
+    throw new Error(`备份还原失败（首段搬移），备份仍完整滞留于 ${backupDir}，未做任何还原${targetTrashDir === undefined ? '' : `（原目标位内容已在 ${targetTrashDir}，可人工找回）`}：${errorMessage(error)}`)
   }
   try {
     if (existsSync(originalDir)) renameSync(originalDir, trashDir)
@@ -194,32 +209,47 @@ export async function rollbackSession(
     }
     // 2) 目标目录清理（迁移落位的半/全产物）：rename 挪入 trash 残目录保留（与
     //    restoreFromBackup 对 originalDir 残迹同口径），不做递归删除——迁移后会话
-    //    通常已在目标位继续追加事件，rmSync 会静默吞掉这部分增量。残余风险：台账
-    //    未封存迁移时点的 revision/事件规模，现位产物是否已被改写无现成数据可自动
-    //    比对拒绝；trash 保留把静默丢失变为可恢复，若有增量丢失请从 trash 残目录
-    //    （`${targetDir}.trash-<时间戳>`）人工核对找回。
+    //    通常已在目标位继续追加事件，rmSync 会静默吞掉这部分增量。是否真有增量在
+    //    还原后以台账迁移时刻（at）判定（见步骤 3 后处理），trash 路径
+    //    `${targetDir}.trash-<时间戳>` 供人工核对找回。
     let targetTrashDir: string | undefined
     if (targetDir !== originalDir && existsSync(targetDir)) {
       targetTrashDir = `${targetDir}.trash-${Date.now().toString(36)}`
       renameSync(targetDir, targetTrashDir)
     }
     // 3) 备份还原到原目录（备份即原物，含原 header cwd；staging 中转 + rename 原子就位）。
-    restoreFromBackup(backupDir, originalDir, log)
-    //    还原已成事实后清退目标位 trash 残迹（失败不影响回滚结果，留待人工）。
+    //    首段搬移失败时 targetTrashDir 随错误文案呈现，避免目标位内容去向不明。
+    restoreFromBackup(backupDir, originalDir, log, targetTrashDir)
+    //    还原已成事实后处理目标位 trash 残迹：trash 内存在晚于迁移时刻（台账 at）
+    //    写入的文件即迁移后追加的事件/产物，递归删除会静默丢失——保留并在
+    //    outcome/日志中给出路径交由人工核对；无更晚写入才清退；判定或清退失败
+    //    一律保守保留。
+    let retainedTrashDir: string | undefined
     if (targetTrashDir !== undefined) {
+      const migratedAt = Date.parse(latest.at)
       try {
-        rmSync(targetTrashDir, { recursive: true, force: true })
-      } catch {
-        // 残迹留待人工清理。
+        if (Number.isNaN(migratedAt)) {
+          retainedTrashDir = targetTrashDir
+          log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 台账迁移时刻不可解析（'${String(latest.at)}'），无法判定目标位是否有迁移后追加的写入，trash 残迹保留于 ${targetTrashDir}，请人工核对后清理`)
+        } else if (hasWritesAfter(targetTrashDir, migratedAt)) {
+          retainedTrashDir = targetTrashDir
+          log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚后目标位存在迁移后追加的写入，trash 残迹保留于 ${targetTrashDir}，请人工核对后清理`)
+        } else {
+          rmSync(targetTrashDir, { recursive: true, force: true })
+        }
+      } catch (error) {
+        retainedTrashDir = targetTrashDir
+        log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚后无法判定/清退目标位 trash 残迹，保留于 ${targetTrashDir} 待人工核对：${errorMessage(error)}`)
       }
     }
-    //    目标 project 目录清空则一并移除（避免 mangled 目录残留噪音）。
+    //    目标 project 目录清空则一并移除（避免 mangled 目录残留噪音）。用非递归
+    //    rmdirSync 原子判定空目录：非空抛 ENOTEMPTY 由本 catch 忽略，消除「先判定
+    //    为空、再递归删除」两步之间新写入的会话目录被一并删除的 TOCTOU。
     if (targetDir !== originalDir) {
       try {
-        const targetProjectDir = dirname(targetDir)
-        if (existsSync(targetProjectDir) && readdirSync(targetProjectDir).length === 0) rmSync(targetProjectDir, { recursive: true, force: true })
+        rmdirSync(dirname(targetDir))
       } catch {
-        // 目录已不存在/不可枚举：忽略。
+        // 目录非空（含保留的 trash 或新写入会话）或已不存在：保留。
       }
     }
     // 4) 注册表实例索引撤销（下一轮 readSessionHeader 全量重索引读回旧 header）。
@@ -235,7 +265,7 @@ export async function rollbackSession(
       throw new Error(`会话目录已还原至 ${originalDir}、备份已消费（不可原样重试），但台账 rolled-back 落盘失败：${errorMessage(error)}`)
     }
     log.info?.(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚：${latest.toCwd} → ${latest.fromCwd}（产物与 header 复现迁移前状态）`)
-    return { status: 'rolled-back', sessionId, fromCwd: latest.fromCwd }
+    return { status: 'rolled-back', sessionId, fromCwd: latest.fromCwd, ...(retainedTrashDir === undefined ? {} : { trashDir: retainedTrashDir }) }
   } catch (error) {
     const detail = errorMessage(error)
     log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚失败：${detail}`)
@@ -289,8 +319,13 @@ export function parseRollbackArgs(argv: readonly string[]): RollbackCliArgs {
   let dshHome: string | undefined
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
-    if (arg === '--all') mode = 'all'
-    else if (arg === '--session') {
+    if (arg === '--all') {
+      // 互斥模式：--all 与 --session 同时出现时直接报用法错误，绝不按出现顺序
+      // 静默择一（否则 `--session <id> --all` 会误执行破坏性的全部回滚）。
+      if (mode === 'single') throw new Error(`--all 与 --session 不能同时使用；${CLI_USAGE}`)
+      mode = 'all'
+    } else if (arg === '--session') {
+      if (mode === 'all') throw new Error(`--all 与 --session 不能同时使用；${CLI_USAGE}`)
       sessionId = requireFlagValue(argv, ++i, '--session')
       mode = 'single'
     } else if (arg === '--dsh-home') dshHome = requireFlagValue(argv, ++i, '--dsh-home')
