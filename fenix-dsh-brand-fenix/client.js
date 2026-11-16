@@ -18,6 +18,11 @@
  *      --dsw-alias-label-primary/secondary/tertiary（暗色自动翻转），字体为
  *      dsh-web-frontend 全局 @font-face Montserrat（300/400/500，600 为合成，
  *      与官方 boot 屏同做法）。
+ *      2026-11-16：桌面版宿主 24px 高 .brand 容器 overflow:hidden 裁掉 38px
+ *      画布下缘（副标字形底部被切，用户截图报告）。画布收窄 38→24 贴合墨迹：
+ *      基线 17/30.5 → 9.5/23.0（基线距 13.5 不变，视觉空隙仍 7.2px），字号/
+ *      字距/textLength 全部不动，墨迹跨度 0.75..23.0，居中于 24px 裁剪窗内
+ *      上下各留 ≈1px 余量，Web 与桌面一致完整显示。
  *   3. conversation.hero.brand.mark（size 34）——新建会话界面的空会话品牌标：
  *      官方动画鱼 fallback → 同款 Fenix 环结。不透传宿主 className（fish 类在
  *      hover 时对 mark 施加游动动画，不适用位图）。
@@ -165,12 +170,12 @@
 
 			/* 名称：自绘 SVG lockup（概念稿 A·House Caps 紧凑版，2026-11-07 用户选定）。
 			 * 主行 FENIX HARNESS：12.5px/600/字距 1px 大写，HARNESS 500 灰；
-			 * 副标 THE AI-NATIVE SDLC（2026-11-10 改文）：9px/500/字距 2.2px，基线 y=30.5（视觉空隙 ≈7.2px，
-			 * 用户校准值）。两行 textLength 锁同宽 117.3px（lengthAdjust=spacing 均
+			 * 副标 THE AI-NATIVE SDLC（2026-11-10 改文）：9px/500/字距 2.2px，基线 y=23（视觉空隙 ≈7.2px，
+			 * 用户校准值；2026-11-16 画布 38→24 收窄，基线 17/30.5 → 9.5/23，见文件头）。两行 textLength 锁同宽 117.3px（lengthAdjust=spacing 均
 			 * 分字间空隙，2026-11-07 用户要求副标与主行等宽；主行实测自然宽即
 			 * 117.3px，锁定后字体回退时两行仍等宽）。颜色走 dsh 别名变量明暗自适应；
-			 * Montserrat 为页面全局 @font-face；SVG 定宽 124px + overflow visible
-			 * 兜字体回退时的轻微超宽。 */
+			 * Montserrat 为页面全局 @font-face；SVG 定宽 124px、定高 24px 贴合宿主
+			 * 24px 品牌容器（overflow:hidden）+ overflow visible 兜字体回退时的轻微超宽。 */
 			var FenixName = function () {
 				return react.createElement(
 					'span',
@@ -182,8 +187,8 @@
 						'svg',
 						{
 							width: 124,
-							height: 38,
-							viewBox: '0 0 124 38',
+							height: 24,
+							viewBox: '0 0 124 24',
 							role: 'img',
 							'aria-label': 'Fenix Harness — The AI-Native SDLC',
 							style: { display: 'block', overflow: 'visible' },
@@ -192,7 +197,7 @@
 							'text',
 							{
 								x: 0,
-								y: 17,
+								y: 9.5,
 								textLength: 117.3,
 								lengthAdjust: 'spacing',
 								fontFamily: 'Montserrat, var(--dsw-font-family, sans-serif)',
@@ -215,7 +220,7 @@
 							'text',
 							{
 								x: 0,
-								y: 30.5,
+								y: 23,
 								textLength: 117.3,
 								lengthAdjust: 'spacing',
 								fontFamily: 'Montserrat, var(--dsw-font-family, sans-serif)',
