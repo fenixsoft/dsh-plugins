@@ -528,7 +528,7 @@
 ## 2026-11-13
 ### 可改进
 - **[arbiter:add-sess] impl修复申报缺真机效果探针（单测绿与真机无效并存白烧整轮重跑预算）**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：否
   - 影响：凡 bug-found→修复→重验循环中出现「单测绿但真机无效」的修复申报，即白烧一整轮 impl+合入+全量重验的算力与墙钟，并直接消耗 judge 重跑预算推向上限冻结（本案 rerun 6/5 的直接推手之一）；无诊断日志时归因还需额外黑盒探针轮。
   - 证据：impl-result.json 申报 tsc 零错+vitest 120/120+产物核验 ctx.get 在场（16:54Z）→ e37d005 合入 → 部署 lib 17:12Z 重建并被新实例加载（symlink+ps 取证）→ 17:13:02Z report.json 与 T2 探针 job-mwdteer6-7 双源实证 title 全空/排序退化，修复机制真机无效。tests/host.test.ts 桩按 get 陷阱形态镜像（impl 自述），结构上无法覆盖「服务在真机不可达」类失效。；触发 run_id=arbiter-add-session-advanced-search-1794503583（签名 add-session-advanced-search::judge_rerun_cap，来源 chain-handoff:escalation-alert）
   - 调查评估：触发信号 judge_rerun_cap（spec=add-session-advanced-search）：'add-session-advanced-search' judge 重跑超上限（6/5 轮），已冻结等待人工裁决。Arbiter 调查判定为框架缺口——修复涉及框架代码或产品面变更，超出处置白名单，记 todo 由自进化统一立项。
