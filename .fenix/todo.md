@@ -656,6 +656,7 @@
 
 ### 浪费
 - **429 十连退避吃掉周期评审 44% 墙钟**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：周期代码审查 run 的墙钟 44% 烧在零产出的限流等待上：首个候选 bigmodel.cn（上游限流供应商）触发 429（上游速率限制）后，客户端在 181.6 秒内连续 10 次指数退避重试全部失败，token 与工具调用均为 0；换到 deepseek 后才用 226.7 秒产出 14 条审查发现，另叠加 63.3 秒单轮停滞，整 run 408.5 秒、成本 $2.25 全部落在第二尝试，下游 code-fix 修复链随之后移。
   - 证据：fenixd.log 19441 行 run_metrics 记 run code-review-1794848697（周期代码审查 run）duration_seconds=408.459、cost_usd=2.251052、latency_stalls=1、latency_max=63.305；首尝试 context metrics（19426 行）duration_s=181.577、turns=1、input_tokens=0、tool_uses_total=0；归档 .fenix/runs/archive/code-review-1794848697.jsonl 头部 10 条 api_retry（客户端内 API 重试事件）均 error_status=429，退避延迟 0.6→38.8 秒合计 177.3 秒；19428 行 provider switched（供应商换道留痕）记「原因=429、attempt 1/2」。同一小时 18:08Z（11-17 02:08 本地，晚于本期聚合快照 4 分钟）每日自省 run review-2026-11-17 的首个 attempt 复现同形态：193.6 秒内 10 次 429 退避合计 189.4 秒、0 token，两次合计 375.2 秒。
   - 调查评估：问题源是周期代码审查车道（非某个 SPEC 实现）。已核实事实链：429 来自 bigmodel.cn，客户端 10 次退避后以 Exit code 1 退出，runner 的车道候选环随后换到 deepseek 并成功——换道机制按 add-maintenance-lane-provider-failover（在飞 SPEC，给六条维护车道接 provider 链 failover）工作正常，300 秒限流冷却也在位（17:07:58Z 日志有 switch-cooldown 记录）。但该 SPEC 的 request.md 明确写着「周/月额度类 429 的 300s 冷却不合理」一项被用户推迟（m00308「4先不动」），且该 SPEC 只改车道换道，不缩短客户端内部 10 次重试的等待——换道发生在 181.6 秒之后，这才是本条的损耗主体。与 11-16 既有条目（todo.md 625 行，code-review-1794762140 纯停滞 418.8 秒）互补：那条是成功尝试内的往返停滞，本条是失败尝试的退避等待，机制不同。429 属配额耗尽还是短时限流，归档无响应体、证据不足，不写单因结论。
@@ -666,12 +667,14 @@
 
 ### 可改进
 - **失败尝试的 181.6 秒空耗在指标中不可见**
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
   - 影响：一次 429 失败的尝试空耗 181.6 秒，但该尝试在 run_metrics 里 latency_rounds=0、latency_max=null，只留一条按实例去重（同实例只报一次）的失明 WARNING；本期数据摘要第 6 节据此只报 63.3 秒停滞，漏掉该 run 实际 244.9 秒空耗中的 74%，最大的浪费不能自动进入回顾与告警视野。
   - 证据：fenixd.log 19424 行「run code-review-1794848697: 0 rounds（无 API 往返样本）」与 19425 行 WARNING「延迟观测疑似失明（latency_rounds=0 但 assistant 轮次=1）——事件流缺时间戳/无法配对出 API 往返样本」；同 run 首尝试 run_metrics（19426 行）latency_rounds=0、latency_stalls=0、latency_max=null；数据摘要第 6 节 api-stall 聚合为 stalls=1 total=63.3s。归档 jsonl 中 10 条 api_retry（重试事件）均无 timestamp 字段，仅 retry_delay_ms（计划退避毫秒数）可读。
   - 调查评估：问题源是 run_metrics 对失败 attempt 的观测面。已核实：失败尝试的事件流缺时间戳，延迟观测器无法配对往返样本（日志自述），于是该尝试既不计停滞也不计轮次，只剩 aggregate duration 181.6 秒一个数字；每日摘要的 api-stall 口径只读 latency_* 字段，真实空耗因此被系统性低估。与 11-16 既有条目（todo.md 625 行「周期审查 run 三成 API 往返停滞」建议把停滞升级为可消费信号）互补：那条针对成功尝试内的停滞，本条针对失败尝试整体不可见；本项目 spec/changes 与 /root/fenixd 活跃区均无覆盖该观测面的立项。结论：这是从证据源头漏掉浪费的缺口，比单次 181.6 秒更值得先修。
   - 建议：在 run_metrics 增加按 attempt 的明细数组（attempt 序号、provider/model、duration、api_retry 次数与累计退避秒数、终态），失败 attempt 同样落账；或从 api_retry 的 retry_delay_ms 合成失败尝试的空耗指标。把「延迟观测失明」从按实例一次的 WARNING 改为逐 run 计数字段（如 latency_blind_seconds），让每日摘要第 6 节能看见 429 退避空耗。
 
 - **自进化回写 3 分钟落了 8 个单行提交**
+  - 自进化：问题部分成立 / 建议部分合理 / — 不需要
   - 影响：同一批自进化标记回写被拆成 8 个只改一行的提交，在 3 分 08 秒内（21:28:45–21:31:53）连续写入 git 历史；当日 9 个同类提交占窗口 19 个提交的 47%，与 ADR-285（todo 标记提交按生产者批末合并的架构裁定）要求的「一批每项目一枚提交」相悖，历史可读性与逐条对账线索被稀释。
   - 证据：git log 窗口内 8 个连续提交（664640f、56d52f6、b35b0ef、de665cf、98fddf9、1cd361f、b4b54b1、f24d0c8），每个 diff 均为 .fenix/todo.md +1/-1，把「处理：待处理」改为「处理：接受」，提交正文为空；同一日 02:48 另有 a623d85 同型提交。ADR-285（/root/fenixd/spec/knowledge/adr/ADR-285-todo-marker-commit-producer-scoped-batch-no-file-debounce.md）Decision 明文「批处理消费方在循环内逐条写标记不提交、批末按项目各调一次合并提交」，Consequences 写「接受批的标记提交数从 O(条目数) 降为 O(涉及项目数)」；知识页 todo-marker-commit-on-write.md rev=3 同口径，并要求批末合并提交正文附条目 id 明细。
   - 调查评估：问题源是 todo.md 标记回写的提交粒度。已核实提交与 diff、ADR-285 与知识页规则（规则本身已蒸馏，不算新发现）；未核实生产方——日志 13:20–13:36Z 窗口无进化/接受循环记录，commit 正文也无明细，无法裁决是自动接受循环（auto_accept_pending，按 ADR-285 应 defer 到批末一次提交）还是 dashboard 手动逐条接受（单点路径写后即提交，按设计合规）。若为前者即 evo-evolution-accept-marker-batching（2026-10-27 已归档 SPEC）的规则回归；若为后者则无需改动。与存量关系：本项目 spec/changes 无相关立项，框架侧 ADR-285 已给出应然形态。结论：形态确定、归因待取证，先补生产方可辨识性与批量断言再谈修复。
