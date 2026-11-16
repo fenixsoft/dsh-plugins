@@ -171,11 +171,15 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   let observer: ResizeObserver | undefined
   let layoutWarned = false
 
-  /** 同步面板位置（内容区矩形随窗口/侧栏宽度变化时对齐）。 */
+  /** 同步面板位置（内容区矩形随窗口/侧栏宽度变化时对齐）。
+   *  注意：cssText 整体赋值会清掉 display:none——收起态下 ResizeObserver
+   *  触发（如开关右侧边栏导致内容区 resize）曾把视图“洗”回可见，而 open
+   *  标志仍为 false，closeView 的 `!open` 早退使其永远关不掉（m01984）。
+   *  故此处显式保持收起态：closed 时样式串附加 display:none。 */
   const syncPosition = (): void => {
     if (container === undefined) return
     const layout = panelLayout(win.document)
-    container.style.cssText = layout.style
+    container.style.cssText = layout.style + (open ? '' : ';display:none')
     if (layout.observe !== undefined && typeof ResizeObserver === 'function' && observer === undefined) {
       observer = new ResizeObserver(syncPosition)
       observer.observe(layout.observe)
@@ -215,7 +219,8 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   }
 
   const closeView = (): void => {
-    if (!open) return
+    // 不做 `!open` 早退：即使 open 标志与实际可见态失步（历史 bug 的放大器），
+    // 任何收起路径都必须强制隐藏容器，保证「点了就收」绝对成立。
     open = false
     if (container !== undefined) container.style.display = 'none'
   }

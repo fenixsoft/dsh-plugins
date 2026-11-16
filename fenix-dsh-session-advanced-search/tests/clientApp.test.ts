@@ -166,6 +166,33 @@ describe('client 装配（v3.1 body 挂载嵌入）', () => {
     expect(document.querySelector('div[data-fenix-sas-view-root]')).toBeNull()
   })
 
+  it('收起态 ResizeObserver 触发（如开关右侧边栏）不得把视图洗回可见（m01984 回归）', () => {
+    mountSkeleton()
+    const stop = apply({} as never, { host: window })
+    const button = document.querySelector('button.fenix-sas-entry')
+    // 开 → 关（进入收起态，iframe 保活）。
+    button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const root = viewRoot()
+    expect(root.style.display).toBe('')
+    button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(root.style.display).toBe('none')
+    // 模拟内容区布局变化：syncPosition 被重入（cssText 重写）。
+    // 触发途径1：窗口 resize 监听仅在 open 态生效，直接调不可达——这里走
+    // ResizeObserver 语义：手动重设位置的唯一公开入口是 showView/syncPosition，
+    // 故以「收起态下 display 必须为 none」为断言核心（cssText 内嵌 display）。
+    expect(root.style.display).toBe('none')
+    // 即便容器样式被外部整体重写为可见（模拟 cssText 洗白），再次点击任意
+    // 非豁免位置也必须强制收起（closeView 不再以 open 标志早退）。
+    root.style.display = ''
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    expect(root.style.display).toBe('none')
+    // 真实重开仍可用：点入口按钮 → 可见且无 display:none 残留。
+    button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(root.style.display).toBe('')
+    expect(root.style.cssText).not.toContain('display:none')
+    stop()
+  })
+
   it('无 document 环境跳过装配并返回空停止函数（node 直载自守）', () => {
     const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'document')
     Object.defineProperty(globalThis, 'document', { value: undefined, configurable: true })
