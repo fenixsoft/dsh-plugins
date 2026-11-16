@@ -53,6 +53,12 @@ const scrypt = promisify(scryptCallback)
  * 记录的派生一律抛错。校验按记录内落盘参数执行，旧记录（N=16384）向后兼容。 */
 const SCRYPT_PARAMS = Object.freeze({ N: 131072, r: 8, p: 1, keylen: 64, maxmem: 268_435_456 })
 
+/* 未认证登录派生的在飞上限：单次派生（N=2^17/r=8）约需 128MiB，而失败限流只按
+ * 次数计数、不约束并发——同源并发提交会全部先过 isLocked 再并行派生（线程池
+ * 默认 4 并发 → 峰值约 512MiB，排队请求持续累积），小内存部署可被打至 OOM/登录
+ * 不可用。超限直接按锁定响应，并发派生内存峰值有界。 */
+const MAX_CONCURRENT_LOGIN_DERIVATIONS = 2
+
 /** 凭据记录 key（`<owner>/<id>`；owner=插件注册名）。 */
 const CREDENTIAL_SCOPE = 'fenix-dsh-auth'
 const CREDENTIAL_ID = 'login'
@@ -156,6 +162,16 @@ export function verifyUsername(username, payload) {
 	if (expected === undefined) return false
 	const candidate = Buffer.from(username, 'utf8')
 	return candidate.length === expected.length && timingSafeEqual(candidate, expected)
+}
+
+/**
+ * 远端地址归一到限流桶键：取不到地址的连接（unix socket/部分代理形态）统一
+ * 归入哨兵桶，登录计数与凭据移除清理共用同一键（否则 reset('') 是空操作，
+ * 该来源在哨兵桶里的失败锁定清不掉）。
+ * @param remoteAddress - req.socket?.remoteAddress（可空串）。
+ */
+function normalizeRateLimitAddress(remoteAddress) {
+	return typeof remoteAddress === 'string' && remoteAddress !== '' ? remoteAddress : RATE_LIMIT_UNKNOWN_ADDRESS
 }
 
 /**
@@ -846,12 +862,15 @@ function createIndexHandler({ connection, webServer, credentials, limiter, log }
 
 /**
  * 登录端点 `/auth/login`（design D4/D8）：GET（含 ?error= 白名单）直出登录
- * 页；POST 同源校验 → 8KB 限读 + Content-Type 白名单解析 → 限流判定 → scrypt
- * + 用户名校验；成功 303 `authenticatedUrl(origin + '/')`（原生 authorizeIndex 随即
+ * 页；POST 同源校验 → 8KB 限读 + Content-Type 白名单解析 → 限流判定 → 并发
+ * 闸门（在飞派生上限，超限按锁定响应）→ scrypt + 用户名校验；成功 303
+ * `authenticatedUrl(origin + '/')`（原生 authorizeIndex 随即
  * 铸 cookie 并 303 回 `./`，地址栏不残留 token）；失败 303 error=invalid；
  * 未配置 303 error=unconfigured；锁定 303 error=locked；超长/类型不符 400。
  */
 function createLoginHandler({ connection, credentials, limiter, webServer, log }) {
+	/** 未认证登录派生的在飞计数（见 MAX_CONCURRENT_LOGIN_DERIVATIONS）。 */
+	let inFlightDerivations = 0
 	return async function handleLogin(req, res) {
 		try {
 			if (req.method === 'GET' || req.method === 'HEAD') {
@@ -898,7 +917,7 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 			const remoteAddress = req.socket?.remoteAddress ?? ''
 			/* 空地址归一到哨兵键：limiter 对空串直接放行，会让取不到远端地址的
 			 * 连接整体绕过失败锁定（无限次尝试口令）。 */
-			const rateLimitAddress = remoteAddress === '' ? RATE_LIMIT_UNKNOWN_ADDRESS : remoteAddress
+			const rateLimitAddress = normalizeRateLimitAddress(remoteAddress)
 			if (limiter.isLocked(rateLimitAddress)) {
 				return writeRedirect(req, res, '/auth/login?error=locked')
 			}
@@ -909,12 +928,21 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 				return writeRedirect(req, res, '/auth/login?error=unconfigured')
 			}
 
+			/* 并发闸门：检查与递增之间不 await，保证在飞派生数不超过上限；超限
+			 * 请求按锁定处理（计入限流失败数会让廉价请求反过来锁死该来源）。 */
+			if (inFlightDerivations >= MAX_CONCURRENT_LOGIN_DERIVATIONS) {
+				log('warn', `login derivation concurrency cap (${MAX_CONCURRENT_LOGIN_DERIVATIONS}) hit; rejecting attempt from ${remoteAddress || '?'}`)
+				return writeRedirect(req, res, '/auth/login?error=locked')
+			}
 			let passwordOk
+			inFlightDerivations += 1
 			try {
 				passwordOk = await verifyPassword(parsed.password, payload)
 			} catch (error) {
 				log('warn', `password verification failed unexpectedly (${error?.message ?? error})`)
 				passwordOk = false
+			} finally {
+				inFlightDerivations -= 1
 			}
 			/* username 一并校验（凭据记录保存的账号名参与判定，不再只是展示）。
 			 * scrypt 无条件先跑：用户名错与密码错同路分流（同一 error=invalid +
@@ -970,6 +998,9 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
  */
 function createCredentialsHandler({ connection, credentials, limiter, webServer, log }) {
 	return async function handleCredentials(req, res) {
+		/* HEAD 在各错误分支同样只写头（与 GET/HEAD 成功分支、writeNativeUnauthorized
+		 * / writeLoginPage 的 HEAD 处理一致）。 */
+		const headOnly = req.method === 'HEAD'
 		try {
 			let admission
 			try {
@@ -979,7 +1010,7 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 				admission = { rejection: 401 }
 			}
 			if (admission === undefined || admission === null || 'rejection' in admission || admission.peer === undefined) {
-				writeJson(res, 401, { error: 'unauthenticated' })
+				writeJson(res, 401, { error: 'unauthenticated' }, headOnly)
 				return
 			}
 
@@ -987,7 +1018,7 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 				const record = await readLoginRecord(credentials, log)
 				const payload = record?.payload
 				const configured = payload !== undefined && payload !== null && typeof payload === 'object' && typeof payload.hash === 'string'
-				writeJson(res, 200, { configured, username: configured ? String(payload.username ?? '') : null }, req.method === 'HEAD')
+				writeJson(res, 200, { configured, username: configured ? String(payload.username ?? '') : null }, headOnly)
 				return
 			}
 
@@ -997,24 +1028,24 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 				 * cookie 认证的写请求在同源判定之外仅剩 admit 一层防线。 */
 				if (!isSameOriginStrict(headerValue(req.headers, 'origin'), headerValue(req.headers, 'host'), protocol)) {
 					log('warn', 'credential write rejected: cross-origin request')
-					writeJson(res, 403, { error: 'cross-origin' })
+					writeJson(res, 403, { error: 'cross-origin' }, headOnly)
 					return
 				}
 				let body
 				try {
 					body = await readRequestBody(req, MAX_LOGIN_BODY_BYTES)
 				} catch (error) {
-					writeJson(res, 400, { error: error?.code === 'FENIX_BODY_TOO_LARGE' ? 'body-too-large' : 'body-read-failed' })
+					writeJson(res, 400, { error: error?.code === 'FENIX_BODY_TOO_LARGE' ? 'body-too-large' : 'body-read-failed' }, headOnly)
 					return
 				}
 				const parsed = parseCredentialBody(body, headerValue(req.headers, 'content-type'))
 				if (parsed === null) {
-					writeJson(res, 400, { error: 'unsupported-body' })
+					writeJson(res, 400, { error: 'unsupported-body' }, headOnly)
 					return
 				}
 				const invalid = validateCredentialInput(parsed)
 				if (invalid !== '') {
-					writeJson(res, 400, { error: invalid })
+					writeJson(res, 400, { error: invalid }, headOnly)
 					return
 				}
 				/* 凭据 key 段写入前实际校验（review b85f804d0d02）：兑现头注释
@@ -1022,7 +1053,7 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 				 * 合法值，此处是 key 动态化前的哨兵。 */
 				if (!isCredentialKeySegment(CREDENTIAL_SCOPE) || !isCredentialKeySegment(CREDENTIAL_ID)) {
 					log('warn', `credential key segment invalid (${CREDENTIAL_KEY}); refusing to write record`)
-					writeJson(res, 500, { error: 'internal' })
+					writeJson(res, 500, { error: 'internal' }, headOnly)
 					return
 				}
 				const { salt, hash } = await hashPassword(parsed.password)
@@ -1038,16 +1069,18 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 				const protocol = listenerProtocol(webServer)
 				if (!isSameOriginStrict(headerValue(req.headers, 'origin'), headerValue(req.headers, 'host'), protocol)) {
 					log('warn', 'credential delete rejected: cross-origin request')
-					writeJson(res, 403, { error: 'cross-origin' })
+					writeJson(res, 403, { error: 'cross-origin' }, headOnly)
 					return
 				}
 				if (typeof credentials.deleteRecord !== 'function') {
 					log('warn', 'credentials.deleteRecord unavailable; cannot remove credential record')
-					writeJson(res, 501, { error: 'delete-unsupported' })
+					writeJson(res, 501, { error: 'delete-unsupported' }, headOnly)
 					return
 				}
 				await credentials.deleteRecord(CREDENTIAL_KEY)
-				limiter.reset(req.socket?.remoteAddress ?? '')
+				/* 与登录计数同一归一化：取不到远端地址时清哨兵桶，否则 reset('')
+				 * 空操作、该来源的失败锁定残留。 */
+				limiter.reset(normalizeRateLimitAddress(req.socket?.remoteAddress ?? ''))
 				writeJson(res, 200, { configured: false })
 				return
 			}
@@ -1057,7 +1090,7 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 		} catch (error) {
 			log('warn', `credentials handler degraded (${error?.message ?? error})`)
 			try {
-				writeJson(res, 500, { error: 'internal' })
+				writeJson(res, 500, { error: 'internal' }, headOnly)
 			} catch {}
 		}
 	}

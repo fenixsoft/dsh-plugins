@@ -148,11 +148,13 @@ export interface ClientPluginOptions {
  * @returns 停止函数（按钮 observer/按钮移除 + 容器清理 + 监听/观察退订）。
  */
 export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
-  if (typeof document === 'undefined') {
+  // 宿主先于全局探测解析：调用方经 host 注入自带 document 的宿主（测试桩）时，
+  // 即便全局无 document 也应可装配——自守判定统一落在解析后的宿主上。
+  const win = options?.host ?? (typeof window !== 'undefined' ? window : undefined)
+  if (win?.document === undefined) {
     log.warn('fenix-dsh-session-advanced-search: 无 document 环境，client 半装配跳过')
     return () => {}
   }
-  const win = options?.host ?? window
 
   const uiWorkspace = resolveUiWorkspace(ctx)
   if (uiWorkspace?.openSession === undefined) {
@@ -169,6 +171,7 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   let container: HTMLDivElement | undefined
   let iframe: HTMLIFrameElement | undefined
   let observer: ResizeObserver | undefined
+  let observedHost: Element | undefined
   let layoutWarned = false
 
   /** 同步面板位置（内容区矩形随窗口/侧栏宽度变化时对齐）。
@@ -180,7 +183,13 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     if (container === undefined) return
     const layout = panelLayout(win.document)
     container.style.cssText = layout.style + (open ? '' : ';display:none')
-    if (layout.observe !== undefined && typeof ResizeObserver === 'function' && observer === undefined) {
+    // 官方 React 可能整体替换内容区元素：旧节点脱离文档后不再回报尺寸。
+    // 每次同步比对已观察目标，变化即断开重挂（降级抽屉时目标缺失则纯断开）。
+    if (layout.observe === observedHost) return
+    observer?.disconnect()
+    observer = undefined
+    observedHost = layout.observe
+    if (layout.observe !== undefined && typeof ResizeObserver === 'function') {
       observer = new ResizeObserver(syncPosition)
       observer.observe(layout.observe)
     }
