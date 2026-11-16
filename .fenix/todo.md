@@ -461,7 +461,7 @@
 
 ### 失误
 - **4 个 done spec 续推全败，无远程推送必败循环**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：否
   - 影响：今日 19:09 daemon 重启，恢复扫对 4 个已完成 SPEC 的发布推送步骤全部失败，每个进入 1/3 次退避重试——仓库根本没有远程仓库，重试永远无效，属结构性必败循环；4 个 done 条目的 error 字段被推送失败污染，每次 daemon 重启还会再来一轮（本会话最多再试 8 次）。实际代码成果无损失（已全部并入本地 master）。
   - 证据：fenixd.log 11-12T11:09:50Z 四条 WARNING「Push failed ... error: src refspec main does not match any（推送目标分支 main 不存在）」attempt 1/3、退避 [300,900] 秒；STATE.md 四条目（add-fenix-skill-provider-plugin、polish-dsh-plugins-ui、bridge-projects-inline-section、add-session-grouper-and-shell-polish，均 done）error 字段同文。git remote -v 输出为空（无任何远程仓库）、git branch 仅 master 无 main。日志另有「pm.push.retry_backoff_seconds 非 list 或长度不足 2 None，回退默认退避」——该配置键缺失。全日志期（10-14 起）无更早推送尝试记录，今日启动扫为首次触发（为何 10-15/11-02 完成的 spec 今日才首推，触发机制未核实）。
   - 调查评估：问题源是 daemon 重启时的 push retry sweep（推送续跑恢复扫，对 done spec 补投 approve_push 即推送审批门后的发布步骤）。已核实事实：单因确定性归因成立——无 remote 加分支名不匹配（目标 main、实际 master），git push origin main 结构性必败，与自省车道 10 月的失败同文同因。根因归属系统性缺口：框架推送步骤缺「无远程仓库」预检，本仓库为纯本地仓库，推送步骤本应短路豁免。与存量工作关系：todo.md 既有条目链「自省收尾 push 无远程必败第 8 次」（10-16~10-23 连续 8 天上报）同根因，当时建议的预检/跳过判一直未落地，如今同一缺口从自省车道扩散到 pm_engine 发布车道，波及面从 1 条目扩大到全部 done spec；与 gates.require_push_approval=true（推送需审批门）并存形成「审批门后是必败推送」的空转链。结论：修复方向明确，属配置预检缺口而非一次性失误。
