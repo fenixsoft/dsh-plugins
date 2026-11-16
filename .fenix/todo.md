@@ -599,7 +599,7 @@
 
 ### 可改进
 - **回归白名单漏收两个被修插件，63 条修复零插件面验证入主树**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：否
   - 影响：11-14 18:55 至 11-15 01:20 合并入 main 的 63 条 fixed 项（38+21+1+3，触面为 fenix-dsh-session-advanced-search 与 fenix-dsh-session-grouper 两个 TS 插件）自合并起无任何一次 tsc/vitest 验证——fix worktree 内因无 node_modules 按契约跳过，链收尾回归（每批固定 182 项、约 7 秒）只跑 cc-import + dashboard-bridge；未验证敞口已持续 7 小时以上。
   - 证据：.fenix/verify.yaml：prepare 段有 2026-11-12 注释扩编的 session-advanced-search install+build，而 regression.cmd（同文件 regression 段）只列 cc-import 与 dashboard-bridge；.fenix/regression/last-run.json 的 cmd 同形态、total=182；三个 fix run 收尾自述「worktree 与主仓均无 node_modules，tsc/vitest 条件跳过」（-2817/-4577/-6417），worktree 创建时 verify_contract「供给完成标记写入失败 node_modules」WARNING 两度出现（10:40:17Z、11:40:17Z）；fenixd.log 晚间合并后无任何 vitest/tsc 执行行（grep 核实）。
   - 调查评估：问题源是 2026-11-12 的 verify contract 扩编（admin 为 add-session-advanced-search 环境阻塞把该插件加进装配链）只做了一半：prepare 收编、regression 漏收编，而 session-advanced-search 有现成测试套件（host/view/page/protocol.test，11-13 c0e61af、3f14af9 落库）；session-grouper 同样不在白名单。这也解释了观察到的依赖不对称——dashboard-bridge 每被回归 pnpm install 而 SAS 目录始终无 node_modules。已核实：唯获得真实验证的是 auth 纯 JS 插件（夜批自述 node --test 19/19 全过）。根因归属：新插件收编 checklist 不对称的系统性缺口，非代码错误。与存量工作关系：11-13 既有条目「impl修复申报缺真机效果探针」（todo 49f8f80）讲修复申报侧验证缺位，本条是链级回归白名单缺位，互补不重复；知识域无 verify contract 收编能力页。结论：每条 TS 修复的验证都被无限期推迟到下一轮 review 或人工，确定性敞口，够格小改立项。
