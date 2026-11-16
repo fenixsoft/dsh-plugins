@@ -591,7 +591,7 @@
 
 ### 失误
 - **合并门「零修复拒合回」丢弃 2 个 ignore 标记提交**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：否
   - 影响：两个 worktree 提交（979f47f、00162a0，均为源码内 fenix-ignore 误报标记注释，作用是防止同一误报在下一轮 review 复发再烧一轮 fix）因「fixed=0 拒合回」（框架对零有效修复批次拒绝把 worktree 分支合回主树的闸门动作）被丢弃，其中 dd1ac41dd886（composer 无日期输入的误报标记）已核实不在 main——本轮 -5449 烧 $2.06 处置的恰是同类误报复发，标记丢失即复发敞口自我再生；且 run 终态记 success 与产物实际丢失直接矛盾。
   - 证据：fenixd.log 11:40:04Z「code-fix 第 3 批零有效修复（fixed=0, commits=1, ignored=2），拒合回」与 11:47:34Z「第 1 批零有效修复（fixed=0, commits=1, ignored=1），拒合回」，两条 worktree 随后 success=False 清理（11:47:34Z 注册 legacy、12:26:47Z stale 清理）；git log --all 无 979f47f/00162a0；main 的 page.ts 仅有 6c97dc4a0f16 一个标记、无 dd1ac41dd886（grep 核实）；而 code-fix-1794656417 的 run_metrics terminal=success，其收尾自述「收尾状态：工作区干净（commit 00162a0 已落）」。
   - 调查评估：问题源是 session-advanced-search 修复链的合并门。已核实事实链：拒合回判定只读批报告的 fixed 计数，无视自己同时报出的 commits=1——被弃的恰是纯标记型提交；fixer 在 worktree 内提交后自认「已落」，runner 记 success，合并门弃件，三层对产物去向的认知互不一致。根因归属：系统性缺口（合并门语义不含「仅含标记」的提交形态），非一次性失误。与存量工作关系：知识域 maintree-stray-wip 的 stray-wip-disposal 能力页规定了 fenix-ignore 标记的收编用法但未覆盖「标记提交被拒合回丢弃」形态；11-03「升级告警条件消失后不核销」属告警域不同面，均互补。结论：两处标记须重新落盘，合并门需把「commits>0 且 ignored>0」视为可合文档型提交。
