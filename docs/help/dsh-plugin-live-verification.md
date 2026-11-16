@@ -62,6 +62,17 @@
 - cc-import：按 `docs/help/cc-import-install.md` 的真机验收清单 1–6 逐项核对（导入写入只进 `$DRILL_HOME`，可用 `python3 -c "import yaml; ..."` 直接核对 `cordis.patch.yml` 里 provider 的 `apiKeyEnv` 引用与 `.credentials.yaml` 的 refs，**不要把凭据值打印到验收记录**）。
 - bridge：按 `docs/help/fenix-dashboard-bridge-install.md` 的真机验收清单 1–12 逐项核对。其中 SSE 自动刷新与「移除项目 ≤60s 消失」需要上游数据变化驱动，见下节。
 
+## playwright-cli 断言口径
+
+清单核对与自动化断言（`playwright-cli` 的 eval/console/requests 快照）均以**真实运行时实测值**为准，不锚定规格字面量。2026-10-14 全量验收 30 场景中 11 个 warning 全部源于断言校准而非产品缺陷，口径如下：
+
+- **locale**：UI 文案以运行时实际 locale 为准（本机为 English locale），按钮/条目断言用 "Import from Claude Code" 之类实际文案，不要精确匹配中文字面量（「从 Claude Code 导入」）。
+- **bundle URL 形态**：dsh 组合模块 URL 形如 `plugins/??cc-import/client.js&rev=<hash>`，断言不要 grep 字面 `plugins/cc-import/client.js`；以 HTTP 200 + 响应体特征（ModuleLoader 工厂、按钮文案）为准。
+- **定位器**：优先 role/可访问名定位；`textContent` 匹配注意前缀噪声——如项目条目实际文本为 `"Ffenix-server"`（头像字母前缀），`^\s*fenix-server\s*$` 之类锚定正则会落空，用包含式匹配或 role+name。
+- **数值断言用有界口径**：如上游连接数断言「多轮切换后 `ss -tan | grep 8787` 的 ESTAB ≤ 基线」，不做精确等值。
+- **时序断言一律条件轮询**（条件满足连续 N 次才放行，禁固定 sleep）；首跑引导弹窗（Preview Notice / Add an API key）与验证流存在时序竞争，以「连续 2 次无弹窗」为放行口径。
+- **断言失败先复核归属**：断言与运行时实际行为不符属场景缺陷（修场景），确属产品行为不符才修产品代码（对照 verification-report 的复核口径）。
+
 ## 上游数据变更纪律（bridge SSE/移除验收）
 
 共享上游不属于本 drill，所有变更必须自愈：
@@ -84,7 +95,7 @@
 
 ## 拆除
 
-1. 杀隔离实例（`ss -tlnp | grep 3444` 找 pid，`kill`）；
+1. 杀隔离实例（`ss -tlnp | grep 3444` 找 pid，`kill <pid>`。**不要用 `pkill -f dsh`**——自匹配陷阱：命令行含 `dsh` 的当前脚本/终端会把自己一并杀掉，还会误伤同机其他 dsh 实例；停上游同理，先 `ss` 取 pid 再 `kill`）；
 2. 移除临时 hosts 条目（如有）并确认解析还原；
 3. 上游 registry diff 确认无残留（如做过夹具/停机操作）；
 4. `$DRILL_HOME` 目录按需保留或删除（含导入的凭据，不留明文导出）。

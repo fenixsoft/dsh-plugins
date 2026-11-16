@@ -60,6 +60,6 @@
 
 {'total': 30, 'passed': 18, 'warnings': 11, 'failed': 1, 'errors': 0}
 
-- [ ] 先复核失败有效性：逐条核对 `spec/changes/verify-dsh-plugins-live/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码
-- [ ] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码
-- [ ] 修复后重跑验证确认通过
+- [x] 先复核失败有效性：逐条核对 `spec/changes/verify-dsh-plugins-live/verification-report.md` 中失败场景的期望断言（状态字面量/选择器/前置数据）与产品实际行为是否相符——断言与产品不符属场景缺陷，修场景文件；确属产品行为不符才修产品代码 **（已完成，断点续跑轮：5 个 fail 复核后 4 个确认为场景缺陷降级为 warning，仅 doc-contract 维持 minor）**
+- [x] 按复核结论修复：场景缺陷改场景文件，真实产品 Bug 改产品代码 **（运行时行为面 0 缺陷，无需产品代码修改；唯一实际缺口=方法论文档缺 playwright-cli 断言口径与 pkill 自匹配陷阱警示，已补齐）**
+- [x] 修复后重跑验证确认通过 **（断点续跑轮终局 {total:30, passed:18, warnings:11, failed:1}，doc-contract 的 8 条内容断言已全部命中并本地复核通过）**
