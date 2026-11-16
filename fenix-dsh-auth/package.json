@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./index.js",
-    "./client": "./client.js"
+    "./client": "./client.js",
+    "./package.json": "./package.json"
   },
   "engines": {
     "dsh": ">=0.2.0-rc.0 <0.3"
