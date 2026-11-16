@@ -613,7 +613,7 @@
   - 建议：code-review 提示词约束收尾报告为结构化少轮输出（findings 台账 JSON 单轮落盘+受限摘要轮数）；run_metrics 聚合侧对 text_turns 占比离群 run 加提示性标注供复盘消费。
 
 - **散件升级条目悬置 15 小时，指纹入库无自动认领探测**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：否
   - 影响：maintree_stray_wip_stale（主树 tracked 未提交改动滞留超 30 分钟宽限的周期盘点告警）第 4 度升级的 4 条告警/处置条目自 11-14 11:04-11:13（本地）创建起至窗口结束全部 handled=false（悬置 15 小时+），而人工已在 18:39 用提交 47fefd9 精确处置了指纹 5 文件——框架对「人工已回应」零感知，下次同文件滞留将按第 5 度条款再次零触碰+升级，悬置逐度累加。
   - 证据：admin_alerts.json 中 6ec454cd3333（stale 信号）/beebaad1f510（处置中过路条目）/a786455543d4（第 4 度升级）/9c2b3b7d7a37（escalation）均 handled=false（读核实）；git show 47fefd9 --stat 含且仅含指纹 5 文件（dashboard-bridge 的 index.ts/panels.tsx/dsh-runtime.d.ts/opsBadge.test.ts/srcContract.test.ts）加同特征 untracked 兄弟（clipboard-fallback 新插件 4 文件）。
   - 调查评估：问题源是 maintree-stray-wip 处置域的升级消费端。已核实：知识域能力页 stray-wip-disposal 第 4 度条款（零触碰+升级转人工，直至人工建 worktree 车道或明示认领主树直改）已蒸馏且本次处置动作本身合规，不算新发现；缺口在协议没有「人工以提交回应」的检测面——指纹文件集全部进入 main 新 commit 是机械可判的认领信号，今日实证框架未能消费（告警文本自述「等待人工提交或 stash 处置」，提交发生却无人核销）。与存量工作关系：11-03「升级告警条件消失后不核销」与本日既有「升级告警空转扫描」条目是告警生命周期通用缺口，本条是该族在本信号上的指纹级专用探测形态，互补不重复。结论：人工主树直改形态未变，第 5 度复发概率高，探测缺位会让每度升级都成为永久挂账。
