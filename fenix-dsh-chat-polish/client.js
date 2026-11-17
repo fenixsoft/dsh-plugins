@@ -68,10 +68,13 @@
 			/* ── 样式 ─────────────────────────────────────────────────────────── */
 
 			var POLISH_CSS = [
-				/* 对话列留白固定 24px。选择器全部用 CSS-modules 语义后缀 [class$="_suffix"]
+				/* 对话列留白固定 24px。选择器用 CSS-modules 语义后缀 [class$="_suffix"]
 				 * （类名=构建哈希前缀+语义后缀，后缀跨版本稳定）+ 结构锚点
 				 * （[data-conversation-scroll] / :has(textarea)），dsh 升级不再静默失效。
-				 * 全宽变量挂 [class$="_column"]（唯一后缀），用户气泡经 _userStack 钉扎豁免 */
+				 * 全宽变量挂 [class$="_column"]（唯一后缀），用户气泡经 _userStack 钉扎豁免。
+				 * 注意：后缀匹配隐含「该类是 class 属性最后一个 token」——带变体修饰类的
+				 * 元素（如 hero 根 "…_root …_hero"）会失配；此类元素一律用 [class*= 匹配
+				 * 主体类 + :has() 收窄（0.2.2 修复，见下方 InputBar 段注释） */
 				/* ChatView .scroll 侧距（clearance+16=32px）→ 24px */
 				'body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_scroll"]{padding-left:24px;padding-right:24px}',
 				/* ChatView .column 解除 --dsh-chat-content-width 居中上限 */
@@ -89,12 +92,18 @@
 				 * 右移 24px——公式退化路径，非设计意图。min(0px,…) 只夹右推、保留
 				 * 向左负 margin（真正出血场景）。双类抬特异性压过核心同选择器规则 */
 				'[class$="_body"] .md-table-wide.md-table-wide{margin-left:min(0px, calc(-1 * var(--dsh-table-lead)))}',
-				/* InputBar .root 侧距 16→24（bottom 4px 保持官方值） */
-				'body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has(textarea),body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has([contenteditable="true"]){padding-left:24px;padding-right:24px}',
+				/* InputBar .root 侧距 16→24（bottom 4px 保持官方值）。
+				 * 0.2.2: [class$= 换 [class*=——hero 变体根 class 属性是
+				 * "uV2eYG_root uV2eYG_hero"（变体修饰类在后），不以 _root 结尾，
+				 * 后缀匹配在新建会话页全体失配 → 卡片回落官方 952px 与行错位
+				 * （2026-11-17 用户报障）。contains 匹配对 token 顺序免疫；
+				 * 误伤由 :has(textarea)/:has(editable) 收窄兜底（全文档实测仅
+				 * 命中 wSkVaW_root 与 uV2eYG_root[_hero] 两元素，弹层根不含编辑器） */
+				'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea),body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"]){padding-left:24px;padding-right:24px}',
 				/* 输入卡 80% 宽度居中（根节点 align-items:center 自动居中），提示条/队列坞卡同轴 */
-				'body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has(textarea)>[class$="_card"],body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has([contenteditable="true"])>[class$="_card"]{width:80%;max-width:none}',
-				'body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has(textarea) [class$="_notice"],body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has([contenteditable="true"]) [class$="_notice"]{width:80%;max-width:none}',
-				'body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has(textarea) [class$="_dock"],body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has([contenteditable="true"]) [class$="_dock"]{width:80%}',
+				'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea)>[class$="_card"],body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"])>[class$="_card"]{width:80%;max-width:none}',
+				'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea) [class$="_notice"],body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"]) [class$="_notice"]{width:80%;max-width:none}',
+				'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea) [class$="_dock"],body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"]) [class$="_dock"]{width:80%}',
 				/* hero（空会话）栈铺满，卡片经上方 24px 侧距落到同一基线。
 				 * width:auto 是 fit-content——hero 栈缩成标题行自然宽（~368px）
 				 * 「中间一小块」（2026-11-05 用户实证）；width:100% 才是铺满，
