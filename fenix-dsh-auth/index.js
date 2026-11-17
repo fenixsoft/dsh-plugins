@@ -83,6 +83,7 @@ const LOGIN_ERROR_MESSAGES = Object.freeze({
 	locked: '失败次数过多，请 60 秒后重试',
 	unconfigured: '未配置账号密码：请先用 token URL 登录，然后在设置弹窗的「登录」分区配置账号密码',
 	untrusted: '当前访问地址不在 dsh web 信任主机列表中：即使账号密码正确，登录后也无法进入应用。请改用受信任地址访问，或由管理员将该地址加入 --trusted-host 后重启 dsh web',
+	unconfirmed: '登录凭据正确，但 dsh web 未能确认当前访问地址受信任（信任探测能力不可用或异常），已按保守策略拒绝签发会话以防 DNS rebinding——这并非确认地址不受信。请由管理员核查当前地址是否需加入 --trusted-host 并重启 dsh web',
 })
 
 /** 凭据 key 段校验（等价 dsh-credentials KEY_SEGMENT_PATTERN 的保守子集）。 */
@@ -246,7 +247,7 @@ export function normalizeLoginError(rawError) {
  * 渲染登录页（design D7：单文件 HTML，无外部资源、无模板引擎；静态渲染，
  * 禁 CSS animation/transition；页面不含 token/凭据/哈希，错误文案仅来自
  * 白名单并经 escapeHtml）。
- * @param errorCode - '' | 'invalid' | 'locked' | 'unconfigured' | 'untrusted'。
+ * @param errorCode - '' | 'invalid' | 'locked' | 'unconfigured' | 'untrusted' | 'unconfirmed'。
  */
 export function renderLoginPage(errorCode = '') {
 	const code = normalizeLoginError(errorCode)
@@ -964,11 +965,13 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 			 * 预检只拦「确定不受信」（probeUntrusted === true），isTrusted 缺失或
 			 * 抛错时返回 undefined 即放行——DNS rebinding / 改写 Host 的反向代理
 			 * 可借此把会话 token 重定向到非受信域外泄。此处复核：未能确证受信
-			 * （!== false，含 readTrustedHosts/isTrusted 不可用）一律回退既有
-			 * error=untrusted 重定向，不签发带 token 的跳转。 */
+			 * （!== false，含 readTrustedHosts/isTrusted 不可用）一律回退
+			 * error=unconfirmed 重定向（与「确定不受信」的 error=untrusted 文案
+			 * 区分：此处是保守拒绝、未能确认，而非断言地址不受信），不签发带
+			 * token 的跳转。 */
 			if (probeUntrusted(connection, req.headers) !== false) {
-				log('warn', 'login success redirect withheld: host trust not confirmable; falling back to error=untrusted')
-				return writeRedirect(req, res, '/auth/login?error=untrusted')
+				log('warn', 'login success redirect withheld: host trust not confirmable; falling back to error=unconfirmed')
+				return writeRedirect(req, res, '/auth/login?error=unconfirmed')
 			}
 			const base = `${protocol}//${headerValue(req.headers, 'host') ?? 'localhost'}/`
 			let target
