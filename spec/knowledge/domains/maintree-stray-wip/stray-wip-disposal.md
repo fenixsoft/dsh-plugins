@@ -1,7 +1,7 @@
 # 主树散件 WIP 处置口径（maintree_stray_wip_stale）
 
 <!-- knowledge: capability=stray-wip-disposal rev=2 origin=prehistoric
-     sources=git:e570dc3-..2026-11-12, 第4度回写 admin-dsh-plugins-1794625487 2026-11-14, 第5度回写 admin-dsh-plugins-1794878615 2026-11-17 -->
+     sources=git:e570dc3-..2026-11-12, 第4度回写 admin-dsh-plugins-1794625487 2026-11-14, 第5度回写 admin-dsh-plugins-1794878615 2026-11-17, 第6度回写 admin-dsh-plugins-1794886474 2026-11-17 -->
 
 > 最后更新：2026-11-17 UTC+8
 > 来源：admin 处置轮 c97b6ddf8a51（2026-10-16 第 1 度）、298f844aee26（2026-11-12 第 2 度）、add1bdf366c0（2026-11-12 第 3 度）实证蒸馏；落地 evo-recurring-stray-remediation（框架域规则）在本项目的口径。第 4 度回写见跟踪项小节（admin-dsh-plugins-1794625487，2026-11-14），第 5 度回写见其后小节（admin-dsh-plugins-1794878615，2026-11-17）。
@@ -39,3 +39,9 @@
 - 改动内容：第 4 度 opsAlert 特征集策展迭代的延续——diff 注释载明「2026-11-17 用户指令两连改：①徽标缩小并成圆形（单字正圆盒 14×14、多字短胶囊 borderRadius 9999）②上对齐（verticalAlign text-top）」；同现场 untracked market.yml 为 playwright aria snapshot 转储残留（892 行，untracked 族信号管辖，非本信号清单）。
 - 处置：按第 5 度条款零触碰（未 commit/stash/untrack，处置轮 admin-dsh-plugins-1794878615），escalate 通知人类建立 worktree 车道，suggested_choice=notify_worktree_lane（与第 4 度一致）。
 - 复查时机（再确认）：第 6 度起维持零触碰 + 升级通知，直至人类建立车道或明示认领主树直改形态；若人类持续不响应，建议向人类提请流程约束升级（主树直改提醒或人工会话强制 worktree），而非继续逐度空转告警。
+
+### 第 6 度回写（2026-11-17 03:00，零触碰 + 流程约束升级提请已发出）
+
+- 告警：first_seen=2026-11-17T03:00:33Z（指纹 9c72bf8edc2a6b1f，宽限 30.1 分钟），同文件集口径第 6 度命中——panels.tsx 单文件，与第 5 度字节级同一改动集（同指纹，第 5 度告警 00:52 后约 2 小时复发）。
+- 处置：零触碰（处置轮 admin-dsh-plugins-1794886474），suggested_choice=notify_worktree_lane 维持。
+- 流程约束升级提请已发出：第 4 度（11-14）与第 5 度（11-17 00:52）升级通知均未获响应，按复查时机条款向人类提请二选一——人工会话强制/提醒 worktree 车道，或主树 tracked 直改提醒 hook；第 7 度起处置轮可直接引用本条，不必重新论证。
