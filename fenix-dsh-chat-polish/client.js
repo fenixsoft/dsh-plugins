@@ -255,7 +255,10 @@
 				var parts = contentParts(data.content)
 				var showBubble = parts.text !== '' || parts.rest.length > 0
 				var compactImages = parts.attachments.length > 1
-				var referenceLabels = data.referenceLabels || []
+				/* 形态守卫：referenceLabels 漂移出非数组真值（字符串/对象）时降级为空数组，
+				 * 防止下方 join('、') 抛 TypeError 击穿整个遮蔽渲染器（宿主 abdicate 整体
+				 * 退位回官方纯文本），与附件 name/bytes、useInput/useChat 的显式守卫同口径 */
+				var referenceLabels = Array.isArray(data.referenceLabels) ? data.referenceLabels : []
 
 				var children = []
 				if (parts.attachments.length > 0) {
@@ -324,8 +327,12 @@
 
 			/* ═══ 输入框历史消息导航（feature 3）══════════════════════════════════ */
 
-		/* 当前挂载的控制器引用：全局捕获监听的路由目标（headless 组件挂载时登记）；
-		 * 浏览态光标与缓存草稿等会话状态收在各控制器实例 ref 内，不在此共享 */
+		/* 当前挂载的控制器引用：全局捕获监听的路由目标（控制器挂载时登记）；
+		 * 浏览态光标与缓存草稿等会话状态收在各控制器实例 ref 内，不在此共享。
+		 * owner 是单指针，多 composer 短暂并存（会话切换过渡期双挂载）时后挂载者
+		 * 覆盖先挂载者，按键路由以 owner.anchorRef 锚元素与事件目标 editorEl 的
+		 * 共同 InputBar 根（[class*="_root"]，与 POLISH_CSS 输入卡锚点同源）判定
+		 * 归属，不匹配不接管——历史文本不会写进别的 composer 草稿 */
 		var historyState = { owner: null }
 		/* 浏览态光标（每控制器一份，随 session 作用域插槽自然隔离，多 composer 并存
 		 * 不串扰）：pos = 从最新一条往回的步数（1=最新）；savedDraft = 进浏览态前的草稿 */
@@ -461,6 +468,18 @@
 			if (keepSaved !== true) nav.savedDraft = null
 		}
 
+		/* 按键归属校验：事件目标编辑器须与 owner 锚元素共处同一 InputBar 根
+		 * （[class*="_root"]）。锚不可用（未挂载/已断开/根找不到）时按不归属处理——
+		 * 宁可放行默认行为，也不把历史导航套到别的控制器上 */
+		function ownedEditor(editorEl, owner) {
+			var anchorRef = owner.anchorRef
+			var anchorEl = anchorRef && anchorRef.current
+			if (!anchorEl || !anchorEl.isConnected) return false
+			var ownerRoot = anchorEl.closest('[class*="_root"]')
+			if (!ownerRoot) return false
+			return ownerRoot === editorEl.closest('[class*="_root"]')
+		}
+
 		/* document 捕获阶段 keydown：先于 Lexical 命令处理 */
 		function onHistoryKeydown(e) {
 			var nav = null
@@ -473,6 +492,7 @@
 				if (!editorEl || editorEl.dataset.phase !== 'plain') return
 				var owner = historyState.owner
 				if (!owner) return
+				if (!ownedEditor(editorEl, owner)) return /* 事件目标不是 owner 的编辑器：放行 */
 				nav = owner.nav
 
 				if (e.key === 'Escape') {
@@ -543,11 +563,15 @@
 			} catch (err) { /* never */ }
 		}
 
-		/* headless 控制器：session 作用域插槽自动注入 inputActions/useInput/useChat */
+		/* 历史导航控制器：session 作用域插槽自动注入 inputActions/useInput/useChat；
+		 * 另渲染一个 display:none 锚元素（纯 headless 拿不到任何宿主 DOM，无从做
+		 * 按键事件的实例归属判定），锚不生成盒子、不占布局与 flex gap，仅供
+		 * ownedEditor 做共同根比对 */
 		var HistoryController = function HistoryController(props) {
 			var input = typeof props.useInput === 'function' ? props.useInput(function (s) { return s }) : null
 			var chat = typeof props.useChat === 'function' ? props.useChat(function (s) { return s }) : null
 
+			var anchorRef = react.useRef(null)
 			var refs = react.useRef(null)
 			if (refs.current === null) {
 				refs.current = {
@@ -555,6 +579,7 @@
 					chatRef: { current: null },
 					draftRef: { current: '' },
 					nav: freshNav(),
+					anchorRef: anchorRef,
 				}
 			}
 			refs.current.actionsRef.current = props.inputActions || null
@@ -571,7 +596,11 @@
 					if (historyState.owner === api) historyState.owner = null
 				}
 			}, [])
-			return null
+			return react.createElement('span', {
+				ref: anchorRef,
+				'data-fdxchat-history-anchor': '',
+				style: { display: 'none' },
+			})
 		}
 
 		/* ── 插件体：样式注入 + keyed 插槽遮蔽注册 ── */

@@ -198,20 +198,34 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   // [fenix-ignore:3d7f80671ff6] v3.1 起容器挂 document.body 且 position:fixed，contentHost 仅只读矩形，从不改写宿主 inline 样式，卸载无残留可还原
   const ensureMounted = (): void => {
     if (initialized) return
-    initialized = true
     const doc = win.document
-    container = doc.createElement('div')
-    container.dataset.fenixSasViewRoot = 'true'
-    container.style.display = 'none'
-    iframe = doc.createElement('iframe')
-    iframe.src = PAGE_PATH
-    iframe.title = '高级搜索'
-    iframe.style.cssText = 'display:block;width:100%;height:100%;border:none;background:transparent;'
-    container.append(iframe)
-    // body 挂载：React 重渲染不可达（内容区挂载会被摘除成孤儿——上一形态
-    // 「重开不保留结果」根因），iframe 状态天然保活。
-    syncPosition()
-    doc.body.append(container)
+    try {
+      container = doc.createElement('div')
+      container.dataset.fenixSasViewRoot = 'true'
+      container.style.display = 'none'
+      iframe = doc.createElement('iframe')
+      iframe.src = PAGE_PATH
+      iframe.title = '高级搜索'
+      iframe.style.cssText = 'display:block;width:100%;height:100%;border:none;background:transparent;'
+      container.append(iframe)
+      // body 挂载：React 重渲染不可达（内容区挂载会被摘除成孤儿——上一形态
+      // 「重开不保留结果」根因），iframe 状态天然保活。
+      syncPosition()
+      doc.body.append(container)
+    } catch (error) {
+      // 装配中途抛错：回滚半成品与观察态，initialized 保持未置位（闩锁只在
+      // 装配全部成功后落定），warn 留痕后返回，下次点击入口按钮可整体重试——
+      // 原实现先置闩锁后装配，任一步骤抛错即永久封锁后续 showView。
+      container?.remove()
+      container = undefined
+      iframe = undefined
+      observer?.disconnect()
+      observer = undefined
+      observedHost = undefined
+      log.warn(`fenix-dsh-session-advanced-search: 嵌入视图装配抛错，已回滚待下次点击重试：${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
+    initialized = true
     if (layoutWarned) return
     const anchored = resolveContentHost(doc) !== undefined
     if (!anchored) {
