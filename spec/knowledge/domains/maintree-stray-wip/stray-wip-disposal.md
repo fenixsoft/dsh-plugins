@@ -1,10 +1,10 @@
 # 主树散件 WIP 处置口径（maintree_stray_wip_stale）
 
 <!-- knowledge: capability=stray-wip-disposal rev=2 origin=prehistoric
-     sources=git:e570dc3-..2026-11-12, 第4度回写 admin-dsh-plugins-1794625487 2026-11-14 -->
+     sources=git:e570dc3-..2026-11-12, 第4度回写 admin-dsh-plugins-1794625487 2026-11-14, 第5度回写 admin-dsh-plugins-1794878615 2026-11-17 -->
 
-> 最后更新：2026-11-14 11:11 UTC+8
-> 来源：admin 处置轮 c97b6ddf8a51（2026-10-16 第 1 度）、298f844aee26（2026-11-12 第 2 度）、add1bdf366c0（2026-11-12 第 3 度）实证蒸馏；落地 evo-recurring-stray-remediation（框架域规则）在本项目的口径。第 4 度回写见跟踪项小节（admin-dsh-plugins-1794625487，2026-11-14）。
+> 最后更新：2026-11-17 UTC+8
+> 来源：admin 处置轮 c97b6ddf8a51（2026-10-16 第 1 度）、298f844aee26（2026-11-12 第 2 度）、add1bdf366c0（2026-11-12 第 3 度）实证蒸馏；落地 evo-recurring-stray-remediation（框架域规则）在本项目的口径。第 4 度回写见跟踪项小节（admin-dsh-plugins-1794625487，2026-11-14），第 5 度回写见其后小节（admin-dsh-plugins-1794878615，2026-11-17）。
 
 ## 信号形态
 
@@ -32,3 +32,10 @@
 - 改动内容：add-dsh-ops-alert-badge（2026-11-13 push 完结、交付物已入库）之后的策展改版——diff 注释载明「2026-11-13 用户指令：告警计数移到菜单文字后红底 pill 显示」（图标数字角标→存在圆点 + label pill，dsh-runtime.d.ts label 类型放宽 ReactNode，测试同步换血）；快照自洽实测全绿（tsc --noEmit 0 错、vitest 174/174）。
 - 处置：按第 4 度条款零触碰（未 commit/stash/untrack，处置轮 admin-dsh-plugins-1794625487），escalate 通知人类建立人工会话 worktree 车道；注册表两选项（commit_stray_wip 第 4 度禁用、untrack_stray_wip 源码禁用）均不适用，回填 suggested_choice=notify_worktree_lane 供注册表演进。
 - 复查时机（更新）：第 5 度起维持同一处置（零触碰 + 升级通知），直至人类建立车道或明示认领主树直改形态；MUST NOT 自动收编快照。
+
+### 第 5 度回写（2026-11-17，第 4 度条款按复查时机再触发）
+
+- 告警：first_seen=2026-11-17T00:52:34Z（指纹 9c72bf8edc2a6b1f，宽限 30.1 分钟），dashboard-bridge 1 tracked 散件：src/client/panels.tsx——同文件集口径第 5 度命中（信号 evidence 计「历史告警/处置 2 轮」为同指纹 9c72bf8e 自身口径；signal evidence 首见 11-17 00:52 前该指纹未告警过，度数仍按知识页同文件集口径计）。
+- 改动内容：第 4 度 opsAlert 特征集策展迭代的延续——diff 注释载明「2026-11-17 用户指令两连改：①徽标缩小并成圆形（单字正圆盒 14×14、多字短胶囊 borderRadius 9999）②上对齐（verticalAlign text-top）」；同现场 untracked market.yml 为 playwright aria snapshot 转储残留（892 行，untracked 族信号管辖，非本信号清单）。
+- 处置：按第 5 度条款零触碰（未 commit/stash/untrack，处置轮 admin-dsh-plugins-1794878615），escalate 通知人类建立 worktree 车道，suggested_choice=notify_worktree_lane（与第 4 度一致）。
+- 复查时机（再确认）：第 6 度起维持零触碰 + 升级通知，直至人类建立车道或明示认领主树直改形态；若人类持续不响应，建议向人类提请流程约束升级（主树直改提醒或人工会话强制 worktree），而非继续逐度空转告警。
