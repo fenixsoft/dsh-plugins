@@ -572,6 +572,7 @@ function degradeBannerHTML(reason, degradedDetail) {
        protocol.ts credentialHint 一致），完整路径见 db-d 提示文案。 */
     actions = '<div class="db-actions">'
       + '<button class="btn-amber" id="goConfigBtn">' + ICONS.rightUp + ' 返回主界面，前往「设置 → 模型」</button>'
+      // [fenix-ignore:a62977cabf80] 文案为 spec 钉死口径：session-advanced-search.md 规定 credential-missing 横幅必含「仅重试 AI 分析」（同 query 重新 POST），protocol.ts UI_TEXT.actionRetryAiOnly 同源且注释明示行为=重新 POST；协议仅 POST/GET/DELETE /jobs 端点、无分析段重放端点，文案与行为均按 spec 实现（两分支同 handler），改文案即偏离 spec。
       + '<button class="btn-amber" id="retryAiBtn">' + ICONS.refresh + ' 仅重试 AI 分析</button>'
       + '</div>';
   } else {
@@ -646,6 +647,19 @@ async function runSearch(query) {
   renderLogs();
 
   try {
+    /* 中断/详情监听在面板渲染后立即绑定（原在 POST 返回后才绑）：建任务请求
+       在途期间面板与「中断」按钮已可见，点击须有反馈。interrupt 对 jobId 为空
+       的建任务窗口跳过 DELETE（本 run token 随即过期，POST 返回后由下方过期
+       分支回收刚建成的任务）；详情切换不依赖 jobId，窗口期同样可用。 */
+    $('#stopBtn').addEventListener('click', function () { interrupt(token); });
+    $('#detailToggle').addEventListener('click', function () {
+      detailOpen = !detailOpen;
+      var d = $('#detailBody');
+      if (d) d.style.display = detailOpen ? 'block' : 'none';
+      /* 展开时补渲染当前全量日志：终态后轮询与 SSE 均已停、不再有新帧触发
+         renderLogs，此处不补则此时才点开的详情面板恒为空/陈旧。 */
+      if (detailOpen) renderLogs();
+    });
     /* 单在途契约（知识页/jobs.ts 头注释：同一 client 重复提交先 DELETE 旧任务
        再建新任务，host 不做隐式取消）。DELETE 幂等（未知 id 404/终态 noop），
        结果尽力而为，不阻塞建新任务。 */
@@ -655,6 +669,14 @@ async function runSearch(query) {
       try { await api('DELETE', API + '/' + encodeURIComponent(prevJob)); } catch (e) { /* 尽力而为 */ }
     }
     var created = await api('POST', API, { query: query });
+    /* POST 建任务响应形状守卫（口径同上方 parseJobStatus 的 jobId 非空串纪律，
+       与 GET 轮询/SSE 帧同一数据面纪律）：api() 把非 JSON 的 2xx 响应吞成
+       null，裸取 created.jobId 会以「Cannot read properties of null」类
+       TypeError 漏进 finishFail，用户看到的不是可读原因；不满足最小形状时
+       按既有失败路径报可读文案。 */
+    if (!isPlainObject(created) || typeof created.jobId !== 'string' || created.jobId.length === 0) {
+      throw new Error('任务创建响应异常，请稍后重试');
+    }
     if (token !== runToken) {
       /* 过期响应（快速连续提交/提交后即中断）：本 run 已被取代，取代方登记
          时 jobId 还是 null（本 POST 未返回）无人可 DELETE 本任务——此处删除
@@ -669,15 +691,6 @@ async function runSearch(query) {
       var el = $('#aiStatusText');
       if (el) el.textContent = '分析中 · ' + ((performance.now() - t0) / 1000).toFixed(1) + 's';
     }, 100);
-    $('#stopBtn').addEventListener('click', function () { interrupt(token); });
-    $('#detailToggle').addEventListener('click', function () {
-      detailOpen = !detailOpen;
-      var d = $('#detailBody');
-      if (d) d.style.display = detailOpen ? 'block' : 'none';
-      /* 展开时补渲染当前全量日志：终态后轮询与 SSE 均已停、不再有新帧触发
-         renderLogs，此处不补则此时才点开的详情面板恒为空/陈旧。 */
-      if (detailOpen) renderLogs();
-    });
 
     /* SSE 优先（用户反馈：轮询刷新令过程记录闪烁）——任务变更即推帧，有新
        内容才更新；EventSource 不可用/连接失败退化为 700ms 轮询兜底。 */
