@@ -9,7 +9,8 @@
  *   - 其余：先按封存清单核验备份完整性（不可信即拒绝还原，保留现场）；目标会话
  *     目录（mangled(toCwd)）rename 挪入 trash 残目录（迁移后目标位可能已被继续追加
  *     事件，递归删除会静默吞掉增量）：还原后以台账迁移时刻判定，trash 内存在更晚
- *     写入则保留并在结果中给出路径供人工核对找回，无更晚写入才清退；备份产物（`<DSH_HOME>/session-grouper-backups/<id>/`，
+ *     写入则保留并在结果中给出路径供人工核对找回，无更晚写入才清退；还原时挪入
+ *     trash 的原位残迹（迁移后原位亦可能被继续追加或重建）同口径判定；备份产物（`<DSH_HOME>/session-grouper-backups/<id>/`，
  *     即迁移前原目录的全量副本，header.cwd 仍为原值）经 staging 中转 + rename 原子
  *     还原回 `mangled(fromCwd)` 会话目录；
  *   - 注册表实例索引撤销（headers/sessionPaths 删除该 id → readSessionHeader
@@ -29,7 +30,9 @@ import { errorMessage } from './sessionScan.js'
 
 /** 单会话回滚结果。 */
 export type RollbackOutcome =
-  | { readonly status: 'rolled-back'; readonly sessionId: SessionId; readonly fromCwd: string; readonly trashDir?: string }
+  // trashDir/originalTrashDir：目标位/原位残迹 trash 中存在迁移后追加写入（或无法
+  // 判定）时保守保留的残目录路径，交人工核对后清理。
+  | { readonly status: 'rolled-back'; readonly sessionId: SessionId; readonly fromCwd: string; readonly trashDir?: string; readonly originalTrashDir?: string }
   | { readonly status: 'skipped'; readonly sessionId: SessionId; readonly detail: string }
   | { readonly status: 'failed'; readonly sessionId: SessionId; readonly detail: string }
 
@@ -86,7 +89,7 @@ async function sameLocation(a: string, b: string): Promise<boolean> {
 
 /**
  * trash（或任意目录树）内是否存在晚于 sinceMs 写入的文件：用于判定迁移后目标位
- * 是否又追加了事件。无法枚举/读取交由调用方按「保留现场」保守处理。
+ * 或原位是否又追加了事件。无法枚举/读取交由调用方按「保留现场」保守处理。
  */
 function hasWritesAfter(dir: string, sinceMs: number): boolean {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -99,18 +102,49 @@ function hasWritesAfter(dir: string, sinceMs: number): boolean {
 }
 
 /**
+ * trash 残迹保守清退（目标位/原位同口径）：trash 内存在晚于台账迁移时刻（at）
+ * 写入的文件即迁移后追加的事件/产物，递归删除会静默丢失——保留并返回路径，随
+ * outcome 与日志交人工核对；无更晚写入才清退；时刻不可解析、判定或清退失败一律
+ * 保守保留。返回 undefined 表示已清退。
+ */
+function retainOrDisposeTrash(trashDir: string, migratedAtRaw: string, where: '目标位' | '原位', sessionId: SessionId, log: MigrateLogger): string | undefined {
+  const migratedAt = Date.parse(migratedAtRaw)
+  try {
+    if (Number.isNaN(migratedAt)) {
+      log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 台账迁移时刻不可解析（'${String(migratedAtRaw)}'），无法判定${where}是否有迁移后追加的写入，trash 残迹保留于 ${trashDir}，请人工核对后清理`)
+      return trashDir
+    }
+    if (hasWritesAfter(trashDir, migratedAt)) {
+      log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚后${where}存在迁移后追加的写入，trash 残迹保留于 ${trashDir}，请人工核对后清理`)
+      return trashDir
+    }
+    rmSync(trashDir, { recursive: true, force: true })
+  } catch (error) {
+    log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚后无法判定/清退${where} trash 残迹，保留于 ${trashDir} 待人工核对：${errorMessage(error)}`)
+    return trashDir
+  }
+  return undefined
+}
+
+/**
  * 备份还原（原子口径）：备份 rename 入 staging 中转 → 原目录残迹 rename 挪入
- * trash（原子搬移代替递归删除）→ staging rename 就位 → 删 trash。会话目录缺席
- * 窗口 = 残迹挪入 trash 到 staging 就位之间（≤ 一次 rename；递归删除只发生在
- * 就位之后，不再拉长窗口）：窗口内进程被杀时会话目录暂缺，但数据完整滞留于
+ * trash（原子搬移代替递归删除）→ staging rename 就位。会话目录缺席窗口 = 残迹
+ * 挪入 trash 到 staging 就位之间（≤ 一次 rename；残迹清退只发生在就位之后、由
+ * 调用方判定，不再拉长窗口）：窗口内进程被杀时会话目录暂缺，但数据完整滞留于
  * staging 残目录（`${originalDir}.rollback-<时间戳>`），人工挪回即恢复——
  * 不存在半还原态。失败以抛错注明备份当下真实滞留位置（首段 rename 失败 = 备
  * 份仍完整滞留于主备份区原位、未做还原，原目标位内容已在 targetTrashDir 中，
- * 路径随错误一并呈现；挪出之后的失败 = 滞留于 staging），供外层 failed detail
- * 呈现人工恢复路径。就位成功后同步清退备份同级完整性清单文件（残留会在下轮被
- * 误当在册核验基准），清理失败仅告警不影响还原结果。
+ * 路径随错误一并呈现；挪出之后的失败 = 滞留于 staging，原位残迹已挪入 trash
+ * 时一并呈现其路径），供外层 failed detail 呈现人工恢复路径。就位成功后同步
+ * 清退备份同级完整性清单文件（残留会在下轮被误当在册核验基准），清理失败仅
+ * 告警不影响还原结果。
+ *
+ * 返回原位残迹滞留的 trash 路径（原位无残迹则 undefined）；不在本函数内就地
+ * 清退——残迹中可能含迁移后追加到原位的写入（pending-attach 窗口内应用仍向
+ * 旧路径追加、上次中断回滚的残留、人工放置的产物），递归删除会静默吞掉这部分
+ * 增量，与目标位残迹同口径交调用方以台账迁移时刻判定清退或保留。
  */
-function restoreFromBackup(backupDir: string, originalDir: string, log?: MigrateLogger, targetTrashDir?: string): void {
+function restoreFromBackup(backupDir: string, originalDir: string, log?: MigrateLogger, targetTrashDir?: string): string | undefined {
   const stagingDir = `${originalDir}.rollback-${Date.now().toString(36)}`
   const trashDir = `${originalDir}.trash-${Date.now().toString(36)}`
   mkdirSync(dirname(originalDir), { recursive: true })
@@ -122,11 +156,15 @@ function restoreFromBackup(backupDir: string, originalDir: string, log?: Migrate
     // targetTrashDir——须注明该真实位置供外层 failed detail 指导人工找回。
     throw new Error(`备份还原失败（首段搬移），备份仍完整滞留于 ${backupDir}，未做任何还原${targetTrashDir === undefined ? '' : `（原目标位内容已在 ${targetTrashDir}，可人工找回）`}：${errorMessage(error)}`)
   }
+  let remnantTrashDir: string | undefined
   try {
-    if (existsSync(originalDir)) renameSync(originalDir, trashDir)
+    if (existsSync(originalDir)) {
+      renameSync(originalDir, trashDir)
+      remnantTrashDir = trashDir
+    }
     renameSync(stagingDir, originalDir)
   } catch (error) {
-    throw new Error(`备份还原中断，备份滞留于 ${stagingDir}（主备份区已空；人工恢复请将其挪回 ${originalDir}）：${errorMessage(error)}`)
+    throw new Error(`备份还原中断，备份滞留于 ${stagingDir}（主备份区已空；人工恢复请将其挪回 ${originalDir}${remnantTrashDir === undefined ? '' : `；原位残迹滞留于 ${trashDir}，请人工核对后处置`}）：${errorMessage(error)}`)
   }
   // 备份已就位：清退完整性清单文件（残留会在下轮被误当在册核验基准，与
   // rollbackPartialMigration 的清理口径一致）；失败仅告警，不影响还原结果。
@@ -135,12 +173,10 @@ function restoreFromBackup(backupDir: string, originalDir: string, log?: Migrate
   } catch (error) {
     log?.warn(`fenix-dsh-session-grouper: 备份完整性清单清理失败（${backupManifestPath(backupDir)} 残留会误导下轮核验，请人工删除）：${errorMessage(error)}`)
   }
-  // 就位已完成：trash 残迹清理失败不影响还原结果（残留仅是垃圾），忽略。
-  try {
-    rmSync(trashDir, { recursive: true, force: true })
-  } catch {
-    // 残迹留待人工清理。
-  }
+  // 原位残迹不在就位后就地清退：与目标位残迹同口径，返回路径交调用方以台账迁移
+  // 时刻判定清退或保留（判定/清退失败一律保守保留，路径随 outcome 与日志交人工
+  // 核对）；原位本无残迹则无需处置。
+  return remnantTrashDir
 }
 
 /** 单会话回滚（最新台账行须为 migrated/pending-attach 否则 skipped，rolled-back 幂等跳过；fromCwd/toCwd 同位零文件操作）。 */
@@ -219,29 +255,13 @@ export async function rollbackSession(
     }
     // 3) 备份还原到原目录（备份即原物，含原 header cwd；staging 中转 + rename 原子就位）。
     //    首段搬移失败时 targetTrashDir 随错误文案呈现，避免目标位内容去向不明。
-    restoreFromBackup(backupDir, originalDir, log, targetTrashDir)
-    //    还原已成事实后处理目标位 trash 残迹：trash 内存在晚于迁移时刻（台账 at）
-    //    写入的文件即迁移后追加的事件/产物，递归删除会静默丢失——保留并在
-    //    outcome/日志中给出路径交由人工核对；无更晚写入才清退；判定或清退失败
-    //    一律保守保留。
-    let retainedTrashDir: string | undefined
-    if (targetTrashDir !== undefined) {
-      const migratedAt = Date.parse(latest.at)
-      try {
-        if (Number.isNaN(migratedAt)) {
-          retainedTrashDir = targetTrashDir
-          log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 台账迁移时刻不可解析（'${String(latest.at)}'），无法判定目标位是否有迁移后追加的写入，trash 残迹保留于 ${targetTrashDir}，请人工核对后清理`)
-        } else if (hasWritesAfter(targetTrashDir, migratedAt)) {
-          retainedTrashDir = targetTrashDir
-          log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚后目标位存在迁移后追加的写入，trash 残迹保留于 ${targetTrashDir}，请人工核对后清理`)
-        } else {
-          rmSync(targetTrashDir, { recursive: true, force: true })
-        }
-      } catch (error) {
-        retainedTrashDir = targetTrashDir
-        log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚后无法判定/清退目标位 trash 残迹，保留于 ${targetTrashDir} 待人工核对：${errorMessage(error)}`)
-      }
-    }
+    const restoreTrashDir = restoreFromBackup(backupDir, originalDir, log, targetTrashDir)
+    //    还原已成事实后处理 trash 残迹（目标位 + 原位同口径）：trash 内存在晚于
+    //    迁移时刻（台账 at）写入的文件即迁移后追加的事件/产物，递归删除会静默
+    //    丢失——保留并在 outcome/日志中给出路径交由人工核对；无更晚写入才清退；
+    //    判定或清退失败一律保守保留。
+    const retainedTrashDir = targetTrashDir === undefined ? undefined : retainOrDisposeTrash(targetTrashDir, latest.at, '目标位', sessionId, log)
+    const retainedOriginalTrashDir = restoreTrashDir === undefined ? undefined : retainOrDisposeTrash(restoreTrashDir, latest.at, '原位', sessionId, log)
     //    目标 project 目录清空则一并移除（避免 mangled 目录残留噪音）。用非递归
     //    rmdirSync 原子判定空目录：非空抛 ENOTEMPTY 由本 catch 忽略，消除「先判定
     //    为空、再递归删除」两步之间新写入的会话目录被一并删除的 TOCTOU。
@@ -265,7 +285,13 @@ export async function rollbackSession(
       throw new Error(`会话目录已还原至 ${originalDir}、备份已消费（不可原样重试），但台账 rolled-back 落盘失败：${errorMessage(error)}`)
     }
     log.info?.(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚：${latest.toCwd} → ${latest.fromCwd}（产物与 header 复现迁移前状态）`)
-    return { status: 'rolled-back', sessionId, fromCwd: latest.fromCwd, ...(retainedTrashDir === undefined ? {} : { trashDir: retainedTrashDir }) }
+    return {
+      status: 'rolled-back',
+      sessionId,
+      fromCwd: latest.fromCwd,
+      ...(retainedTrashDir === undefined ? {} : { trashDir: retainedTrashDir }),
+      ...(retainedOriginalTrashDir === undefined ? {} : { originalTrashDir: retainedOriginalTrashDir }),
+    }
   } catch (error) {
     const detail = errorMessage(error)
     log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚失败：${detail}`)
