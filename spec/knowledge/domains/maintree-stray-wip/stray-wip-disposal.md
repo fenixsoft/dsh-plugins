@@ -1,7 +1,7 @@
 # 主树散件 WIP 处置口径（maintree_stray_wip_stale）
 
-<!-- knowledge: capability=stray-wip-disposal rev=2 origin=prehistoric
-     sources=git:e570dc3-..2026-11-12, 第4度回写 admin-dsh-plugins-1794625487 2026-11-14, 第5度回写 admin-dsh-plugins-1794878615 2026-11-17, 第6度回写 admin-dsh-plugins-1794886474 2026-11-17 -->
+<!-- knowledge: capability=stray-wip-disposal rev=3 origin=prehistoric
+     sources=git:e570dc3-..2026-11-12, 第4度回写 admin-dsh-plugins-1794625487 2026-11-14, 第5度回写 admin-dsh-plugins-1794878615 2026-11-17, 第6度回写 admin-dsh-plugins-1794886474 2026-11-17, 第7度回写 admin-dsh-plugins-1794889175 2026-11-17 -->
 
 > 最后更新：2026-11-17 UTC+8
 > 来源：admin 处置轮 c97b6ddf8a51（2026-10-16 第 1 度）、298f844aee26（2026-11-12 第 2 度）、add1bdf366c0（2026-11-12 第 3 度）实证蒸馏；落地 evo-recurring-stray-remediation（框架域规则）在本项目的口径。第 4 度回写见跟踪项小节（admin-dsh-plugins-1794625487，2026-11-14），第 5 度回写见其后小节（admin-dsh-plugins-1794878615，2026-11-17）。
@@ -45,3 +45,9 @@
 - 告警：first_seen=2026-11-17T03:00:33Z（指纹 9c72bf8edc2a6b1f，宽限 30.1 分钟），同文件集口径第 6 度命中——panels.tsx 单文件，与第 5 度字节级同一改动集（同指纹，第 5 度告警 00:52 后约 2 小时复发）。
 - 处置：零触碰（处置轮 admin-dsh-plugins-1794886474），suggested_choice=notify_worktree_lane 维持。
 - 流程约束升级提请已发出：第 4 度（11-14）与第 5 度（11-17 00:52）升级通知均未获响应，按复查时机条款向人类提请二选一——人工会话强制/提醒 worktree 车道，或主树 tracked 直改提醒 hook；第 7 度起处置轮可直接引用本条，不必重新论证。
+
+### 第 7 度回写（2026-11-17 04:22，零触碰 + 直接引用第 6 度升级提请）
+
+- 告警：first_seen=2026-11-17T03:44:39Z（指纹 9c72bf8edc2a6b1f，宽限 30 分钟），同文件集口径第 7 度命中——panels.tsx 单文件，与第 5/6 度字节级同一改动集（同指纹第 3 次告警：00:52→03:00→03:44），diff 注释仍载明 2026-11-17 用户指令两连改（①徽标缩小并成圆形②上对齐 text-top），改动自第 5 度起零演进。
+- 处置：零触碰（处置轮 admin-dsh-plugins-1794889175，未 commit/stash/untrack），直接引用第 6 度回写之流程约束升级提请（二选一：人工会话强制/提醒 worktree 车道，或主树 tracked 直改提醒 hook），不重新论证；注册表两选项均不适用（commit 第 4 度复查时机禁用 + 框架铁律 10 仅提交禁用，untrack 源码禁用），suggested_choice=notify_worktree_lane 维持。
+- 复查时机（维持）：第 8 度起同口径——零触碰 + 升级通知 + 引用第 6 度提请与本条，不逐度扩充论证；人类响应（建车道/明示认领主树直改形态/采纳流程约束）前处置轮动作面收敛为「本页回写 + 处置记录」二件套。
