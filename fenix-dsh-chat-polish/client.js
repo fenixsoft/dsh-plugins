@@ -68,38 +68,38 @@
 			/* ── 样式 ─────────────────────────────────────────────────────────── */
 
 			var POLISH_CSS = [
-				/* 对话列留白固定 24px（哈希类按 0.2.0-rc.2；升级失配自动失效回官方布局） */
+				/* 对话列留白固定 24px。选择器全部用 CSS-modules 语义后缀 [class$="_suffix"]
+				 * （类名=构建哈希前缀+语义后缀，后缀跨版本稳定）+ 结构锚点
+				 * （[data-conversation-scroll] / :has(textarea)），dsh 升级不再静默失效。
+				 * 全宽变量挂 [class$="_column"]（唯一后缀），用户气泡经 _userStack 钉扎豁免 */
 				/* ChatView .scroll 侧距（clearance+16=32px）→ 24px */
-				'body:not(:has(.wSkVaW_embeddedBody)) [data-conversation-scroll] .EvIC1a_scroll{padding-left:24px;padding-right:24px}',
+				'body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_scroll"]{padding-left:24px;padding-right:24px}',
 				/* ChatView .column 解除 --dsh-chat-content-width 居中上限 */
-				'body:not(:has(.wSkVaW_embeddedBody)) [data-conversation-scroll] .EvIC1a_column{max-width:none}',
-				/* 全宽模式同步 --dsh-chat-content-width 为实际列宽（24px×2 侧距内 100%）。
-				 * 不补这行的话 dsh 的 .md-table-wide 对称出血公式（MarkdownText
-				 * .module.css：lead/spare 按 --dsh-chat-content-width 与 100cqw 求
-				 * 值）仍按核心默认 clamp(680px,640px,920px)=680px 计算，lead 解析为
-				 * 负 → margin-left:calc(-1*lead) 反转为正边距右推表格包装器 → 消息
-				 * 溢出链（overflow-x:visible 一路到 .EvIC1a_scroll）→ 对话框横向
-				 * 滚动条（2026-11-07 活站实证：wrapper 左缘 +130px、右缘 1070>940）。
-				 * 挂 .hWmORq_root（markdown 根）而非 .scroll，避免波及用户气泡宽度
-				 * 公式（.userStack 也消费该变量）。cqw 在消费元素处解析=988，减
-				 * 48px 侧距恰为实际列宽 940，随窗口宽度自适应 */
-				'body:not(:has(.wSkVaW_embeddedBody)) [data-conversation-scroll] .hWmORq_root{--dsh-chat-content-width:calc(100cqw - 48px)}',
+				'body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_column"]{max-width:none;--dsh-chat-content-width:calc(100cqw - 48px)}',
+				/* 全宽变量随列下发（列=唯一后缀锚点）：md-table 对称出血公式、
+				 * toBottomSlot 等消费方继承全宽值；不补的话 lead 按 748px 默认求值，
+				 * margin-left:calc(-1*lead) 反转为正边距右推表格包装器 → 消息溢出链
+				 * （overflow-x:visible 一路到列根）→ 对话框横向滚动条（2026-11-07
+				 * 活站实证：wrapper 左缘 +130px、右缘 1070>940）。cqw 在消费元素处
+				 * 解析，减 48px 侧距恰为实际列宽，随窗口宽度自适应 */
+				/* 用户气泡宽度公式钉回官方 fallback（userStack 消费 var(…,748px)）——列宽变量全宽化后不得波及气泡 */
+				'[data-conversation-scroll] [class$="_userStack"]{--dsh-chat-content-width:748px}',
 				/* wide 表 margin 右推夹紧：上行走变量同步后 lead 仍会余出 24px 正
 				 * margin（spare=(100cqw-内容宽)/2 的右出血项），把包装器相对正文
 				 * 右移 24px——公式退化路径，非设计意图。min(0px,…) 只夹右推、保留
 				 * 向左负 margin（真正出血场景）。双类抬特异性压过核心同选择器规则 */
-				'.hWmORq_body .md-table-wide.md-table-wide{margin-left:min(0px, calc(-1 * var(--dsh-table-lead)))}',
+				'[class$="_body"] .md-table-wide.md-table-wide{margin-left:min(0px, calc(-1 * var(--dsh-table-lead)))}',
 				/* InputBar .root 侧距 16→24（bottom 4px 保持官方值） */
-				'body:not(:has(.wSkVaW_embeddedBody)) .uV2eYG_root{padding-left:24px;padding-right:24px}',
+				'body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has(textarea),body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has([contenteditable="true"]){padding-left:24px;padding-right:24px}',
 				/* 输入卡 80% 宽度居中（根节点 align-items:center 自动居中），提示条/队列坞卡同轴 */
-				'body:not(:has(.wSkVaW_embeddedBody)) .uV2eYG_card{width:80%;max-width:none}',
-				'body:not(:has(.wSkVaW_embeddedBody)) .uV2eYG_notice{width:80%;max-width:none}',
-				'body:not(:has(.wSkVaW_embeddedBody)) ._7yHdaG_dock{width:80%}',
+				'body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has(textarea)>[class$="_card"],body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has([contenteditable="true"])>[class$="_card"]{width:80%;max-width:none}',
+				'body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has(textarea) [class$="_notice"],body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has([contenteditable="true"]) [class$="_notice"]{width:80%;max-width:none}',
+				'body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has(textarea) [class$="_dock"],body:not(:has([class$="_embeddedBody"])) [class$="_root"]:has([contenteditable="true"]) [class$="_dock"]{width:80%}',
 				/* hero（空会话）栈铺满，卡片经上方 24px 侧距落到同一基线。
 				 * width:auto 是 fit-content——hero 栈缩成标题行自然宽（~368px）
 				 * 「中间一小块」（2026-11-05 用户实证）；width:100% 才是铺满，
 				 * 内层输入卡 80% 与会话中态同轴 */
-				'body:not(:has(.wSkVaW_embeddedBody)) .wSkVaW_composerHero{width:100%}',
+				'body:not(:has([class$="_embeddedBody"])) [class$="_composerHero"]{width:100%}',
 				/* hero 工作区/模式行与输入卡两缘对齐（2026-11-05 左缘对齐；2026-11-10
 				 * 右缘对齐：git 分支/worktree 复选经 .wSkVaW_heroOptions margin-left:auto
 				 * 贴行右缘，行右缘=卡片右缘后该控件组落到对话框右上角，与左上的工作区/
@@ -107,11 +107,11 @@
 				 * 后与 80% 居中的卡片脱轴——用卡片同款公式取对称 margin：卡片列 = root
 				 * 24px 侧距内 80% 居中，行左/右缘 = 24 + (100%-48)*0.1（改卡片侧距/
 				 * 宽度百分比须同步本式） */
-				'body:not(:has(.wSkVaW_embeddedBody)) .wSkVaW_heroWorkspaceRow{margin-left:calc(24px + (100% - 48px)*0.1);margin-right:calc(24px + (100% - 48px)*0.1);padding:0}',
+				'body:not(:has([class$="_embeddedBody"])) [class$="_heroWorkspaceRow"]{margin-left:calc(24px + (100% - 48px)*0.1);margin-right:calc(24px + (100% - 48px)*0.1);padding:0}',
 				/* 固定留白后无拖拽空间：隐藏列宽把手（防拖拽写入 localStorage 宽度偏好） */
-				'body:not(:has(.wSkVaW_embeddedBody)) [data-width-handle][data-width-handle]{display:none}',
+				'body:not(:has([class$="_embeddedBody"])) [data-width-handle][data-width-handle]{display:none}',
 				/* 「回到底部」浮钮右距对齐 24px */
-				'body:not(:has(.wSkVaW_embeddedBody)) [data-conversation-scroll] .EvIC1a_toBottomSlot{padding-right:24px}',
+				'body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_toBottomSlot"]{padding-right:24px}',
 				/* 滚动条对齐 dashboard（浏览器默认观感；宽度收至 10px、thumb 加深至
 				 * #a0a0a0，并补出 dsh 未定义的上下/左右箭头按钮——定义了 ::-webkit-scrollbar
 				 * 系列后按钮不再由 UA 自动出现，需显式绘制。暗色按 dsh 自身的

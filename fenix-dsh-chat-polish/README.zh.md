@@ -60,22 +60,24 @@ dsh web 对话区打磨插件（纯 client 半，零构建，先例 `dsh-plugin-
    - 监听为 document 捕获阶段单例，先于 Lexical 命令处理；组件异常由宿主
      SlotErrorBoundary/abdicate 兜底。
 
-## 版本钉扎与升级
+## 版本韧性（0.2.1 起）
 
-留白覆盖使用 dsh 0.2.0-rc.2 构建产物的 CSS-modules 哈希类（取自安装包
-`lib/client.js` 内的类映射）：
+留白覆盖选择器**不再钉扎构建哈希**。CSS-modules 类名 = 构建哈希前缀 + 语义后缀，
+后缀（`_scroll`/`_column`/`_card`…）源自组件源码类名、跨版本稳定，因此 0.2.1 起
+一律用**语义后缀匹配** `[class$="_suffix"]` + 结构锚点（`[data-conversation-scroll]`、
+`:has(textarea)`）书写，dsh 升级不再静默失效：
 
-| 前缀 | 来源包 | 用到的类 |
+| 语义后缀 | 来源组件（rc.1 实证） | 锚点保障 |
 | --- | --- | --- |
-| `EvIC1a` | `dsh-client-ui-chat` (ChatView) | `scroll` `column` `toBottomSlot` |
-| `uV2eYG` | `dsh-client-ui-conversation` (InputBar) | `root` `card` `notice` |
-| `_7yHdaG` | `dsh-client-ui-conversation` (QueueDock) | `dock` |
-| `wSkVaW` | `dsh-client-ui-conversation` (ConversationRoot) | `composerHero` `embeddedBody` `widthHandle` |
+| `_scroll` `_column` `_toBottomSlot` | ChatView | `[data-conversation-scroll]` 后代限定 |
+| `_root` `_card` `_notice` `_dock` | InputBar/QueueDock | `:has(textarea)` 限定（构建内 composer 是唯一 textarea），card 限直接子级 |
+| `_userStack` | MessageItem | 后缀全构建唯一；宽度变量钉回官方 fallback 748px，气泡不受全宽化影响 |
+| `_composerHero` `_heroWorkspaceRow` `_embeddedBody` | ConversationRoot | 后缀全构建唯一 |
 
-dsh 升级后哈希变化 → 覆盖静默失效（回官方布局，不会坏页面）。届时从新版本安装包
-`lib/client.js` 的 `ChatView_module_css_default` / `QueueDock_module_css_default` /
-`ConversationRoot_module_css_default` 类映射重新提取前缀即可；用户消息 Markdown
-渲染不依赖哈希类，升级不受影响。
+0.2.0 及之前按 rc.2 构建哈希钉扎（`EvIC1a`/`uV2eYG`/`_7yHdaG`/`wSkVaW` 前缀），
+dsh 升级后哈希漂移 → 覆盖静默失效回官方布局（部署实证 2026-11-17：新装机 dsh
+非 rc.1/rc.2 时会话回到 920px 居中）。若未来某规则因上游改名失效，仅该条覆盖
+降级，其余不受影响；届时按新版构建产物的类映射核对语义后缀是否变化。
 
 ## 安装（web profile）
 
