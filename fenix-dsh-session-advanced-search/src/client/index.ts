@@ -196,8 +196,9 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   }
 
   // [fenix-ignore:3d7f80671ff6] v3.1 起容器挂 document.body 且 position:fixed，contentHost 仅只读矩形，从不改写宿主 inline 样式，卸载无残留可还原
-  const ensureMounted = (): void => {
-    if (initialized) return
+  /** @returns 装配是否就绪（已初始化或本次装配成功）；失败=false 供调用方早退。 */
+  const ensureMounted = (): boolean => {
+    if (initialized) return true
     const doc = win.document
     try {
       container = doc.createElement('div')
@@ -223,19 +224,23 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
       observer = undefined
       observedHost = undefined
       log.warn(`fenix-dsh-session-advanced-search: 嵌入视图装配抛错，已回滚待下次点击重试：${error instanceof Error ? error.message : String(error)}`)
-      return
+      return false
     }
     initialized = true
-    if (layoutWarned) return
+    if (layoutWarned) return true
     const anchored = resolveContentHost(doc) !== undefined
     if (!anchored) {
       layoutWarned = true
       log.warn(`fenix-dsh-session-advanced-search: 内容区锚点失配（input.closest('${SIDEBAR_SELECTOR}').nextElementSibling 不存在），高级搜索视图降级右侧抽屉；官方 UI 升级后请按 README「已知限制」修缝`)
     }
+    return true
   }
 
   const showView = (): void => {
-    ensureMounted()
+    // 装配失败即早退且不翻转 open：否则 open=true 而界面无任何变化，下次点击
+    // 走 if(open) 分支执行 closeView 把标志翻回 false，重试装配要多拖一次点击
+    // （失败后连续两次点击全部无效）；早退保证每次点击都真正尝试重试装配。
+    if (!ensureMounted()) return
     open = true
     syncPosition()
     if (container !== undefined) container.style.display = ''
