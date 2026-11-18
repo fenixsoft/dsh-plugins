@@ -752,7 +752,11 @@ function handleStatus(status, token) {
 
 /* ===== SSE 状态流（/jobs/:id/events；失败退化轮询）===== */
 var statusSource = null;
+var watchdogTimer = null;
 function stopStatusStream() {
+  /* 看门狗轮询与 SSE 同生命周期：撤流即撤表（终态三分支/中断/换 run 均经
+     stopTimers→stopStatusStream 汇合，见下方 startStatusStream 内看门狗注释）。 */
+  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
   if (statusSource) { try { statusSource.close(); } catch (e) { /* 已关闭 */ } statusSource = null; }
 }
 function startStatusStream(id, token) {
@@ -762,6 +766,20 @@ function startStatusStream(id, token) {
   var es;
   try { es = new EventSource(API + '/' + encodeURIComponent(id) + '/events'); } catch (e) { startPolling(id, token); return; }
   statusSource = es;
+  /* 看门狗轮询（补「连上却无帧」停滞档）：SSE 连接成功建立但始终收不到
+     status 帧（反向代理默认缓冲 text/event-stream、服务端事件名漂移）时
+     onerror 不触发，仅靠它自身则任务完成后界面仍无限显示「分析中」。SSE
+     激活期间并行保留一条低频轮询兜底；handleStatus 的整帧 JSON 去重保证
+     相同载荷不渲染、无闪烁，中途帧流停滞同样被下一次拉取对账到终态。单次
+     拉取失败静默容忍（真实断连由 onerror→轮询容错路径收尾，不在此误判终局）；
+     撤表随 stopStatusStream 统一进行。 */
+  watchdogTimer = setInterval(async function () {
+    if (token !== runToken || finishingRun) { stopStatusStream(); return; }
+    var status = null;
+    try { status = parseJobStatus(await api('GET', API + '/' + encodeURIComponent(id))); }
+    catch (e) { return; }
+    handleStatus(status, token);
+  }, 5000);
   es.addEventListener('status', function (ev) {
     if (token !== runToken) { stopStatusStream(); return; }
     var data = null;
@@ -833,7 +851,7 @@ function finishFail(err) {
   if (pill) pill.className = 'status-pill fail';
   var pillText = $('#aiStatusText');
   if (pillText) pillText.textContent = err && err.authRequired ? '未登录' : '失败';
-  markAllStepsFailed();
+  markAllStepsFailed(false);
   var stop = $('#stopBtn');
   if (stop) stop.style.display = 'none';
   var area = $('#dynamicArea');
@@ -852,21 +870,24 @@ function finishCancelled() {
   if (pill) pill.className = 'status-pill fail';
   var pillText = $('#aiStatusText');
   if (pillText) pillText.textContent = '已中断';
-  markAllStepsFailed();
+  markAllStepsFailed(true);
   var stop = $('#stopBtn');
   if (stop) stop.style.display = 'none';
   $('#runBtn').disabled = false;
 }
 
-/* 失败/中断收尾：把在途步骤（最后一格 run）置为 fail。 */
-function markAllStepsFailed() {
+/* 失败/中断收尾：把在途步骤（最后一格 run）置为 fail。终态语义分文案：
+   error 终态写「AI 分析失败」、cancelled 终态写「AI 分析已中断」，与顶部
+   pill 的失败/已中断口径一致（cancelled 由调用方传入）。 */
+function markAllStepsFailed(cancelled) {
+  var runText = cancelled ? 'AI 分析已中断' : 'AI 分析失败';
   var runSteps = document.querySelectorAll('#aiSteps .step.run');
   for (var i = 0; i < runSteps.length; i++) {
     runSteps[i].className = 'step fail';
     var ic = runSteps[i].querySelector('.st-ic');
     if (ic) ic.innerHTML = ICONS.x;
     var l1 = runSteps[i].querySelector('.st-l1');
-    if (l1 && l1.textContent.indexOf('调用 AI') === 0) l1.textContent = 'AI 分析已中断';
+    if (l1 && l1.textContent.indexOf('调用 AI') === 0) l1.textContent = runText;
   }
 }
 
