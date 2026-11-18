@@ -60,10 +60,23 @@
 		factory(require) {
 			var react = require('react')
 			var primitives = require('@deepseek-ai/dsh-client-ui-primitives')
-			var MarkdownText = primitives.MarkdownText
-			var FileTypeIcon = primitives.FileTypeIcon
-			var fileExtension = primitives.fileExtension
-			var fileSizeText = primitives.fileSizeText
+			/* 基线导出同口径守卫：宿主升级致 primitives 导出漂移（改名/移除）时降级为
+			 * 安全替身，不让 fileExtension() 等渲染期 TypeError 击穿整个遮蔽渲染器
+			 * （与 renderMessageImages、useInput/useChat、附件 name/bytes 的显式守卫
+			 * 同口径）。组件导出除函数外还有 memo/forwardRef 等带 $$typeof 标记的
+			 * React 元素类型，一并认可 */
+			function componentExport(value, fallback) {
+				if (typeof value === 'function') return value
+				if (value && typeof value.$$typeof === 'symbol') return value
+				return fallback
+			}
+			var MarkdownText = componentExport(primitives.MarkdownText, function (props) {
+				return react.createElement('span', null, typeof props.text === 'string' ? props.text : '')
+			})
+			var FileTypeIcon = componentExport(primitives.FileTypeIcon, function () { return null })
+			/* 辅助函数漂移时降级为空扩展名/空尺寸文案（fileMeta filter(Boolean) 自然收敛） */
+			var fileExtension = typeof primitives.fileExtension === 'function' ? primitives.fileExtension : function () { return '' }
+			var fileSizeText = typeof primitives.fileSizeText === 'function' ? primitives.fileSizeText : function () { return '' }
 
 			/* ── 样式 ─────────────────────────────────────────────────────────── */
 
@@ -341,6 +354,21 @@
 		}
 		/* setDraft 触发 composer input 事件时抑制“编辑即退出”判定 */
 		var applying = false
+		/* applying 闸门按双 rAF 复位，只是“setDraft 回声必在两帧内到达”的时序近似；
+		 * 掉帧/并发调度下回声可能晚于窗口到达，被 onHistoryInput 误判为用户编辑而
+		 * 静默退出并清空 savedDraft（真实数据丢失）。另记最近一次召回目标文本作
+		 * 确定性判据：input 事件时编辑器文本仍与召回目标一致 → 视为 setDraft 回声
+		 * 忽略，不依赖帧调度时序 */
+		var lastRecall = { text: null }
+
+		/* 回声比对：剥掉尾部换行（Lexical 对末段落补合成换行）后全文比对 */
+		function recallEcho(editorEl, text) {
+			if (typeof text !== 'string') return false
+			var live = ''
+			try { live = editorEl.innerText || '' } catch (err) { return false }
+			var strip = function (s) { return typeof s === 'string' ? s.replace(/\n+$/, '') : '' }
+			return strip(live) === strip(text)
+		}
 
 		/* chat 快照 → 按时间升序的已发送文本数组（user/steering，相邻重复折叠） */
 		function extractUserTexts(chat) {
@@ -449,6 +477,7 @@
 
 		function applyRecall(owner, editorEl, text, dir) {
 			applying = true
+			lastRecall.text = typeof text === 'string' ? text : null
 			try {
 				var actions = owner.actionsRef.current
 				if (actions && typeof actions.setDraft === 'function') actions.setDraft(text)
@@ -550,15 +579,18 @@
 		}
 
 		/* composer 编辑（键入/粘贴/发送清空）→ 静默退出浏览态；setDraft 自身触发的
-		 * input 用 applying 闸门豁免 */
+		 * input 用 applying 闸门豁免，晚于窗口到达的回声再以「文本仍等于召回目标」
+		 * 确定性判据兜底豁免 */
 		function onHistoryInput(e) {
 			try {
 				if (applying) return
 				var target = e.target
 				if (!(target instanceof Element)) return
-				if (!target.closest('[data-composer-input]')) return
+				var editorEl = target.closest('[data-composer-input]')
+				if (!editorEl) return
 				var owner = historyState.owner
 				if (!owner || !owner.nav.browsing) return
+				if (lastRecall.text !== null && recallEcho(editorEl, lastRecall.text)) return
 				exitBrowsing(owner.nav)
 			} catch (err) { /* never */ }
 		}
