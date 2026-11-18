@@ -53,10 +53,11 @@ const scrypt = promisify(scryptCallback)
  * 记录的派生一律抛错。校验按记录内落盘参数执行，旧记录（N=16384）向后兼容。 */
 const SCRYPT_PARAMS = Object.freeze({ N: 131072, r: 8, p: 1, keylen: 64, maxmem: 268_435_456 })
 
-/* 未认证登录派生的在飞上限：单次派生（N=2^17/r=8）约需 128MiB，而失败限流只按
- * 次数计数、不约束并发——同源并发提交会全部先过 isLocked 再并行派生（线程池
- * 默认 4 并发 → 峰值约 512MiB，排队请求持续累积），小内存部署可被打至 OOM/登录
- * 不可用。超限直接按锁定响应，并发派生内存峰值有界。 */
+/* 登录校验与凭据写（POST /auth/credentials）共用的在飞派生上限：单次派生
+ * （N=2^17/r=8）约需 128MiB，而失败限流只按次数计数、不约束并发——同源并发
+ * 提交会全部先过 isLocked/admit 再并行派生（线程池默认 4 并发 → 峰值约
+ * 512MiB，排队请求持续累积），小内存部署可被打至 OOM/登录不可用。两条路径
+ * 共用同一闸门实例合流计数，并发派生内存峰值整体有界。 */
 const MAX_CONCURRENT_LOGIN_DERIVATIONS = 2
 
 /** 凭据记录 key（`<owner>/<id>`；owner=插件注册名）。 */
@@ -224,6 +225,27 @@ export function createRateLimiter({ windowMs = RATE_WINDOW_MS, maxFails = RATE_M
 /** 限流命中判定（绑定导出名；limiter 见 createRateLimiter）。 */
 export function rateLimitHit(limiter, address, now = Date.now()) {
 	return limiter.isLocked(address, now)
+}
+
+/**
+ * 在飞 scrypt 派生并发闸门（登录校验与凭据写共用同一实例：单次派生同为
+ * N=2^17/r=8 ≈ 128MiB，合流计数才能把两条路径合计的并发派生内存峰值整体
+ * 有界）。tryEnter 的检查与递增之间不 await，保证在飞数不超上限；返回 false
+ * 表示超限、由调用方按各自路径的既有响应形态拒绝，true 表示已占额、必须
+ * 配对 release()（派生结束即释放，不覆盖其后的写入/响应阶段）。
+ */
+function createDerivationGate() {
+	let inFlight = 0
+	return {
+		tryEnter() {
+			if (inFlight >= MAX_CONCURRENT_LOGIN_DERIVATIONS) return false
+			inFlight += 1
+			return true
+		},
+		release() {
+			inFlight -= 1
+		},
+	}
 }
 
 /** HTML 反射值转义。 */
@@ -593,6 +615,8 @@ function describeMissing(ctx) {
 function activate(ctx, services, log) {
 	const { connection, webServer, credentials } = services
 	const limiter = createRateLimiter()
+	/* 登录校验与凭据写共用同一派生并发闸门（见 createDerivationGate）。 */
+	const derivationGate = createDerivationGate()
 	const disposeRoute = (registerResult, path) => {
 		if (typeof registerResult === 'function') return registerResult
 		log('warn', `register(${path}) returned no disposer; route persists until reload`)
@@ -605,8 +629,8 @@ function activate(ctx, services, log) {
 		 * 抛错会让已注册路由的 disposer 随局部变量一起丢失，停用时无法注销。 */
 		for (const [path, handler] of [
 			['/', createIndexHandler({ connection, webServer, credentials, limiter, log })],
-			['/auth/login', createLoginHandler({ connection, credentials, limiter, webServer, log })],
-			['/auth/credentials', createCredentialsHandler({ connection, credentials, limiter, webServer, log })],
+			['/auth/login', createLoginHandler({ connection, credentials, limiter, webServer, log, derivationGate })],
+			['/auth/credentials', createCredentialsHandler({ connection, credentials, limiter, webServer, log, derivationGate })],
 		]) {
 			disposers.push(disposeRoute(webServer.register({ kind: 'exact', path, handler }), path))
 		}
@@ -633,6 +657,14 @@ function activate(ctx, services, log) {
 /** 监听协议（cookie Secure 判定与同源 scheme 归一共用）。 */
 function listenerProtocol(webServer) {
 	return webServer?.protocol === 'https:' ? 'https:' : 'http:'
+}
+
+/** 同源拒绝留痕（scheme/origin/host 归一三元组，review d62631e76262）：
+ * webServer.protocol 不在 probeServices 六项契约清单内，https 部署下该字段
+ * 缺失/漂移会被按 http: 归一（Origin 默认 443 ≠ Host 80）把合法请求误判
+ * 跨源——日志附三元组可直接定位这类失配，而非只见一条无参 cross-origin warn。 */
+function describeSameOriginReject(protocol, headers) {
+	return `(scheme=${protocol} origin=${headerValue(headers, 'origin') ?? '?'} host=${headerValue(headers, 'host') ?? '?'})`
 }
 
 /** 原生降级 401（与 dsh-client-connection writeUnauthorized 同文案同形态）。 */
@@ -869,9 +901,7 @@ function createIndexHandler({ connection, webServer, credentials, limiter, log }
  * 铸 cookie 并 303 回 `./`，地址栏不残留 token）；失败 303 error=invalid；
  * 未配置 303 error=unconfigured；锁定 303 error=locked；超长/类型不符 400。
  */
-function createLoginHandler({ connection, credentials, limiter, webServer, log }) {
-	/** 未认证登录派生的在飞计数（见 MAX_CONCURRENT_LOGIN_DERIVATIONS）。 */
-	let inFlightDerivations = 0
+function createLoginHandler({ connection, credentials, limiter, webServer, log, derivationGate }) {
 	return async function handleLogin(req, res) {
 		try {
 			if (req.method === 'GET' || req.method === 'HEAD') {
@@ -889,7 +919,7 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 
 			const protocol = listenerProtocol(webServer)
 			if (!isSameOrigin(headerValue(req.headers, 'origin'), headerValue(req.headers, 'host'), protocol)) {
-				log('warn', 'login rejected: cross-origin request')
+				log('warn', `login rejected: cross-origin request ${describeSameOriginReject(protocol, req.headers)}`)
 				writeJson(res, 403, { error: 'cross-origin' })
 				return
 			}
@@ -929,21 +959,21 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
 				return writeRedirect(req, res, '/auth/login?error=unconfigured')
 			}
 
-			/* 并发闸门：检查与递增之间不 await，保证在飞派生数不超过上限；超限
-			 * 请求按锁定处理（计入限流失败数会让廉价请求反过来锁死该来源）。 */
-			if (inFlightDerivations >= MAX_CONCURRENT_LOGIN_DERIVATIONS) {
+			/* 并发闸门（与凭据写共用同一实例）：tryEnter 检查与递增之间不 await，
+			 * 保证在飞派生数不超过上限；超限请求按锁定处理（计入限流失败数会让
+			 * 廉价请求反过来锁死该来源）。 */
+			if (!derivationGate.tryEnter()) {
 				log('warn', `login derivation concurrency cap (${MAX_CONCURRENT_LOGIN_DERIVATIONS}) hit; rejecting attempt from ${remoteAddress || '?'}`)
 				return writeRedirect(req, res, '/auth/login?error=locked')
 			}
 			let passwordOk
-			inFlightDerivations += 1
 			try {
 				passwordOk = await verifyPassword(parsed.password, payload)
 			} catch (error) {
 				log('warn', `password verification failed unexpectedly (${error?.message ?? error})`)
 				passwordOk = false
 			} finally {
-				inFlightDerivations -= 1
+				derivationGate.release()
 			}
 			/* username 一并校验（凭据记录保存的账号名参与判定，不再只是展示）。
 			 * scrypt 无条件先跑：用户名错与密码错同路分流（同一 error=invalid +
@@ -995,11 +1025,11 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log }
  * 凭据端点 `/auth/credentials`（design D6/D9）：三方法均要求 admit 通过
  * （未认证 401）；GET/HEAD `{configured, username}`（HEAD 只写头，不回显密码/哈希/盐）；POST/
  * DELETE 严格同源（isSameOriginStrict：Origin 缺失判 403）；POST 参数校验
- * （username 1-64、password ≥8、confirm 一致）+ key 段校验 → scrypt 派生 →
- * modifyRecord 写入；DELETE → deleteRecord + 清该来源限流（回退 token-only）；
- * 参数非法 400 JSON。
+ * （username 1-64、password ≥8、confirm 一致）+ key 段校验 → 共用派生并发
+ * 闸门（超限 429 JSON）→ scrypt 派生 → modifyRecord 写入；DELETE →
+ * deleteRecord + 清该来源限流（回退 token-only）；参数非法 400 JSON。
  */
-function createCredentialsHandler({ connection, credentials, limiter, webServer, log }) {
+function createCredentialsHandler({ connection, credentials, limiter, webServer, log, derivationGate }) {
 	return async function handleCredentials(req, res) {
 		/* HEAD 在各错误分支同样只写头（与 GET/HEAD 成功分支、writeNativeUnauthorized
 		 * / writeLoginPage 的 HEAD 处理一致）。 */
@@ -1030,7 +1060,7 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 				/* 写路径用严格同源（review a9fb0cff763d）：Origin 缺失判 403，
 				 * cookie 认证的写请求在同源判定之外仅剩 admit 一层防线。 */
 				if (!isSameOriginStrict(headerValue(req.headers, 'origin'), headerValue(req.headers, 'host'), protocol)) {
-					log('warn', 'credential write rejected: cross-origin request')
+					log('warn', `credential write rejected: cross-origin request ${describeSameOriginReject(protocol, req.headers)}`)
 					writeJson(res, 403, { error: 'cross-origin' }, headOnly)
 					return
 				}
@@ -1059,7 +1089,22 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 					writeJson(res, 500, { error: 'internal' }, headOnly)
 					return
 				}
-				const { salt, hash } = await hashPassword(parsed.password)
+				/* 派生并发闸门（review 7605f989aa24）：与登录共用同一实例，单次
+				 * scrypt 约 128MiB，持有效会话的并发 POST 同样可放大内存峰值；
+				 * 超限 429、不计限流失败（廉价请求不该锁死来源）。派生结束即
+				 * 释放，modifyRecord 的写入阶段不占额。 */
+				if (!derivationGate.tryEnter()) {
+					log('warn', `credential write rejected: derivation concurrency cap (${MAX_CONCURRENT_LOGIN_DERIVATIONS}) hit`)
+					writeJson(res, 429, { error: 'busy' }, headOnly)
+					return
+				}
+				let derived
+				try {
+					derived = await hashPassword(parsed.password)
+				} finally {
+					derivationGate.release()
+				}
+				const { salt, hash } = derived
 				await credentials.modifyRecord(CREDENTIAL_KEY, async () => ({
 					kind: 'grant',
 					payload: { version: 1, username: parsed.username, salt, hash, N: SCRYPT_PARAMS.N, r: SCRYPT_PARAMS.r, p: SCRYPT_PARAMS.p, keylen: SCRYPT_PARAMS.keylen },
@@ -1071,7 +1116,7 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 			if (req.method === 'DELETE') {
 				const protocol = listenerProtocol(webServer)
 				if (!isSameOriginStrict(headerValue(req.headers, 'origin'), headerValue(req.headers, 'host'), protocol)) {
-					log('warn', 'credential delete rejected: cross-origin request')
+					log('warn', `credential delete rejected: cross-origin request ${describeSameOriginReject(protocol, req.headers)}`)
 					writeJson(res, 403, { error: 'cross-origin' }, headOnly)
 					return
 				}
