@@ -717,12 +717,14 @@
 
 ### 浪费
 - **周期评审 run 连续三日 API 停滞，本窗空等 373 秒**
+  - 自进化：问题成立 / 建议合理 / — 不需要
   - 影响：周期代码审查 run 的 13 个 API 往返中 4 次超 60 秒停滞（stall，单次往返空等，占 31%），合计空等 373.0 秒、单次最长 122.3 秒，占 run 全长 549.8 秒的 68%；停滞轮零 token 产出，纯墙钟损耗使审查与其后 code-fix（审查发现台账的自动修复批处理）交付顺延约 6 分钟，且这是该车道连续第三个评审日出现 370-420 秒量级停滞。
   - 证据：fenixd.log 2026-11-18T17:07:02Z「API round-trip stall: 122.3s (round #6 > 120s)」（grade=info，provider=bigmodel.cn）；run_metrics（框架逐 run 的时长/token/延迟记账行）同日 17:10:21Z 记 code-review-1795021271 latency_stalls=4、latency_stall_total_seconds=373.028、duration_seconds=549.79、terminal=success；同窗对照 code-fix-1795021821 stalls=0/65 轮；数据摘要第 6 节 api-stall 行同值。
   - 调查评估：问题源是周期代码审查车道（非 SPEC 实现车道）。已核实事实：run 终态 success，停滞数字与摘要、日志三方同源。连续序列回源：11-16 code-review-1794762140 停滞合计 418.8 秒（todo.md 11-16 浪费条目）、11-17 code-review-1794935099 合计 402.8 秒（fenixd.log 2026-11-17T17:14:29Z 行）加 11-17 另有 429 退避 181.6 秒（不同机制，todo 11-17 已单列）、本窗 373.0 秒——11-16 条目「单 run 离群」的判断已失效，停滞是该车道常态形态，三个评审日全部命中。根因归属：外因（上游供应商延迟），且框架观测面已补齐——车道×日停滞合计加 30 分钟阈值告警（evo-add-lane-stall-daily-budget-accounting）已在本窗摘要生效（「未超 30 分钟阈值」标注），373 秒距 1800 秒阈值余量 4.8 倍，属阈值内损耗而非告警漏报。与存量关系：11-16/11-17 两条既有条目的升级与明细建议已部分落地，本条不重复立项。结论：单窗损失确凿但量级稳定在在位阈值内，无需新机制；停滞与上下文体积的相关形态单列 improvements 取证。
   - 建议：无需新立项；维持车道×日阈值观察。若后续单日停滞合计逼近 1800 秒阈值，走既有告警链路消费即可，不必新增机制。
 
 - **蒸馏重试欠账滚到 20 天，major 升级仍零消费**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：dashboard-bridge 能力域知识页缺位已滚到第 20 天（11-16 回顾时为 17 天，恶化）：窗口内 11-19 00:04 该欠账提醒以 major 级再发一条且无人消费，台账内同因超龄未处理记录已积 27 条——知识真相源现有四个能力域，最大的插件 dashboard-bridge 整域无知识页。
   - 证据：告警 bfe6f39c354e（knowledge_distill_retry_stale，蒸馏重试台账欠账扫描信号，created 2026-11-18T16:04:55Z，handled=false，description 自述「2026-10-30-add-dsh-dashboard-bridge（登记 2026-10-30，欠账 20 天）……升级为 major」）；.fenix/todo.md「## 2026-10-30」节的重试行仍未勾选（本次读取核实）；spec/knowledge/index.md 现列 provider-import、maintree-stray-wip、session-search、plugin-rollout 四域，无 dashboard-bridge。
   - 调查评估：问题源是 knowledge-distill 车道 10-30 归档 spec（2026-10-30-add-dsh-dashboard-bridge，已入 spec/archive）的蒸馏重试。与 11-16 既有条目（todo.md「蒸馏重试台账欠账 17 天只提醒无消费」）对账：根因链（蒸馏 agent 链接越界违规三次→登重试台账→幂等标记存 daemon 进程内被重启击穿→无任何自动消费者）与三项建议（admin 处置轮按 sources=git: 注释形态补蒸馏／幂等标记落盘／超 N 天自动重派一次）均已登记在案，本条不重复立项，只报恶化——欠账 17→20 天、提醒升级 major、且本窗处置记录 0 条（数据摘要第 3 节）说明「立即止血」建议发出 3 天后仍未被执行。结论：既有条目的恶化重述，出口仍在人工响应或 admin 处置轮补蒸馏。
@@ -733,12 +735,14 @@
 
 ### 可改进
 - **API 停滞集中大上下文 run，停滞事件缺请求体积字段**
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
   - 影响：复发敞口：大上下文 run 每个评审日稳定烧 270-420 秒停滞（已连续三日全中），若上游延迟按请求体积放大，随 run 上下文继续增长损耗同步放大；而停滞事件的 input_tokens/cache_read 字段恒为 0，停滞与请求体积的相关形态只能靠 run 级间接指标拼凑，定位不到轮，根因无法取证裁决。
   - 证据：run 级对照（fenixd.log run_metrics 三日逐行回源）：code-review 车道平均每轮输入 token（per_turn）3224-4282、停滞率 27-33%（code-review-1794935099 3/11 轮、code-review-1795021271 4/13 轮）；self-review 车道 per_turn 1781、停滞率 9%（review-2026-11-18 3/33 轮，该项按设计不进摘要第 6 节——源码 self_review.py 注释「自省 run 不审视自身」）；code-fix 车道 per_turn 581-764、停滞率 0-1%（code-fix-1795021821 0/65、code-fix-1794935669 1/71）。停滞事件字段：2026-11-18T17:07:02Z api_round_stall 事件 input_tokens=0、cache_read_input_tokens=0。
   - 调查评估：问题源是 agent_runner 的停滞观测面（框架层，非某 SPEC）。已核实：上述数字全部回源 run_metrics 逐行，「停滞轮不计 token」口径（11-16 条目）与本窗事件字段为零一致。归因边界：证据只覆盖「停滞率与 run 上下文体积单调正相关」的形态层，根因多假说并存——上游 prefill 计算随体积放大／服务端负载排队／网络链路，本窗内无 429、无 provider switched（grep 核实），不能裁决；按证据边界规则不预设单因，不建议根因方向修复。与存量关系：evo-add-lane-stall-daily-budget-accounting 已补车道×日合计与 30 分钟阈值（本窗生效）、evo-api-stall-signal-grading 已做停滞分级，两者均不落「单轮停滞×请求体积」明细；11-17 既有条目（失败 attempt 观测失明）讲 attempt 级记账，本条是 stall 轮级体积字段，互补不重复；spec/changes 活跃区 8 个目录均为已完结 spec，无相关立项。结论：观测面最后一个盲点是停滞轮的请求体积，补上即可让既有阈值机制之外多一张裁决根因的底牌，够格小改立项。
   - 建议：小改立项：api_round_stall 事件与 run_metrics 停滞明细补落停滞时刻的请求体积上下文（当轮 per-turn 输入估算或上轮 assistant usage 回填，现字段恒 0 形同虚设）；摘要第 6 节聚合按 per-turn 体积分桶输出停滞率——积累两到三个评审日即可裁决或排除 prefill 放大假说，再决定是否需要换道或上下文裁剪类动作。
 
 - **告警台账 119 条超龄未处理，每日提醒仅覆盖 8 条升级**
+  - 自进化：问题成立 / 建议合理 / — 不需要
   - 影响：台账积压与提醒呈现差 15 倍：窗口末全量台账超 24 小时未处理记录 119 条，进入每日摘要「超 24 小时未处理提醒」的只有 8 条（升级类）；其中 6 条 push_failed（自动推送连败放弃重试、需人工介入的 major 信号）滞留 7 天从未进过任何提醒口径——「需人工介入」类信号可以无限期滑出视野，真实积压长期不可见。
   - 证据：本次逐条计数 admin_alerts.json（admin 告警/处置台账）：未处理且超 24h 共 119 条，分布为 knowledge_distill_retry_stale 信号 27、maintree_stray_wip_stale 处置 19+信号 6+升级 7、advanced-search/ops-badge 两个已完结 spec 时代的处置记录 32（inconclusive_loop 10、manual-intervention 10、verify_env_blocked 8、orphaned_state 2、token_budget 1、judge_rerun_cap 1）、untracked 族信号 17、push_failed 6、code_fix_night_quiet_window 4、lane_env_unavailable 升级 1；摘要 8 条恰为 escalation（升级人工告警）全集（源码 self_review.py _unhandled_escalation_aging 只扫 ESCALATION kind，「全量台账口径」标签指全台账扫描而非全 kind）；push_failed 6 条（64c6bedd474c 等，created 2026-11-12T12:09Z）所涉 4 个 spec 的交付已核实到达远端——origin/main 含该四 spec 相关提交 54 个。
   - 调查评估：问题源是 admin_alerts 台账生命周期（框架层）。已核实两类堆积形态：(a) 条件已消失不收口——push_failed 6 条所涉 4 个 spec 交付已随 main 推送到达 origin（merge-base 核实 origin/main 含相关提交），advanced-search/ops-badge 时代 32 条处置记录所涉 spec 均已完结（ops-badge 有远端分支 origin/fenix/add-dsh-ops-alert-badge-1794533145、advanced-search 修复 445f039 已落 main），记录仍 handled=false 永久滞留；(b) 按设计永不处置的记录照常逐条累积——untracked info 族「只告警不处置」、每日蒸馏提醒各成一条。框架已有收口先例：evo-add-stray-wip-claim-reconcile（2026-11-16 22:12 三连提交）为 stray 族落地 auto-resolve-claim（人工提交指纹文件后周期盘点自动核销告警），其余族无对应通道。与存量关系：11-16 蒸馏条目只覆盖 119 条中的一族（27 条），11-18 lane_env 条目只谈单条告警的措辞矛盾，台账级收口与提醒 kind 口径未被任何既有条目覆盖，互补不重复；spec/changes 活跃区无相关立项。结论：本窗实际损失为零（推送达成交付、窗口内无新增可执行信号），但结构性敞口确凿，够格小改立项。
