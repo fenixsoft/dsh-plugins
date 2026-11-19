@@ -12,7 +12,10 @@
  *   - 无左侧栏/聊天视图（本页即搜索页，独立于会话界面）；
  *   - 无预览模式切换（AI/机械形态由后端 degraded 决定，非人工切换）；
  *   - 无 scope/filter 假 chips 与 ws:/since:/in: 语法提示（后端不解析前缀，
- *     原型中为装饰）。
+ *     原型中为装饰；原型初始态 syntax-row 语法 chips 同此口径，不落地）；
+ *   - 无初始态 recent-row「最近搜索」区块（原型内为「最近搜索」标签 + 3 个
+ *     recent-chip 假数据装饰，本页无搜索历史数据面；恢复须先提供真实历史
+ *     数据面，不以假数据形式回归）。
  *
  * 真实数据面（与 shared/protocol.ts 契约对齐）：
  *   POST /api/session-advanced-search/jobs        {query} → {jobId}
@@ -603,22 +606,23 @@ function jumpToSession(sessionId) {
     try { api.openSession(sessionId); return; } catch (e) { /* 服务缝抛错走兜底 */ }
   }
   try { localStorage.setItem('dsh.sessions.current', JSON.stringify({ sessionId: sessionId })); } catch (e) { /* 存储不可用时仍跳首页 */ }
-  try { parentWin().location.href = '/'; } catch (e) { /* 跨域宿主：父窗口 location 不可写，导航兜底也不可得 */ }
+  try { parentWin().location.href = '/'; } catch (e) { /* 跨源宿主不进此 catch：跨源 location.href 写入被 HTML 规范放行，该导航仍会执行，会把父页面导航至本服务首页 */ }
 }
 
 /* 嵌入形态关闭缝：父级 client 装配注册 window.__fenixSas.close（同源直调）；
    未注册（异常宿主）退化为父级回首页。独立页形态不变（整页回 '/'）。 */
 function closeEmbedded() {
   var w = parentWin();
-  /* 服务缝读取与 close 调用、导航兜底各自包 try：跨源宿主下读父窗口属性/
-     写父窗口 location 均抛 SecurityError，全程无捕获会使 Escape 关闭与
-     返回会话按钮在这种宿主下毫无响应。 */
+  /* 服务缝读取与 close 调用、导航兜底各自包 try：跨源宿主下读父窗口属性
+     抛 SecurityError（下方对父窗口 location.href 的写入则被规范放行、
+     跨源也不进 catch，见其行内注释），全程无捕获会使 Escape 关闭与
+     返回会话按钮在这种宿主下因缝读取抛错而毫无响应。 */
   var api = null;
   try { api = w && w.__fenixSas; } catch (e) { /* 跨域宿主：缝不可得 */ }
   if (api && typeof api.close === 'function') {
     try { api.close(); return; } catch (e) { /* 服务缝抛错走兜底 */ }
   }
-  try { w.location.href = '/'; } catch (e) { /* 跨域宿主：无法导航父窗口 */ }
+  try { w.location.href = '/'; } catch (e) { /* 跨源宿主不进此 catch：跨源 location.href 写入被 HTML 规范放行，该导航仍会执行，会把父页面导航至本服务首页 */ }
 }
 
 /* ===== 主流程 ===== */

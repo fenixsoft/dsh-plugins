@@ -6,6 +6,8 @@
 
 **界面原型（UI 真相源）：`specs/optimize-session-advanced-search/prototype/`**（含 index.html + annotator.js + 四态整页截图 05–08）。相关 Scenario 显式声明「界面以 prototype/ 为准」。仓库根当前无 `DESIGN.md`（界面设计宪法缺失），本 SPEC 设计约束来源 = 定稿原型 + DSH 官方主题令牌（`@deepseek-ai/dsh-client-ui-primitives` / 会话 composer bundle 实测值，见下）；后续 DESIGN.md 落地时以宪法为准回扫。
 
+**原型差异裁决记录**：原型初始态（data-proto-id=initial-state）的 syntax-row（ws:/since:/in: 语法 chips）与 recent-row（「最近搜索」标签 + 3 个 recent-chip）为假数据装饰区，实现不落地（后端不解析前缀语法、独立页无搜索历史数据面）；后续若恢复「最近搜索」，须以真实搜索历史数据面为前提，不以假数据形式回归。
+
 ## Goals
 
 1. 搜索从「卡 3.5 分钟 + 黑盒降级」变为「≤60s 硬上限（凭证缺失时即时）+ 原因明示 + 出路可操作」。
