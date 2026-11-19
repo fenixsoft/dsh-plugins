@@ -1,10 +1,10 @@
 # 主树散件 WIP 处置口径（maintree_stray_wip_stale）
 
 <!-- knowledge: capability=stray-wip-disposal rev=4 origin=prehistoric
-     sources=git:e570dc3-..2026-11-12, 第4度回写 admin-dsh-plugins-1794625487 2026-11-14, 第5度回写 admin-dsh-plugins-1794878615 2026-11-17, 第6度回写 admin-dsh-plugins-1794886474 2026-11-17, 第7度回写 admin-dsh-plugins-1794889175 2026-11-17, 第8度回写 admin-dsh-plugins-1794920391 2026-11-17, 第9度回写 admin-dsh-plugins-1794922493 2026-11-17 -->
+     sources=git:e570dc3-..2026-11-12, 第4度回写 admin-dsh-plugins-1794625487 2026-11-14, 第5度回写 admin-dsh-plugins-1794878615 2026-11-17, 第6度回写 admin-dsh-plugins-1794886474 2026-11-17, 第7度回写 admin-dsh-plugins-1794889175 2026-11-17, 第8度回写 admin-dsh-plugins-1794920391 2026-11-17, 第9度回写 admin-dsh-plugins-1794922493 2026-11-17, 第10度回写 admin-dsh-plugins-1795123240 2026-11-20 -->
 
-> 最后更新：2026-11-17 UTC+8
-> 来源：admin 处置轮 c97b6ddf8a51（2026-10-16 第 1 度）、298f844aee26（2026-11-12 第 2 度）、add1bdf366c0（2026-11-12 第 3 度）实证蒸馏；落地 evo-recurring-stray-remediation（框架域规则）在本项目的口径。第 4 度回写见跟踪项小节（admin-dsh-plugins-1794625487，2026-11-14），第 5 度回写见其后小节（admin-dsh-plugins-1794878615，2026-11-17）。
+> 最后更新：2026-11-20 UTC+8
+> 来源：admin 处置轮 c97b6ddf8a51（2026-10-16 第 1 度）、298f844aee26（2026-11-12 第 2 度）、add1bdf366c0（2026-11-12 第 3 度）实证蒸馏；落地 evo-recurring-stray-remediation（框架域规则）在本项目的口径。第 4 度回写见跟踪项小节（admin-dsh-plugins-1794625487，2026-11-14），第 5 度起回写见其后逐度小节（admin-dsh-plugins-1794878615 起，2026-11-17 → 2026-11-20 第 10 度）。
 
 ## 信号形态
 
@@ -63,3 +63,9 @@
 - 告警：first_seen=2026-11-17T13:04:00Z（指纹 9c72bf8edc2a6b1f，宽限 30 分钟），同文件集口径第 9 度命中——panels.tsx 单文件，与第 5/6/7/8 度字节级同一改动集（同指纹第 5 次告警：00:52→03:00→03:44→12:28→13:04，末次间隔约 35 分钟），改动自第 5 度起零演进；同现场 untracked market.yml（892 行 aria snapshot 转储）仍在，归 untracked 族管辖。
 - 处置：零触碰（处置轮 admin-dsh-plugins-1794922493，未 commit/stash/untrack），按第 8 度复查时机条款直接引用第 6 度回写之流程约束升级提请，不重新论证；注册表两选项均不适用（commit 第 4 度复查时机禁用 + 框架铁律 10 仅提交禁用，untrack 源码禁用），suggested_choice=notify_worktree_lane 维持。
 - 复查时机（维持）：第 10 度起同口径——零触碰 + 升级通知 + 引用第 6 度提请与本条，动作面维持「本页回写 + 处置记录」二件套；升级提请已第 5 次发出（11-14、11-17×4），人类持续不响应时逐度告警仍按本口径空转，直至人类响应或调整盘点宽限/豁免该文件集。
+
+### 第 10 度回写（2026-11-20，零触碰 + 引用第 6 度升级提请，口径同第 7/8/9 度）
+
+- 告警：first_seen=2026-11-19T20:46:39Z（指纹 9c72bf8edc2a6b1f，宽限 30 分钟），同文件集口径第 10 度命中——panels.tsx 单文件，与第 5/6/7/8/9 度字节级同一改动集（同指纹第 6 次告警：11-17 00:52→03:00→03:44→12:28→13:04→11-19 20:46，末次间隔约 2 天 7.7 小时），改动自第 5 度起零演进；同现场 untracked market.yml（892 行 aria snapshot 转储）仍在，归 untracked 族管辖。
+- 处置：零触碰（处置轮 admin-dsh-plugins-1795123240，未 commit/stash/untrack），按第 9 度复查时机条款直接引用第 6 度回写之流程约束升级提请，不重新论证；注册表两选项均不适用（commit 第 4 度复查时机禁用 + 框架铁律 10 仅提交禁用，untrack 源码禁用），suggested_choice=notify_worktree_lane 维持。
+- 复查时机（维持）：第 11 度起同口径——零触碰 + 升级通知 + 引用第 6 度提请与本条，动作面维持「本页回写 + 处置记录」二件套；升级提请已第 6 次发出（11-14、11-17×4、11-19），人类持续不响应时逐度告警仍按本口径空转，直至人类响应或调整盘点宽限/豁免该文件集。
