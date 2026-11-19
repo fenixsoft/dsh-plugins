@@ -340,302 +340,303 @@
 
 			/* ═══ 输入框历史消息导航（feature 3）══════════════════════════════════ */
 
-		/* 当前挂载的控制器引用：全局捕获监听的路由目标（控制器挂载时登记）；
-		 * 浏览态光标与缓存草稿等会话状态收在各控制器实例 ref 内，不在此共享。
-		 * owner 是单指针，多 composer 短暂并存（会话切换过渡期双挂载）时后挂载者
-		 * 覆盖先挂载者，按键路由以 owner.anchorRef 锚元素与事件目标 editorEl 的
-		 * 共同 InputBar 根（[class*="_root"]，与 POLISH_CSS 输入卡锚点同源）判定
-		 * 归属，不匹配不接管——历史文本不会写进别的 composer 草稿 */
-		var historyState = { owner: null }
-		/* 浏览态光标（每控制器一份，随 session 作用域插槽自然隔离，多 composer 并存
-		 * 不串扰）：pos = 从最新一条往回的步数（1=最新）；savedDraft = 进浏览态前的草稿 */
-		function freshNav() {
-			return { browsing: false, pos: 0, savedDraft: null }
-		}
-		/* setDraft 触发 composer input 事件时抑制“编辑即退出”判定 */
-		var applying = false
-		/* applying 闸门按双 rAF 复位，只是“setDraft 回声必在两帧内到达”的时序近似；
-		 * 掉帧/并发调度下回声可能晚于窗口到达，被 onHistoryInput 误判为用户编辑而
-		 * 静默退出并清空 savedDraft（真实数据丢失）。另记最近一次召回目标文本作
-		 * 确定性判据：input 事件时编辑器文本仍与召回目标一致 → 视为 setDraft 回声
-		 * 忽略，不依赖帧调度时序 */
-		var lastRecall = { text: null }
-
-		/* 回声比对：剥掉尾部换行（Lexical 对末段落补合成换行）后全文比对 */
-		function recallEcho(editorEl, text) {
-			if (typeof text !== 'string') return false
-			var live = ''
-			try { live = editorEl.innerText || '' } catch (err) { return false }
-			var strip = function (s) { return typeof s === 'string' ? s.replace(/\n+$/, '') : '' }
-			return strip(live) === strip(text)
-		}
-
-		/* chat 快照 → 按时间升序的已发送文本数组（user/steering，相邻重复折叠） */
-		function extractUserTexts(chat) {
-			var items = []
-			if (!chat || !chat.order || !chat.nodes || typeof chat.nodes.get !== 'function') return []
-			for (var i = 0; i < chat.order.length; i++) {
-				var node
-				try { node = chat.nodes.get(chat.order[i]) } catch (err) { node = null }
-				if (!node) continue
-				var kind = node.kind
-				if (kind !== 'user' && kind !== 'steering') continue
-				var data = node.data || {}
-				var text = textOfContent(data.content)
-				if (text === '') continue
-				/* data.seq 为权威时序；缺 seq 的节点按 order 次序垫底 */
-				items.push({
-					seq: typeof data.seq === 'number' ? data.seq : 1e9 + i,
-					text: text,
-				})
+			/* 当前挂载的控制器引用：全局捕获监听的路由目标（控制器挂载时登记）；
+			 * 浏览态光标与缓存草稿等会话状态收在各控制器实例 ref 内，不在此共享。
+			 * owner 是单指针，多 composer 短暂并存（会话切换过渡期双挂载）时后挂载者
+			 * 覆盖先挂载者，按键路由以 owner.anchorRef 锚元素与事件目标 editorEl 的
+			 * 共同 InputBar 根（[class*="_root"]，与 POLISH_CSS 输入卡锚点同源）判定
+			 * 归属，不匹配不接管——历史文本不会写进别的 composer 草稿 */
+			var historyState = { owner: null }
+			/* 浏览态光标（每控制器一份，随 session 作用域插槽自然隔离，多 composer 并存
+			 * 不串扰）：pos = 从最新一条往回的步数（1=最新）；savedDraft = 进浏览态前的草稿 */
+			function freshNav() {
+				return { browsing: false, pos: 0, savedDraft: null }
 			}
-			items.sort(function (a, b) { return a.seq - b.seq })
-			var out = []
-			for (var j = 0; j < items.length; j++) {
-				if (out.length > 0 && out[out.length - 1] === items[j].text) continue
-				out.push(items[j].text)
+			/* setDraft 触发 composer input 事件时抑制“编辑即退出”判定 */
+			var applying = false
+			/* applying 闸门按双 rAF 复位，只是“setDraft 回声必在两帧内到达”的时序近似；
+			 * 掉帧/并发调度下回声可能晚于窗口到达，被 onHistoryInput 误判为用户编辑而
+			 * 静默退出并清空 savedDraft（真实数据丢失）。另记最近一次召回目标文本作
+			 * 确定性判据：input 事件时编辑器文本仍与召回目标一致 → 视为 setDraft 回声
+			 * 忽略，不依赖帧调度时序 */
+			var lastRecall = { text: null }
+
+			/* 回声比对：剥掉尾部换行（Lexical 对末段落补合成换行）后全文比对 */
+			function recallEcho(editorEl, text) {
+				if (typeof text !== 'string') return false
+				var live = ''
+				try { live = editorEl.innerText || '' } catch (err) { return false }
+				var strip = function (s) { return typeof s === 'string' ? s.replace(/\n+$/, '') : '' }
+				return strip(live) === strip(text)
 			}
-			return out
-		}
 
-		function textOfContent(content) {
-			if (!Array.isArray(content)) return ''
-			var texts = []
-			for (var i = 0; i < content.length; i++) {
-				var block = content[i] || {}
-				if (block.type === 'text' && typeof block.text === 'string') texts.push(block.text)
-			}
-			return texts.join('')
-		}
-
-		/* ── 光标行几何（DOM Range，不碰 Lexical 内部）── */
-
-		/* 折叠选区的可视行 top；边界无字形矩形时按前字符/容器矩形近似 */
-		function caretRectTop(range) {
-			var rects = range.getClientRects()
-			if (rects.length > 0) return rects[0].top
-			var node = range.startContainer
-			var offset = range.startOffset
-			try {
-				if (node.nodeType === 3 && offset > 0) {
-					var probe = document.createRange()
-					probe.setStart(node, offset - 1)
-					probe.setEnd(node, offset)
-					var rs = probe.getClientRects()
-					if (rs.length > 0) return rs[rs.length - 1].top
-				}
-				if (node.nodeType === 1) {
-					var probe2 = document.createRange()
-					probe2.selectNodeContents(node)
-					var rc = probe2.getClientRects()
-					if (rc.length > 0) return range.startOffset === 0 ? rc[0].top : rc[rc.length - 1].top
-					var box = node.getBoundingClientRect()
-					if (box && (box.height > 0 || box.width > 0)) return box.top
-				}
-			} catch (err) { /* fallthrough */ }
-			return null
-		}
-
-		/* 编辑器全部内容的首行 top（过滤零尺寸矩形） */
-		function firstContentTop(editorEl) {
-			try {
-				var range = document.createRange()
-				range.selectNodeContents(editorEl)
-				var rects = range.getClientRects()
-				for (var i = 0; i < rects.length; i++) {
-					if (rects[i].height > 0 || rects[i].width > 0) return rects[i].top
-				}
-			} catch (err) { /* fallthrough */ }
-			return null
-		}
-
-		function atFirstLine(editorEl) {
-			var sel = window.getSelection()
-			if (!sel || sel.rangeCount === 0) return true
-			var range = sel.getRangeAt(0)
-			if (!range.collapsed) return false
-			var caretTop = caretRectTop(range)
-			if (caretTop === null) return true
-			var contentTop = firstContentTop(editorEl)
-			if (contentTop === null) return true
-			return Math.abs(caretTop - contentTop) < 8
-		}
-
-		/* 召回后的光标落位：↑ 置首（保证连按 ↑ 连续导航），↓/恢复置末 */
-		function placeCaretAtEdge(editorEl, atStart) {
-			try {
-				editorEl.focus()
-				var sel = window.getSelection()
-				if (!sel) return
-				var range = document.createRange()
-				range.selectNodeContents(editorEl)
-				range.collapse(atStart === true)
-				sel.removeAllRanges()
-				sel.addRange(range)
-			} catch (err) { /* 光标落位失败不影响文本 */ }
-		}
-
-		function applyRecall(owner, editorEl, text, dir) {
-			applying = true
-			lastRecall.text = typeof text === 'string' ? text : null
-			try {
-				var actions = owner.actionsRef.current
-				if (actions && typeof actions.setDraft === 'function') actions.setDraft(text)
-			} finally {
-				window.requestAnimationFrame(function () {
-					window.requestAnimationFrame(function () {
-						placeCaretAtEdge(editorEl, dir === 'up')
-						applying = false
+			/* chat 快照 → 按时间升序的已发送文本数组（user/steering，相邻重复折叠） */
+			function extractUserTexts(chat) {
+				var items = []
+				if (!chat || !chat.order || !chat.nodes || typeof chat.nodes.get !== 'function') return []
+				for (var i = 0; i < chat.order.length; i++) {
+					var node
+					try { node = chat.nodes.get(chat.order[i]) } catch (err) { node = null }
+					if (!node) continue
+					var kind = node.kind
+					if (kind !== 'user' && kind !== 'steering') continue
+					var data = node.data || {}
+					var text = textOfContent(data.content)
+					if (text === '') continue
+					/* data.seq 为权威时序；缺 seq 的节点按 order 次序垫底 */
+					items.push({
+						seq: typeof data.seq === 'number' ? data.seq : 1e9 + i,
+						text: text,
 					})
-				})
+				}
+				items.sort(function (a, b) { return a.seq - b.seq })
+				var out = []
+				for (var j = 0; j < items.length; j++) {
+					if (out.length > 0 && out[out.length - 1] === items[j].text) continue
+					out.push(items[j].text)
+				}
+				return out
 			}
-		}
 
-		function exitBrowsing(nav, keepSaved) {
-			nav.browsing = false
-			nav.pos = 0
-			if (keepSaved !== true) nav.savedDraft = null
-		}
-
-		/* 按键归属校验：事件目标编辑器须与 owner 锚元素共处同一 InputBar 根
-		 * （[class*="_root"]）。锚不可用（未挂载/已断开/根找不到）时按不归属处理——
-		 * 宁可放行默认行为，也不把历史导航套到别的控制器上 */
-		function ownedEditor(editorEl, owner) {
-			var anchorRef = owner.anchorRef
-			var anchorEl = anchorRef && anchorRef.current
-			if (!anchorEl || !anchorEl.isConnected) return false
-			var ownerRoot = anchorEl.closest('[class*="_root"]')
-			if (!ownerRoot) return false
-			return ownerRoot === editorEl.closest('[class*="_root"]')
-		}
-
-		/* document 捕获阶段 keydown：先于 Lexical 命令处理 */
-		function onHistoryKeydown(e) {
-			var nav = null
-			try {
-				if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return
-				if (e.isComposing || e.keyCode === 229) return
-				var target = e.target
-				if (!(target instanceof Element)) return
-				var editorEl = target.closest('[data-composer-input]')
-				if (!editorEl || editorEl.dataset.phase !== 'plain') return
-				var owner = historyState.owner
-				if (!owner) return
-				if (!ownedEditor(editorEl, owner)) return /* 事件目标不是 owner 的编辑器：放行 */
-				nav = owner.nav
-
-				if (e.key === 'Escape') {
-					if (!nav.browsing) return
-					var restore = nav.savedDraft
-					exitBrowsing(nav)
-					applyRecall(owner, editorEl, restore || '', 'down')
-					e.preventDefault()
-					e.stopPropagation()
-					return
+			function textOfContent(content) {
+				if (!Array.isArray(content)) return ''
+				var texts = []
+				for (var i = 0; i < content.length; i++) {
+					var block = content[i] || {}
+					if (block.type === 'text' && typeof block.text === 'string') texts.push(block.text)
 				}
+				return texts.join('')
+			}
 
-				var actions = owner.actionsRef.current
-				if (!actions || typeof actions.setDraft !== 'function') return
-				var hist = extractUserTexts(owner.chatRef.current)
+			/* ── 光标行几何（DOM Range，不碰 Lexical 内部）── */
 
-				if (!nav.browsing) {
-					if (e.key !== 'ArrowUp') return /* 草稿态 ↓ 是原生光标移动 */
-					if (!atFirstLine(editorEl)) return /* 多行：行间导航，不接管 */
-					if (hist.length === 0) return
-					var live = owner.draftRef.current
-					nav.savedDraft = typeof live === 'string' ? live : (editorEl.innerText || '')
-					nav.browsing = true
-					nav.pos = 1
-					applyRecall(owner, editorEl, hist[hist.length - 1], 'up')
-					e.preventDefault()
-					e.stopPropagation()
-					return
+			/* 折叠选区的可视行 top；边界无字形矩形时按前字符/容器矩形近似 */
+			function caretRectTop(range) {
+				var rects = range.getClientRects()
+				if (rects.length > 0) return rects[0].top
+				var node = range.startContainer
+				var offset = range.startOffset
+				try {
+					if (node.nodeType === 3 && offset > 0) {
+						var probe = document.createRange()
+						probe.setStart(node, offset - 1)
+						probe.setEnd(node, offset)
+						var rs = probe.getClientRects()
+						if (rs.length > 0) return rs[rs.length - 1].top
+					}
+					if (node.nodeType === 1) {
+						var probe2 = document.createRange()
+						probe2.selectNodeContents(node)
+						var rc = probe2.getClientRects()
+						if (rc.length > 0) return range.startOffset === 0 ? rc[0].top : rc[rc.length - 1].top
+						var box = node.getBoundingClientRect()
+						if (box && (box.height > 0 || box.width > 0)) return box.top
+					}
+				} catch (err) { /* fallthrough */ }
+				return null
+			}
+
+			/* 编辑器全部内容的首行 top（过滤零尺寸矩形） */
+			function firstContentTop(editorEl) {
+				try {
+					var range = document.createRange()
+					range.selectNodeContents(editorEl)
+					var rects = range.getClientRects()
+					for (var i = 0; i < rects.length; i++) {
+						if (rects[i].height > 0 || rects[i].width > 0) return rects[i].top
+					}
+				} catch (err) { /* fallthrough */ }
+				return null
+			}
+
+			function atFirstLine(editorEl) {
+				var sel = window.getSelection()
+				if (!sel || sel.rangeCount === 0) return true
+				var range = sel.getRangeAt(0)
+				if (!range.collapsed) return false
+				var caretTop = caretRectTop(range)
+				if (caretTop === null) return true
+				var contentTop = firstContentTop(editorEl)
+				if (contentTop === null) return true
+				return Math.abs(caretTop - contentTop) < 8
+			}
+
+			/* 召回后的光标落位：↑ 置首（保证连按 ↑ 连续导航），↓/恢复置末 */
+			function placeCaretAtEdge(editorEl, atStart) {
+				try {
+					editorEl.focus()
+					var sel = window.getSelection()
+					if (!sel) return
+					var range = document.createRange()
+					range.selectNodeContents(editorEl)
+					range.collapse(atStart === true)
+					sel.removeAllRanges()
+					sel.addRange(range)
+				} catch (err) { /* 光标落位失败不影响文本 */ }
+			}
+
+			function applyRecall(owner, editorEl, text, dir) {
+				applying = true
+				lastRecall.text = typeof text === 'string' ? text : null
+				try {
+					var actions = owner.actionsRef.current
+					if (actions && typeof actions.setDraft === 'function') actions.setDraft(text)
+				} finally {
+					window.requestAnimationFrame(function () {
+						window.requestAnimationFrame(function () {
+							placeCaretAtEdge(editorEl, dir === 'up')
+							applying = false
+						})
+					})
 				}
+			}
 
-				/* 浏览态：↑/↓ 独占 */
-				if (e.key === 'ArrowUp') {
-					if (nav.pos >= hist.length) { e.preventDefault(); e.stopPropagation(); return } /* 已最旧 */
-					nav.pos += 1
-					applyRecall(owner, editorEl, hist[hist.length - nav.pos], 'up')
-				} else {
-					if (nav.pos <= 1) {
-						/* 越过最新 → 恢复草稿并退出浏览态 */
-						var draft = nav.savedDraft
+			function exitBrowsing(nav, keepSaved) {
+				nav.browsing = false
+				nav.pos = 0
+				if (keepSaved !== true) nav.savedDraft = null
+			}
+
+			/* 按键归属校验：事件目标编辑器须与 owner 锚元素共处同一 InputBar 根
+			 * （[class*="_root"]）。锚不可用（未挂载/已断开/根找不到）时按不归属处理——
+			 * 宁可放行默认行为，也不把历史导航套到别的控制器上 */
+			function ownedEditor(editorEl, owner) {
+				var anchorRef = owner.anchorRef
+				var anchorEl = anchorRef && anchorRef.current
+				if (!anchorEl || !anchorEl.isConnected) return false
+				var ownerRoot = anchorEl.closest('[class*="_root"]')
+				if (!ownerRoot) return false
+				return ownerRoot === editorEl.closest('[class*="_root"]')
+			}
+
+			/* document 捕获阶段 keydown：先于 Lexical 命令处理 */
+			function onHistoryKeydown(e) {
+				var nav = null
+				try {
+					if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return
+					if (e.isComposing || e.keyCode === 229) return
+					var target = e.target
+					if (!(target instanceof Element)) return
+					var editorEl = target.closest('[data-composer-input]')
+					if (!editorEl || editorEl.dataset.phase !== 'plain') return
+					var owner = historyState.owner
+					if (!owner) return
+					if (!ownedEditor(editorEl, owner)) return /* 事件目标不是 owner 的编辑器：放行 */
+					nav = owner.nav
+
+					if (e.key === 'Escape') {
+						if (!nav.browsing) return
+						var restore = nav.savedDraft
 						exitBrowsing(nav)
-						applyRecall(owner, editorEl, draft || '', 'down')
+						applyRecall(owner, editorEl, restore || '', 'down')
+						e.preventDefault()
+						e.stopPropagation()
+						return
+					}
+
+					var actions = owner.actionsRef.current
+					if (!actions || typeof actions.setDraft !== 'function') return
+					var hist = extractUserTexts(owner.chatRef.current)
+
+					if (!nav.browsing) {
+						if (e.key !== 'ArrowUp') return /* 草稿态 ↓ 是原生光标移动 */
+						if (!atFirstLine(editorEl)) return /* 多行：行间导航，不接管 */
+						if (hist.length === 0) return
+						var live = owner.draftRef.current
+						nav.savedDraft = typeof live === 'string' ? live : (editorEl.innerText || '')
+						nav.browsing = true
+						nav.pos = 1
+						applyRecall(owner, editorEl, hist[hist.length - 1], 'up')
+						e.preventDefault()
+						e.stopPropagation()
+						return
+					}
+
+					/* 浏览态：↑/↓ 独占 */
+					if (e.key === 'ArrowUp') {
+						if (nav.pos >= hist.length) { e.preventDefault(); e.stopPropagation(); return } /* 已最旧 */
+						nav.pos += 1
+						applyRecall(owner, editorEl, hist[hist.length - nav.pos], 'up')
 					} else {
-						nav.pos -= 1
-						/* 列表可能在浏览期间缩短（会话快照更新），夹回上界防负索引 */
-						if (nav.pos > hist.length) nav.pos = hist.length
-						var item = hist[hist.length - nav.pos]
-						applyRecall(owner, editorEl, typeof item === 'string' ? item : '', 'down')
+						if (nav.pos <= 1) {
+							/* 越过最新 → 恢复草稿并退出浏览态 */
+							var draft = nav.savedDraft
+							exitBrowsing(nav)
+							applyRecall(owner, editorEl, draft || '', 'down')
+						} else {
+							nav.pos -= 1
+							/* 列表可能在浏览期间缩短（会话快照更新），夹回上界防负索引 */
+							if (nav.pos > hist.length) nav.pos = hist.length
+							var item = hist[hist.length - nav.pos]
+							applyRecall(owner, editorEl, typeof item === 'string' ? item : '', 'down')
+						}
+					}
+					e.preventDefault()
+					e.stopPropagation()
+				} catch (err) {
+					if (nav) exitBrowsing(nav)
+				}
+			}
+
+			/* composer 编辑（键入/粘贴/发送清空）→ 静默退出浏览态；setDraft 自身触发的
+			 * input 用 applying 闸门豁免，晚于窗口到达的回声再以「文本仍等于召回目标」
+			 * 确定性判据兜底豁免 */
+			function onHistoryInput(e) {
+				try {
+					if (applying) return
+					var target = e.target
+					if (!(target instanceof Element)) return
+					var editorEl = target.closest('[data-composer-input]')
+					if (!editorEl) return
+					var owner = historyState.owner
+					if (!owner || !owner.nav.browsing) return
+					if (!ownedEditor(editorEl, owner)) return /* 事件目标不是 owner 的编辑器：放行 */
+					if (lastRecall.text !== null && recallEcho(editorEl, lastRecall.text)) return
+					exitBrowsing(owner.nav)
+				} catch (err) { /* never */ }
+			}
+
+			/* 历史导航控制器：session 作用域插槽自动注入 inputActions/useInput/useChat；
+			 * 另渲染一个 display:none 锚元素（纯 headless 拿不到任何宿主 DOM，无从做
+			 * 按键事件的实例归属判定），锚不生成盒子、不占布局与 flex gap，仅供
+			 * ownedEditor 做共同根比对 */
+			var HistoryController = function HistoryController(props) {
+				var input = typeof props.useInput === 'function' ? props.useInput(function (s) { return s }) : null
+				var chat = typeof props.useChat === 'function' ? props.useChat(function (s) { return s }) : null
+
+				var anchorRef = react.useRef(null)
+				var refs = react.useRef(null)
+				if (refs.current === null) {
+					refs.current = {
+						actionsRef: { current: null },
+						chatRef: { current: null },
+						draftRef: { current: '' },
+						nav: freshNav(),
+						anchorRef: anchorRef,
 					}
 				}
-				e.preventDefault()
-				e.stopPropagation()
-			} catch (err) {
-				if (nav) exitBrowsing(nav)
+				refs.current.actionsRef.current = props.inputActions || null
+				refs.current.chatRef.current = chat
+				refs.current.draftRef.current = input && typeof input.draft === 'string' ? input.draft : ''
+
+				react.useEffect(function () {
+					var api = refs.current
+					historyState.owner = api
+					return function () {
+						/* 浏览态已随实例隔离：无论是否仍是 owner 都退出本人浏览态；
+						 * owner 指针仅在仍是本人时清空，避免误清新挂载的控制器 */
+						exitBrowsing(api.nav)
+						if (historyState.owner === api) historyState.owner = null
+					}
+				}, [])
+				return react.createElement('span', {
+					ref: anchorRef,
+					'data-fdxchat-history-anchor': '',
+					style: { display: 'none' },
+				})
 			}
-		}
 
-		/* composer 编辑（键入/粘贴/发送清空）→ 静默退出浏览态；setDraft 自身触发的
-		 * input 用 applying 闸门豁免，晚于窗口到达的回声再以「文本仍等于召回目标」
-		 * 确定性判据兜底豁免 */
-		function onHistoryInput(e) {
-			try {
-				if (applying) return
-				var target = e.target
-				if (!(target instanceof Element)) return
-				var editorEl = target.closest('[data-composer-input]')
-				if (!editorEl) return
-				var owner = historyState.owner
-				if (!owner || !owner.nav.browsing) return
-				if (lastRecall.text !== null && recallEcho(editorEl, lastRecall.text)) return
-				exitBrowsing(owner.nav)
-			} catch (err) { /* never */ }
-		}
-
-		/* 历史导航控制器：session 作用域插槽自动注入 inputActions/useInput/useChat；
-		 * 另渲染一个 display:none 锚元素（纯 headless 拿不到任何宿主 DOM，无从做
-		 * 按键事件的实例归属判定），锚不生成盒子、不占布局与 flex gap，仅供
-		 * ownedEditor 做共同根比对 */
-		var HistoryController = function HistoryController(props) {
-			var input = typeof props.useInput === 'function' ? props.useInput(function (s) { return s }) : null
-			var chat = typeof props.useChat === 'function' ? props.useChat(function (s) { return s }) : null
-
-			var anchorRef = react.useRef(null)
-			var refs = react.useRef(null)
-			if (refs.current === null) {
-				refs.current = {
-					actionsRef: { current: null },
-					chatRef: { current: null },
-					draftRef: { current: '' },
-					nav: freshNav(),
-					anchorRef: anchorRef,
-				}
-			}
-			refs.current.actionsRef.current = props.inputActions || null
-			refs.current.chatRef.current = chat
-			refs.current.draftRef.current = input && typeof input.draft === 'string' ? input.draft : ''
-
-			react.useEffect(function () {
-				var api = refs.current
-				historyState.owner = api
-				return function () {
-					/* 浏览态已随实例隔离：无论是否仍是 owner 都退出本人浏览态；
-					 * owner 指针仅在仍是本人时清空，避免误清新挂载的控制器 */
-					exitBrowsing(api.nav)
-					if (historyState.owner === api) historyState.owner = null
-				}
-			}, [])
-			return react.createElement('span', {
-				ref: anchorRef,
-				'data-fdxchat-history-anchor': '',
-				style: { display: 'none' },
-			})
-		}
-
-		/* ── 插件体：样式注入 + keyed 插槽遮蔽注册 ── */
+			/* ── 插件体：样式注入 + keyed 插槽遮蔽注册 ── */
 			return {
 				inject: ['slots'],
 				apply(ctx) {

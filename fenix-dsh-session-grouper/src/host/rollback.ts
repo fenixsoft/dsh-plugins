@@ -88,16 +88,18 @@ async function sameLocation(a: string, b: string): Promise<boolean> {
 }
 
 /**
- * trash（或任意目录树）内是否存在晚于 sinceMs 写入的文件：用于判定迁移后目标位
- * 或原位是否又追加了事件。无法枚举/读取交由调用方按「保留现场」保守处理；符号
- * 链接条目（dirent isFile/isDirectory 均为 false）无法经 readdir 判定其目标的
- * 写入状态，同口径保守判有写入保留残迹（递归删除只删链接本身，链接会静默丢失）。
+ * trash（或任意目录树）内是否存在晚于 sinceMs 写入的文件或目录：用于判定迁移后
+ * 目标位或原位是否又追加了事件。无法枚举/读取交由调用方按「保留现场」保守处理；
+ * 符号链接条目（dirent isFile/isDirectory 均为 false）无法经 readdir 判定其目标的
+ * 写入状态，同口径保守判有写入保留残迹（递归删除只删链接本身，链接会静默丢失）；
+ * 目录条目同样检查自身 mtime——迁移后新增的空目录（内无任何文件）仅靠文件判定
+ * 会漏检而被递归清退静默吞掉；目录 rename 保留自身 mtime，迁移前目录不会误报。
  */
 function hasWritesAfter(dir: string, sinceMs: number): boolean {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (hasWritesAfter(full, sinceMs)) return true
+      if (statSync(full).mtimeMs > sinceMs || hasWritesAfter(full, sinceMs)) return true
     } else if (entry.isFile() && statSync(full).mtimeMs > sinceMs) return true
     else if (entry.isSymbolicLink()) return true
   }

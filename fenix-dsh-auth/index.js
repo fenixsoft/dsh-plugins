@@ -65,8 +65,8 @@ const CREDENTIAL_SCOPE = 'fenix-dsh-auth'
 const CREDENTIAL_ID = 'login'
 export const CREDENTIAL_KEY = `${CREDENTIAL_SCOPE}/${CREDENTIAL_ID}`
 
-/** 登录 POST 请求体上限（design：8KB）。 */
-const MAX_LOGIN_BODY_BYTES = 8 * 1024
+/** 登录与凭据写（POST /auth/credentials）路径共用的 JSON 请求体上限（design：8KB）。 */
+const MAX_JSON_BODY_BYTES = 8 * 1024
 
 /** 请求体读取超时兜底（慢速客户端不发完 body 也不该令调用方 await 永久悬挂）。 */
 const BODY_READ_TIMEOUT_MS = 30_000
@@ -808,17 +808,19 @@ function headerValue(headers, name) {
  */
 function createIndexHandler({ connection, webServer, credentials, limiter, log }) {
 	return async function handleIndex(req, res) {
-		/** ConnectionIndexResponse sink：捕获 authorizeIndex 的写出，真实 res 不被触碰。 */
+		/** ConnectionIndexResponse sink：捕获 authorizeIndex 的写出，真实 res 不被触碰；
+		 *  writeHead/end 返回 sink 自身，上游即使链式调用（writeHead(...).end(...)）
+		 *  也不会经返回值落到真实 res 上。 */
 		const sinkStatus = { code: 0, headers: undefined, body: undefined }
 		const sink = {
 			writeHead(status, headers) {
 				sinkStatus.code = status
 				sinkStatus.headers = headers !== undefined ? { ...headers } : {}
-				return res
+				return sink
 			},
 			end(body) {
 				sinkStatus.body = body
-				return res
+				return sink
 			},
 		}
 		try {
@@ -934,7 +936,7 @@ function createLoginHandler({ connection, credentials, limiter, webServer, log, 
 
 			let body
 			try {
-				body = await readRequestBody(req, MAX_LOGIN_BODY_BYTES)
+				body = await readRequestBody(req, MAX_JSON_BODY_BYTES)
 			} catch (error) {
 				writeJson(res, 400, { error: error?.code === 'FENIX_BODY_TOO_LARGE' ? 'body-too-large' : 'body-read-failed' })
 				return
@@ -1066,7 +1068,7 @@ function createCredentialsHandler({ connection, credentials, limiter, webServer,
 				}
 				let body
 				try {
-					body = await readRequestBody(req, MAX_LOGIN_BODY_BYTES)
+					body = await readRequestBody(req, MAX_JSON_BODY_BYTES)
 				} catch (error) {
 					writeJson(res, 400, { error: error?.code === 'FENIX_BODY_TOO_LARGE' ? 'body-too-large' : 'body-read-failed' }, headOnly)
 					return

@@ -280,7 +280,12 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   // ② click-away 兜底（恒注册，document 捕获阶段）：凡点击不落在本视图容器、
   //    也不落在入口按钮上，一律收视图。会话切换/顶栏/侧栏任何交互都必然触发，
   //    与缝形状彻底解耦。
-  const disposeSelectionWatch = uiWorkspace?.watchSelectionChange?.(closeView) ?? undefined
+  const watchDispose = uiWorkspace?.watchSelectionChange?.(closeView)
+  // 缝漂移归一（与 resolveUiWorkspace 逐缝 typeof 探测同口径）：subscribe 返回
+  // 非函数真值（如布尔）不透传——下方卸载清理 disposeSelectionWatch?.() 的
+  // optional call 只对 nullish 短路，非函数真值会 TypeError 中断后续清理链
+  // （keydown/resize 退订、__fenixSas 删除、容器移除全部跳过）。
+  const disposeSelectionWatch = typeof watchDispose === 'function' ? watchDispose : undefined
   const onAwayClick = (event: MouseEvent): void => {
     const target = event.target
     if (!(target instanceof Element)) return
