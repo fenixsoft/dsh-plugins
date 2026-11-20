@@ -368,13 +368,30 @@ function fmtTime(ms) {
   return d.getFullYear() + '-' + md;
 }
 
-/* ===== API（同源 fetch；401 提示登录）===== */
+/* ===== API（同源 fetch；401 提示登录；30s 定时中止防请求悬挂锁死输入口）===== */
 async function api(method, path, body) {
-  var res = await fetch(path, {
-    method: method,
-    headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined
-  });
+  /* 手动 AbortController+setTimeout（AbortSignal.timeout 较新，兼容面不稳）：
+     请求悬挂（如反向代理黑洞）时 30s 后中止，走各调用点既有失败路径收尾——
+     建任务 POST 落 runSearch catch→finishFail 复位 runBtn，DELETE 落各自
+     尽力而为 catch，轮询 GET 落连续失败计数；不再等浏览器自行断开（可达
+     数分钟）导致按钮持续禁用、中断停留「分析中」。 */
+  var ctl = new AbortController();
+  var timer = setTimeout(function () { ctl.abort(); }, 30000);
+  var res;
+  try {
+    res = await fetch(path, {
+      method: method,
+      headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: ctl.signal
+    });
+  } catch (e) {
+    /* 仅超时中止转可读文案；非中止网络异常保持原样传播（既有容错口径不变） */
+    if (ctl.signal.aborted) throw new Error('请求超时（30 秒无响应），请稍后重试');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   if (res.status === 401) {
     var err = new Error('未登录或会话已过期：请先打开 DSH 主界面登录后再使用本页');
     err.authRequired = true;
@@ -776,12 +793,28 @@ function startStatusStream(id, token) {
      激活期间并行保留一条低频轮询兜底；handleStatus 的整帧 JSON 去重保证
      相同载荷不渲染、无闪烁，中途帧流停滞同样被下一次拉取对账到终态。单次
      拉取失败静默容忍（真实断连由 onerror→轮询容错路径收尾，不在此误判终局）；
-     撤表随 stopStatusStream 统一进行。 */
+     非法载荷不是网络类失败，静默吞掉会永停「分析中」，连续 2 次升级判失败
+     （口径对齐 startPolling，见下方守卫分支）；撤表随 stopStatusStream 统一进行。 */
+  var watchdogBadCount = 0;
   watchdogTimer = setInterval(async function () {
     if (token !== runToken || finishingRun) { stopStatusStream(); return; }
     var status = null;
     try { status = parseJobStatus(await api('GET', API + '/' + encodeURIComponent(id))); }
     catch (e) { return; }
+    /* 载荷形状守卫升级：SSE 连接健康而载荷形状漂移/终态帧缺失时 onerror 不
+       触发、handleStatus 对 null 静默早退，唯此处计数升级才不永停「分析中」。
+       连续 2 次非法载荷按 finishFail 收尾复位 runBtn（与 startPolling 连续
+       失败口径对齐）；网络类拉取异常仍静默容忍（断连由 onerror→轮询收尾）。 */
+    if (!status) {
+      if (token !== runToken) return;
+      watchdogBadCount++;
+      if (watchdogBadCount <= 2) return;
+      if (!beginFinish()) return;
+      stopTimers();
+      finishFail(new Error('任务状态载荷形状非法'));
+      return;
+    }
+    watchdogBadCount = 0;
     handleStatus(status, token);
   }, 5000);
   es.addEventListener('status', function (ev) {
