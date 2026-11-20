@@ -103,7 +103,10 @@
 				/* wide 表 margin 右推夹紧：上行走变量同步后 lead 仍会余出 24px 正
 				 * margin（spare=(100cqw-内容宽)/2 的右出血项），把包装器相对正文
 				 * 右移 24px——公式退化路径，非设计意图。min(0px,…) 只夹右推、保留
-				 * 向左负 margin（真正出血场景）。双类抬特异性压过核心同选择器规则 */
+				 * 向左负 margin（真正出血场景）。双类抬特异性压过核心同选择器规则。
+				 * 嵌入形态不豁免（有意）：官方 lead 正常（负出血）时 min(0px,…) 恒
+				 * 等不生效，仅退化回退时把横向溢出挡在 embed 容器外，与「维持官方
+				 * 自身宽度轴」的豁免目标不冲突 */
 				'[class$="_body"] .md-table-wide.md-table-wide{margin-left:min(0px, calc(-1 * var(--dsh-table-lead)))}',
 				/* InputBar .root 侧距 16→24（bottom 4px 保持官方值）。
 				 * 0.2.2: [class$= 换 [class*=——hero 变体根 class 属性是
@@ -237,14 +240,18 @@
 				var copied = state[0]
 				var setCopied = state[1]
 				var timer = react.useRef(null)
+				var mounted = react.useRef(true)
 				react.useEffect(function () {
 					return function () {
+						mounted.current = false
 						if (timer.current !== null) window.clearTimeout(timer.current)
 					}
 				}, [])
 				var onClick = function () {
 					copyText(props.text, function (ok) {
-						if (ok !== true) return /* 复制失败不误报「已复制」 */
+						/* 复制失败不误报「已复制」；卸载后在途回调（clipboard promise
+						 * resolve）不再 setState */
+						if (ok !== true || mounted.current !== true) return
 						setCopied(true)
 						if (timer.current !== null) window.clearTimeout(timer.current)
 						timer.current = window.setTimeout(function () { setCopied(false) }, 1500)
@@ -450,14 +457,19 @@
 			}
 
 			function atFirstLine(editorEl) {
+				/* 测量失败不再一律按「首行」放行召回：仅空草稿放行（空编辑器召回
+				 * 依赖此口），其余失败路径（无选区/光标矩形取不到/首行锚点取不到）
+				 * 一律不接管——多行草稿在异常渲染态按 ↑ 宁可走官方行间导航，也不
+				 * 误入历史浏览态 */
+				var empty = (editorEl.textContent || '').length === 0
+				var contentTop = firstContentTop(editorEl)
+				if (contentTop === null) return empty
 				var sel = window.getSelection()
-				if (!sel || sel.rangeCount === 0) return true
+				if (!sel || sel.rangeCount === 0) return empty
 				var range = sel.getRangeAt(0)
 				if (!range.collapsed) return false
 				var caretTop = caretRectTop(range)
-				if (caretTop === null) return true
-				var contentTop = firstContentTop(editorEl)
-				if (contentTop === null) return true
+				if (caretTop === null) return false
 				return Math.abs(caretTop - contentTop) < 8
 			}
 
