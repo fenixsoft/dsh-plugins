@@ -8,7 +8,8 @@
  *     产物）；
  *   - 其余：先按封存清单核验备份完整性（不可信即拒绝还原，保留现场）；目标会话
  *     目录（mangled(toCwd)）rename 挪入 trash 残目录（迁移后目标位可能已被继续追加
- *     事件，递归删除会静默吞掉增量）：还原后以台账迁移时刻判定，trash 内存在更晚
+ *     事件，递归删除会静默吞掉增量）：还原后以台账 releaseAtMs（迁移器释放写锁前
+ *     打点；旧行退化以迁移时刻）判定，trash 内存在更晚
  *     写入则保留并在结果中给出路径供人工核对找回，无更晚写入才清退；还原时挪入
  *     trash 的原位残迹（迁移后原位亦可能被继续追加或重建）同口径判定；备份产物（`<DSH_HOME>/session-grouper-backups/<id>/`，
  *     即迁移前原目录的全量副本，header.cwd 仍为原值）经 staging 中转 + rename 原子
@@ -107,19 +108,21 @@ function hasWritesAfter(dir: string, sinceMs: number): boolean {
 }
 
 /**
- * trash 残迹保守清退（目标位/原位同口径）：trash 内存在晚于台账迁移时刻（at）
- * 写入的文件即迁移后追加的事件/产物，递归删除会静默丢失——保留并返回路径，随
- * outcome 与日志交人工核对；无更晚写入才清退；时刻不可解析、判定或清退失败一律
- * 保守保留。返回 undefined 表示已清退。
+ * trash 残迹保守清退（目标位/原位同口径）：trash 内存在晚于判定阈值写入的文件
+ * 即迁移后追加的事件/产物，递归删除会静默丢失——保留并返回路径，随 outcome 与
+ * 日志交人工核对；无更晚写入才清退；时刻不可解析、判定或清退失败一律保守保留。
+ * 阈值取台账 releaseAtMs（迁移器释放写锁前打点：该时刻前 flock 持有中不存在任何
+ * 应用侧写入，此后目标位/原位写入均属迁移后增量，严格大于判定完整覆盖）；旧行/
+ * 手工编辑行无有效 releaseAtMs 时退化以迁移时刻（at）判定。返回 undefined 表示
+ * 已清退。
  */
-function retainOrDisposeTrash(trashDir: string, migratedAtRaw: string, where: '目标位' | '原位', sessionId: SessionId, log: MigrateLogger): string | undefined {
-  const migratedAt = Date.parse(migratedAtRaw)
+function retainOrDisposeTrash(trashDir: string, sinceMs: number, where: '目标位' | '原位', sessionId: SessionId, log: MigrateLogger): string | undefined {
   try {
-    if (Number.isNaN(migratedAt)) {
-      log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 台账迁移时刻不可解析（'${String(migratedAtRaw)}'），无法判定${where}是否有迁移后追加的写入，trash 残迹保留于 ${trashDir}，请人工核对后清理`)
+    if (Number.isNaN(sinceMs)) {
+      log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚清退判定时刻不可解析，无法判定${where}是否有迁移后追加的写入，trash 残迹保留于 ${trashDir}，请人工核对后清理`)
       return trashDir
     }
-    if (hasWritesAfter(trashDir, migratedAt)) {
+    if (hasWritesAfter(trashDir, sinceMs)) {
       log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚后${where}存在迁移后追加的写入，trash 残迹保留于 ${trashDir}，请人工核对后清理`)
       return trashDir
     }
@@ -147,7 +150,8 @@ function retainOrDisposeTrash(trashDir: string, migratedAtRaw: string, where: '�
  * 返回原位残迹滞留的 trash 路径（原位无残迹则 undefined）；不在本函数内就地
  * 清退——残迹中可能含迁移后追加到原位的写入（pending-attach 窗口内应用仍向
  * 旧路径追加、上次中断回滚的残留、人工放置的产物），递归删除会静默吞掉这部分
- * 增量，与目标位残迹同口径交调用方以台账迁移时刻判定清退或保留。
+ * 增量，与目标位残迹同口径交调用方以台账判定阈值（releaseAtMs，旧行退化以迁移
+ * 时刻）判定清退或保留。
  */
 function restoreFromBackup(backupDir: string, originalDir: string, log?: MigrateLogger, targetTrashDir?: string): string | undefined {
   const stagingDir = `${originalDir}.rollback-${Date.now().toString(36)}`
@@ -178,9 +182,9 @@ function restoreFromBackup(backupDir: string, originalDir: string, log?: Migrate
   } catch (error) {
     log?.warn(`fenix-dsh-session-grouper: 备份完整性清单清理失败（${backupManifestPath(backupDir)} 残留会误导下轮核验，请人工删除）：${errorMessage(error)}`)
   }
-  // 原位残迹不在就位后就地清退：与目标位残迹同口径，返回路径交调用方以台账迁移
-  // 时刻判定清退或保留（判定/清退失败一律保守保留，路径随 outcome 与日志交人工
-  // 核对）；原位本无残迹则无需处置。
+  // 原位残迹不在就位后就地清退：与目标位残迹同口径，返回路径交调用方以台账判定
+  // 阈值（releaseAtMs，旧行退化以迁移时刻）判定清退或保留（判定/清退失败一律保守
+  // 保留，路径随 outcome 与日志交人工核对）；原位本无残迹则无需处置。
   return remnantTrashDir
 }
 
@@ -223,7 +227,13 @@ export async function rollbackSession(
       // 台账行不带 backupDir（与 migrator「不消费备份不写该字段」口径一致）：
       // 本分支零文件操作、未消费备份，写入的只能是既往周期遗留的陈旧备份目录，
       // 会误导排障者当作「本次回滚面对的迁移前状态」。
-      appendLedger(dshHome, { sessionId, fromCwd: latest.fromCwd, toCwd: latest.toCwd, at: new Date().toISOString(), status: 'rolled-back' })
+      // 台账落盘失败须注明分支语境（与主分支「备份已消费不可原样重试」的实况措辞
+      // 区分）：本分支零文件操作、仅注册表索引撤销（幂等），可安全重试。
+      try {
+        appendLedger(dshHome, { sessionId, fromCwd: latest.fromCwd, toCwd: latest.toCwd, at: new Date().toISOString(), status: 'rolled-back' })
+      } catch (error) {
+        throw new Error(`同位条目零文件操作、仅注册表索引撤销（幂等，可安全重试），但台账 rolled-back 落盘失败：${errorMessage(error)}`)
+      }
       log.info?.(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚：${latest.toCwd} 与 ${latest.fromCwd} 同位（零文件操作，仅索引撤销与台账标记）`)
       return { status: 'rolled-back', sessionId, fromCwd: latest.fromCwd }
     }
@@ -251,7 +261,7 @@ export async function rollbackSession(
     // 2) 目标目录清理（迁移落位的半/全产物）：rename 挪入 trash 残目录保留（与
     //    restoreFromBackup 对 originalDir 残迹同口径），不做递归删除——迁移后会话
     //    通常已在目标位继续追加事件，rmSync 会静默吞掉这部分增量。是否真有增量在
-    //    还原后以台账迁移时刻（at）判定（见步骤 3 后处理），trash 路径
+    //    还原后以台账判定阈值（releaseAtMs）判定（见步骤 3 后处理），trash 路径
     //    `${targetDir}.trash-<时间戳>` 供人工核对找回。
     let targetTrashDir: string | undefined
     if (targetDir !== originalDir && existsSync(targetDir)) {
@@ -262,11 +272,15 @@ export async function rollbackSession(
     //    首段搬移失败时 targetTrashDir 随错误文案呈现，避免目标位内容去向不明。
     const restoreTrashDir = restoreFromBackup(backupDir, originalDir, log, targetTrashDir)
     //    还原已成事实后处理 trash 残迹（目标位 + 原位同口径）：trash 内存在晚于
-    //    迁移时刻（台账 at）写入的文件即迁移后追加的事件/产物，递归删除会静默
-    //    丢失——保留并在 outcome/日志中给出路径交由人工核对；无更晚写入才清退；
-    //    判定或清退失败一律保守保留。
-    const retainedTrashDir = targetTrashDir === undefined ? undefined : retainOrDisposeTrash(targetTrashDir, latest.at, '目标位', sessionId, log)
-    const retainedOriginalTrashDir = restoreTrashDir === undefined ? undefined : retainOrDisposeTrash(restoreTrashDir, latest.at, '原位', sessionId, log)
+    //    判定阈值写入的文件即迁移后追加的事件/产物，递归删除会静默丢失——保留并
+    //    在 outcome/日志中给出路径交由人工核对；无更晚写入才清退；判定或清退失败
+    //    一律保守保留。阈值取台账 releaseAtMs（迁移器释放写锁前打点：flock 持有中
+    //    无应用侧写入，此后目标位/原位写入均属迁移后增量，严格大于判定完整覆盖；
+    //    台账 at 打点晚于锁释放，以其为阈值会漏判释放与落盘之间窗口内追加的增量）；
+    //    旧行/手工编辑行无有效 releaseAtMs 时退化以迁移时刻（at）判定。
+    const disposeSinceMs = typeof latest.releaseAtMs === 'number' && Number.isFinite(latest.releaseAtMs) ? latest.releaseAtMs : Date.parse(latest.at)
+    const retainedTrashDir = targetTrashDir === undefined ? undefined : retainOrDisposeTrash(targetTrashDir, disposeSinceMs, '目标位', sessionId, log)
+    const retainedOriginalTrashDir = restoreTrashDir === undefined ? undefined : retainOrDisposeTrash(restoreTrashDir, disposeSinceMs, '原位', sessionId, log)
     //    目标 project 目录清空则一并移除（避免 mangled 目录残留噪音）。用非递归
     //    rmdirSync 原子判定空目录：非空抛 ENOTEMPTY 由本 catch 忽略，消除「先判定
     //    为空、再递归删除」两步之间新写入的会话目录被一并删除的 TOCTOU。

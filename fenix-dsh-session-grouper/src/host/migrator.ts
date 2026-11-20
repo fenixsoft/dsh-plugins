@@ -57,6 +57,11 @@ export interface MigrationLedgerEntry {
   readonly detail?: string
   /** 备份目录（迁移/回滚可回查）。 */
   readonly backupDir?: string
+  /** 释放写锁前打点的时刻（epoch ms，仅重写路径）：回滚 trash 清退判定阈值——
+   *  该时刻前 flock 持有中不存在任何应用侧写入，此后目标位/原位写入均属迁移后
+   *  增量；台账 at 打点晚于锁释放与注册表校正/attach，以其为阈值会漏判释放与
+   *  落盘之间窗口内追加的增量（详见 rollback.ts retainOrDisposeTrash）。 */
+  readonly releaseAtMs?: number
 }
 
 /** `<DSH_HOME>` 解析：`DSH_HOME` 环境变量优先，缺省 `~/.dsh`（dsh-home-paths 同序）。 */
@@ -279,12 +284,16 @@ export class Migrator {
         await this.verifyRewritten(targetPath, sessionId, toCwd)
 
         // (7) 释放写锁后删除旧目录（顺序不可颠倒：同 id 双目录共存 = duplicate）。
+        //     释放前打点 releaseAtMs 供回滚 trash 清退判定：flock 持有中不存在任何
+        //     应用侧写入，该时刻后目标位/原位的写入均属迁移后增量（台账 at 打点在
+        //     attachAndLedger 尾部、晚于锁释放，以其为阈值会漏判窗口内追加的增量）。
+        const releaseAtMs = Date.now()
         await this.closeHandle(handle, sessionId)
         closed = true
         this.removeSourceSessionDir(srcLog, toCwd, sessionId)
 
         // (8) 注册表实例状态校正 + 官方 attach 归组 + 台账。
-        return await this.attachAndLedger(sessionId, newHeader, toCwdCanonical, fromCwd, toCwd, backupDir)
+        return await this.attachAndLedger(sessionId, newHeader, toCwdCanonical, fromCwd, toCwd, backupDir, releaseAtMs)
       } catch (error) {
         // 数据级失败：回滚到原状态，不留半迁移。
         if (!closed) await this.closeHandle(handle, sessionId)
@@ -410,6 +419,8 @@ export class Migrator {
    * 注册表实例状态校正 + attach + 台账。
    * backupDir 缺省 = attach-only 路径（零重写零备份）：台账不写该字段，
    * 保证「台账带 backupDir ⇒ 备份确属本次迁移前状态」的回滚前提。
+   * releaseAtMs 仅重写路径传入并记入台账（回滚 trash 清退判定阈值）；
+   * attach-only 路径零重写零窗口，回滚走同位短路分支，不消费该时刻。
    */
   private async attachAndLedger(
     sessionId: SessionId,
@@ -418,6 +429,7 @@ export class Migrator {
     fromCwd: string,
     toCwd: string,
     backupDir?: string,
+    releaseAtMs?: number,
   ): Promise<MigrateOutcome> {
     const headers = this.registry.headers
     const sessionPaths = this.registry.sessionPaths
@@ -442,7 +454,7 @@ export class Migrator {
       // 删除还原，而注册表内存态不随回滚校正——失败仅 warn 降级为「迁移成功但
       // 台账缺失」。
       try {
-        appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'pending-attach', detail, ...(backupDir === undefined ? {} : { backupDir }) })
+        appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'pending-attach', detail, ...(backupDir === undefined ? {} : { backupDir }), ...(releaseAtMs === undefined ? {} : { releaseAtMs }) })
       } catch (ledgerError) {
         this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移成功但台账 pending-attach 落盘失败（数据已一致不回滚；台账缺失该 id 会被下轮重复迁移，请人工核对）：${errorMessage(ledgerError)}`)
       }
@@ -450,7 +462,7 @@ export class Migrator {
       return { status: 'pending-attach', sessionId, fromCwd, toCwd, detail }
     }
     try {
-      appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'migrated', ...(backupDir === undefined ? {} : { backupDir }) })
+      appendLedger(this.dshHome, { sessionId, fromCwd, toCwd, at: new Date().toISOString(), status: 'migrated', ...(backupDir === undefined ? {} : { backupDir }), ...(releaseAtMs === undefined ? {} : { releaseAtMs }) })
     } catch (ledgerError) {
       // 同上：台账写失败不回滚已一致数据，仅降级告警留痕。
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移成功但台账 migrated 落盘失败（数据已一致不回滚；台账缺失该 id 会被下轮重复迁移，请人工核对）：${errorMessage(ledgerError)}`)
