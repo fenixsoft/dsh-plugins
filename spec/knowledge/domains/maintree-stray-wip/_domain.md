@@ -7,4 +7,4 @@
 
 | 能力页 | 简介 | 更新时间 |
 | --- | --- | --- |
-| [stray-wip-disposal](stray-wip-disposal.md) | 主树散件 WIP 处置口径：源码禁 untrack、同特征 untracked 兄弟文件随收编、复发型跟踪项（第 4 度起零触碰+转人工，第 16 度维持） | 2026-11-21 |
+| [stray-wip-disposal](stray-wip-disposal.md) | 主树散件 WIP 处置口径：源码禁 untrack、同特征 untracked 兄弟文件随收编、复发型跟踪项（第 4 度起零触碰+转人工，第 18 度维持） | 2026-11-21 |
