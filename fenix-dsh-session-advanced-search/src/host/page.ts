@@ -731,7 +731,14 @@ var lastStatusJson = '';
    同 step 同 at 同 detail 重复概率可忽略）。 */
 function progressKey(p) { return p.step + '|' + (p.detail || '') + '|' + p.at; }
 function handleStatus(status, token) {
-  if (token !== runToken || !status) return;
+  /* 终态闸门：收尾（beginFinish 置 finishingRun）不递增 runToken，轮询失败/
+     看门狗非法载荷/SSE error 帧三条 finishFail 路径之后，await api('GET')
+     返回前的在途轮询/看门狗请求仍会带着合法非终态载荷迟到——仅 token 校验
+     挡不住，且整帧 JSON 去重对「迟到帧≠已处理终态帧」不生效，会落入 else
+     分支 renderProgress 把 markAllStepsFailed 已置 fail 的步骤行翻回
+     「分析中」spinner。终态收尾后一律丢弃迟到帧（合法终态分支本就经
+     beginFinish 单次收尾，此闸门只拦收尾后的残留帧）。 */
+  if (token !== runToken || finishingRun || !status) return;
   var json = JSON.stringify(status);
   if (json === lastStatusJson) return;   /* 重复帧/相同轮询载荷：跳过渲染 */
   lastStatusJson = json;
