@@ -550,7 +550,7 @@
 
 ### 浪费
 - **单 spec token 预算烧至 99.9%，近满无熔断**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：是
   - 影响：add-session-advanced-search（会话高级搜索 SPEC）全程累计消耗 input token 99,914,746，达 100M 预算的 99.9%，输出另计约 125 万；对照同域后继的 optimize-session-advanced-search（优化轮）全流程仅耗 27.2M、judge 实派 2 次，同量级工作的循环空烧差额约 3.7 倍。
   - 证据：STATE.md 该 spec 字段 _tokens_in=99,914,746、_judge_real_dispatches=20、total_duration=38889 秒（我读核实）；告警 a70edecf42b2（token_budget 80% 预算提醒，01:50Z）自述 81.86M/82% 且「本告警不自动冻结 spec」（我读 admin_alerts.json 核实）；对照条目 optimize-session-advanced-search _tokens_in=27,233,689、_judge_real_dispatches=2（同一 STATE.md 核实）；数据摘要第 6 节 6 个离群 run 中 5 个属该 spec 家族（admin 208/104 turns、judge 119 turns 等）。
   - 调查评估：问题源是 add-session-advanced-search 的验证-修复循环（judge 重跑 6/5 触顶三度冻结、impl 修复三轮、20 次 judge 实派）。已核实：99.9M 是 20 次实派判定加多轮重验的合法叠加，但预算治理仅有一档 80% warning（告警明言不自动处置），95% 近满无升级档、无收敛模式，judge_rerun_cap（判定次数硬上限）只封次数不封 token。根因归属系统性缺口：预算面无断路，与 judge 机制缺口相互独立。与存量工作关系：judge 计数口径（d8f7851）、冻结点后移（d787ecc）、infra 轮计入（20ba848）、修复缺真机探针（49f8f80）均已由 11-12/11-13 arbiter 条目立项，token 预算阶梯未被任何既有条目覆盖，属互补不重复。结论：99.9M 已成事实，复发敞口是下一个重型 spec 直接击穿 100M 预算且无任何熔断动作。
@@ -573,7 +573,7 @@
   - 建议：升级类告警入库强制附 choices 快照（缺快照时创建侧 fail-fast 或自动补推荐）；admin_auto_exec 对同一告警连续 N 次推荐不明确后指数退避（60 秒→15 分钟），并把逐分钟日志收敛为单行状态汇总。
 
 - **API 停滞单日累计约 101 分钟，判定车道墙钟无记账**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：是
   - 影响：窗口内 21 个 run 的 API 停滞（单次往返超 60 秒的等待）合计约 6088 秒（约 101 分钟），其中 planner-judge（planner 判定车道）10 个 run 占约 50 分钟，最长单次停滞 332.9 秒；全部 run 最终成功，代价是判定与出题车道墙钟被外因延迟拉长，现有机制只做单 run 分级、无累计视角。
   - 证据：数据摘要第 6 节停滞聚合 21 条合计 6087.6 秒（逐行加总）；归档 run planner-judge-add-session-advanced-search-1794538139-a1 事件间隔回算最大 gap 332.908 秒，与聚合行 max=332.9s 一致（回源核实）；离群 run planner-plan-optimize-session-advanced-search-1794561267-a1 停滞 5 次合计 708.3 秒、最长 266.4 秒；停滞 run 的模型集中在 bigmodel.cn glm-5.3-flash。
   - 调查评估：问题源横跨判定/出题/处置车道，provider 集中于 bigmodel.cn，属上游网关延迟（外因）而非工程缺陷。已核实：停滞全部被编排层吸收（31/31 run 成功、0 超时、0 秒挂），框架已有 evo-api-stall-signal-grading（停滞信号分级机制）做单 run 粒度分级。根因归属：外因主导，缺口在机制面——无车道级日累计阈值告警，run 墙钟预算不区分停滞等待与有效工作。与存量工作关系：10-16 既有条目「上游限流与瞬断风暴」覆盖失败与全局熔断形态，本条覆盖成功 run 内的隐性墙钟税，互补不重复；无既有立项。结论：judge 车道日均 50 分钟的判定延迟会直接拉长验证收敛周期，值得轻量记账机制而非重试改造。
