@@ -206,7 +206,7 @@ export class Migrator {
     const { sessionId, fromCwd, toCwd } = item
     // 外层失败日志的处置口径（默认「备份前早期失败」）：仅当内层 catch 实际
     // 执行过回滚且备份还原成功才允许宣称「已回滚」，不得虚报。
-    let rollbackResult: 'rolled-back' | 'no-backup' | 'restore-refused' = 'no-backup'
+    let rollbackResult: 'rolled-back' | 'no-backup' | 'restore-refused' | 'restore-done-cleanup-failed' = 'no-backup'
     try {
       // (1) 迁移前修订快照 + 计划基准复核。
       const before = await this.requireSnapshot(sessionId)
@@ -307,11 +307,13 @@ export class Migrator {
       // 显式断言加宽后再比较：TS 跨嵌套 catch 再抛路径的 CFA 跟不到内层 catch
       // 的赋值，会把 rollbackResult 收窄成初值字面量并误判比较无交集（TS2367）；
       // 运行时值域即此三者并集（内层 catch 实际写入），断言还原真实类型。
-      const result = rollbackResult as 'rolled-back' | 'no-backup' | 'restore-refused'
+      const result = rollbackResult as 'rolled-back' | 'no-backup' | 'restore-refused' | 'restore-done-cleanup-failed'
       if (result === 'rolled-back') {
         this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败已回滚：${detail}`)
       } else if (result === 'restore-refused') {
         this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败（备份不可信，未执行还原，现场保留，详见回滚告警）：${detail}`)
+      } else if (result === 'restore-done-cleanup-failed') {
+        this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败（原目录已还原，仅目标残迹处置失败，残迹仍在目标位可人工找回，详见回滚告警）：${detail}`)
       } else {
         this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移早期失败（未改动数据，无需回滚）：${detail}`)
       }
@@ -483,9 +485,10 @@ export class Migrator {
    * 备份不存在（失败发生在备份前）时数据未动，仅告警。
    * 返回处置口径供外层失败日志如实措辞：'rolled-back' = 备份已还原就位；
    * 'no-backup' = 无备份、数据未改动；'restore-refused' = 备份不可信或还原
-   * 中断，拒绝/未能还原，现场保留（详见告警）。
+   * 中断，拒绝/未能还原，现场保留（详见告警）；'restore-done-cleanup-failed' =
+   * 备份已还原就位（还原已完成），仅其后的目标残迹清理/处置失败。
    */
-  private rollbackPartialMigration(sessionId: SessionId, fromCwd: string, toCwd: string): 'rolled-back' | 'no-backup' | 'restore-refused' {
+  private rollbackPartialMigration(sessionId: SessionId, fromCwd: string, toCwd: string): 'rolled-back' | 'no-backup' | 'restore-refused' | 'restore-done-cleanup-failed' {
     const root = this.lastKnownRoot
     const backupDir = backupDirFor(this.dshHome, sessionId)
     if (root === undefined || !existsSync(backupDir)) {
@@ -501,10 +504,13 @@ export class Migrator {
     // 备份真实位置随回滚推进变化：backupDir → stagingDir（第一段 rename 后）→
     // originalDir（还原完成）。失败日志必须报告当下真实位置，排障者按提示才能
     // 找到备份；rename 原子完成即无 staging 残留（数据整体就位，无副本散落）。
+    // originalDir/stagingDir 提至 try 外（纯路径计算不抛错）：catch 内按
+    // backupLocation 是否已推进到 originalDir 区分失败阶段——还原完成后的残迹
+    // 处置失败 ≠ 还原前拒绝，二者外层措辞必须区分（见 catch）。
+    const originalDir = join(root, targetSessionDirKey(fromCwd, sessionId))
+    const stagingDir = `${originalDir}.rollback-${Date.now().toString(36)}`
     let backupLocation = backupDir
     try {
-      const originalDir = join(root, targetSessionDirKey(fromCwd, sessionId))
-      const stagingDir = `${originalDir}.rollback-${Date.now().toString(36)}`
       mkdirSync(dirname(originalDir), { recursive: true })
       // 先挪走半迁移残迹（若在），再把备份整目录就位（rename 原子）。
       rmSync(originalDir, { recursive: true, force: true })
@@ -543,6 +549,13 @@ export class Migrator {
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚到迁移前状态（备份已还原至 ${originalDir}）`)
       return 'rolled-back'
     } catch (error) {
+      if (backupLocation === originalDir) {
+        // 备份已 rename 就位（还原已完成），失败发生在其后的残迹清理/处置阶段：
+        // 若按 'restore-refused' 上报，外层会宣称「备份不可信，未执行还原」，与
+        // 已完成的还原事实矛盾（误导排障者寻找一个已不存在的备份），故区分口径。
+        this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 已还原至 ${originalDir}，但目标残迹处置失败（残迹仍在目标位，可人工找回）：${errorMessage(error)}`)
+        return 'restore-done-cleanup-failed'
+      }
       this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚自检失败（备份保留于 ${backupLocation}）：${errorMessage(error)}`)
       return 'restore-refused'
     }
