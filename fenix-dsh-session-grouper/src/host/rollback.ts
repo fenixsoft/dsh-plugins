@@ -37,18 +37,21 @@ export type RollbackOutcome =
   | { readonly status: 'skipped'; readonly sessionId: SessionId; readonly detail: string }
   | { readonly status: 'failed'; readonly sessionId: SessionId; readonly detail: string }
 
-/** 定位持久化 root：经任一现存会话产物路径回推 `<root>/<projectKey>/...`。 */
-async function resolvePersistenceRoot(persistence: DshSessionPersistence): Promise<string | undefined> {
+/** 定位持久化 root：经任一现存会话产物路径回推 `<root>/<projectKey>/...`。
+ *  error 缺席且 root 缺席 = 确无任何现存会话产物；error 在场 = list/resolveCurrentLog
+ *  抛错（产物损坏/权限不足等持久化层故障），异常文本随返回值保留，供调用方与
+ *  「无现存产物」区分上报，避免把持久化层故障误报为「无现存会话产物可回推」。 */
+async function resolvePersistenceRoot(persistence: DshSessionPersistence): Promise<{ root?: string; error?: string }> {
   try {
     const snapshots = await persistence.list()
     for (const snapshot of snapshots) {
       const path = await persistence.resolveCurrentLog?.(snapshot.header.id)
-      if (path !== undefined) return resolveRootFromLogPath(path)
+      if (path !== undefined) return { root: resolveRootFromLogPath(path) }
     }
-  } catch {
-    // list 失败交由调用方按 failed 上报。
+  } catch (error) {
+    return { error: errorMessage(error) }
   }
-  return undefined
+  return {}
 }
 
 /**
@@ -237,10 +240,21 @@ export async function rollbackSession(
       log.info?.(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚：${latest.toCwd} 与 ${latest.fromCwd} 同位（零文件操作，仅索引撤销与台账标记）`)
       return { status: 'rolled-back', sessionId, fromCwd: latest.fromCwd }
     }
-    const root = rootHint ?? (await resolvePersistenceRoot(persistence))
-    if (root === undefined) {
-      return { status: 'failed', sessionId, detail: '无法定位持久化 root（无现存会话产物可回推）' }
+    const resolved: { root?: string; error?: string } = rootHint !== undefined ? { root: rootHint } : await resolvePersistenceRoot(persistence)
+    if (resolved.root === undefined) {
+      // 失败原因如实区分：确无现存产物 ≠ 持久化层枚举失败（异常文本已在
+      // resolvePersistenceRoot 保留）——混同为「无现存会话产物」会把操作者的
+      // 排障方向带偏到核对产物是否存在。
+      return {
+        status: 'failed',
+        sessionId,
+        detail:
+          resolved.error === undefined
+            ? '无法定位持久化 root（无现存会话产物可回推）'
+            : `持久化层枚举失败，无法定位持久化 root：${resolved.error}`,
+      }
     }
+    const root = resolved.root
     const targetDir = join(root, targetSessionDirKey(latest.toCwd, sessionId))
     const originalDir = join(root, targetSessionDirKey(latest.fromCwd, sessionId))
     if (!existsSync(backupDir)) {
