@@ -591,7 +591,7 @@
 
 ### 失误
 - **合并门「零修复拒合回」丢弃 2 个 ignore 标记提交**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：是
   - 影响：两个 worktree 提交（979f47f、00162a0，均为源码内 fenix-ignore 误报标记注释，作用是防止同一误报在下一轮 review 复发再烧一轮 fix）因「fixed=0 拒合回」（框架对零有效修复批次拒绝把 worktree 分支合回主树的闸门动作）被丢弃，其中 dd1ac41dd886（composer 无日期输入的误报标记）已核实不在 main——本轮 -5449 烧 $2.06 处置的恰是同类误报复发，标记丢失即复发敞口自我再生；且 run 终态记 success 与产物实际丢失直接矛盾。
   - 证据：fenixd.log 11:40:04Z「code-fix 第 3 批零有效修复（fixed=0, commits=1, ignored=2），拒合回」与 11:47:34Z「第 1 批零有效修复（fixed=0, commits=1, ignored=1），拒合回」，两条 worktree 随后 success=False 清理（11:47:34Z 注册 legacy、12:26:47Z stale 清理）；git log --all 无 979f47f/00162a0；main 的 page.ts 仅有 6c97dc4a0f16 一个标记、无 dd1ac41dd886（grep 核实）；而 code-fix-1794656417 的 run_metrics terminal=success，其收尾自述「收尾状态：工作区干净（commit 00162a0 已落）」。
   - 调查评估：问题源是 session-advanced-search 修复链的合并门。已核实事实链：拒合回判定只读批报告的 fixed 计数，无视自己同时报出的 commits=1——被弃的恰是纯标记型提交；fixer 在 worktree 内提交后自认「已落」，runner 记 success，合并门弃件，三层对产物去向的认知互不一致。根因归属：系统性缺口（合并门语义不含「仅含标记」的提交形态），非一次性失误。与存量工作关系：知识域 maintree-stray-wip 的 stray-wip-disposal 能力页规定了 fenix-ignore 标记的收编用法但未覆盖「标记提交被拒合回丢弃」形态；11-03「升级告警条件消失后不核销」属告警域不同面，均互补。结论：两处标记须重新落盘，合并门需把「commits>0 且 ignored>0」视为可合文档型提交。
@@ -599,7 +599,7 @@
 
 ### 可改进
 - **回归白名单漏收两个被修插件，63 条修复零插件面验证入主树**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：是
   - 影响：11-14 18:55 至 11-15 01:20 合并入 main 的 63 条 fixed 项（38+21+1+3，触面为 fenix-dsh-session-advanced-search 与 fenix-dsh-session-grouper 两个 TS 插件）自合并起无任何一次 tsc/vitest 验证——fix worktree 内因无 node_modules 按契约跳过，链收尾回归（每批固定 182 项、约 7 秒）只跑 cc-import + dashboard-bridge；未验证敞口已持续 7 小时以上。
   - 证据：.fenix/verify.yaml：prepare 段有 2026-11-12 注释扩编的 session-advanced-search install+build，而 regression.cmd（同文件 regression 段）只列 cc-import 与 dashboard-bridge；.fenix/regression/last-run.json 的 cmd 同形态、total=182；三个 fix run 收尾自述「worktree 与主仓均无 node_modules，tsc/vitest 条件跳过」（-2817/-4577/-6417），worktree 创建时 verify_contract「供给完成标记写入失败 node_modules」WARNING 两度出现（10:40:17Z、11:40:17Z）；fenixd.log 晚间合并后无任何 vitest/tsc 执行行（grep 核实）。
   - 调查评估：问题源是 2026-11-12 的 verify contract 扩编（admin 为 add-session-advanced-search 环境阻塞把该插件加进装配链）只做了一半：prepare 收编、regression 漏收编，而 session-advanced-search 有现成测试套件（host/view/page/protocol.test，11-13 c0e61af、3f14af9 落库）；session-grouper 同样不在白名单。这也解释了观察到的依赖不对称——dashboard-bridge 每被回归 pnpm install 而 SAS 目录始终无 node_modules。已核实：唯获得真实验证的是 auth 纯 JS 插件（夜批自述 node --test 19/19 全过）。根因归属：新插件收编 checklist 不对称的系统性缺口，非代码错误。与存量工作关系：11-13 既有条目「impl修复申报缺真机效果探针」（todo 49f8f80）讲修复申报侧验证缺位，本条是链级回归白名单缺位，互补不重复；知识域无 verify contract 收编能力页。结论：每条 TS 修复的验证都被无限期推迟到下一轮 review 或人工，确定性敞口，够格小改立项。
@@ -613,7 +613,7 @@
   - 建议：code-review 提示词约束收尾报告为结构化少轮输出（findings 台账 JSON 单轮落盘+受限摘要轮数）；run_metrics 聚合侧对 text_turns 占比离群 run 加提示性标注供复盘消费。
 
 - **散件升级条目悬置 15 小时，指纹入库无自动认领探测**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：接受 · 删除：是
   - 影响：maintree_stray_wip_stale（主树 tracked 未提交改动滞留超 30 分钟宽限的周期盘点告警）第 4 度升级的 4 条告警/处置条目自 11-14 11:04-11:13（本地）创建起至窗口结束全部 handled=false（悬置 15 小时+），而人工已在 18:39 用提交 47fefd9 精确处置了指纹 5 文件——框架对「人工已回应」零感知，下次同文件滞留将按第 5 度条款再次零触碰+升级，悬置逐度累加。
   - 证据：admin_alerts.json 中 6ec454cd3333（stale 信号）/beebaad1f510（处置中过路条目）/a786455543d4（第 4 度升级）/9c2b3b7d7a37（escalation）均 handled=false（读核实）；git show 47fefd9 --stat 含且仅含指纹 5 文件（dashboard-bridge 的 index.ts/panels.tsx/dsh-runtime.d.ts/opsBadge.test.ts/srcContract.test.ts）加同特征 untracked 兄弟（clipboard-fallback 新插件 4 文件）。
   - 调查评估：问题源是 maintree-stray-wip 处置域的升级消费端。已核实：知识域能力页 stray-wip-disposal 第 4 度条款（零触碰+升级转人工，直至人工建 worktree 车道或明示认领主树直改）已蒸馏且本次处置动作本身合规，不算新发现；缺口在协议没有「人工以提交回应」的检测面——指纹文件集全部进入 main 新 commit 是机械可判的认领信号，今日实证框架未能消费（告警文本自述「等待人工提交或 stash 处置」，提交发生却无人核销）。与存量工作关系：11-03「升级告警条件消失后不核销」与本日既有「升级告警空转扫描」条目是告警生命周期通用缺口，本条是该族在本信号上的指纹级专用探测形态，互补不重复。结论：人工主树直改形态未变，第 5 度复发概率高，探测缺位会让每度升级都成为永久挂账。
