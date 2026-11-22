@@ -64,6 +64,17 @@ export interface MigrationLedgerEntry {
   readonly releaseAtMs?: number
 }
 
+/**
+ * 迁移内回滚（rollbackPartialMigration）的处置口径：status 为处置结论（语义见
+ * 该方法注释）；trashDir = 还原前挪入 trash 的原位残迹经判定含迁移后追加写入
+ * （或无法判定/清退失败）而保守保留的残目录路径，随口径上交外层失败日志供人工
+ * 核对（已清退则缺省）。
+ */
+type RollbackDisposition = {
+  readonly status: 'rolled-back' | 'no-backup' | 'restore-refused' | 'restore-done-cleanup-failed'
+  readonly trashDir?: string
+}
+
 /** `<DSH_HOME>` 解析：`DSH_HOME` 环境变量优先，缺省 `~/.dsh`（dsh-home-paths 同序）。 */
 export function resolveDshHome(): string {
   return process.env.DSH_HOME ?? join(homedir(), '.dsh')
@@ -153,6 +164,7 @@ export function backupManifestPath(backupDir: string): string {
 }
 
 /** 递归收集目录清单：相对路径 → 字节数。 */
+// [fenix-ignore:ba49327123d8] 失效前提不成立：清单封存自 cpSync 复制后的 staging 产物本身（与核验两侧同用本函数一致跳过符号链接，且 cpSync 默认 dereference:false——实测 Node 24 链接含 dangling/目录链接均原样按链接复制，不解引用），备份不会比清单多出条目，backupIntact 不会恒 false，回滚不会失效
 function collectManifest(root: string, dir: string = root, files: Record<string, number> = {}): Record<string, number> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name)
@@ -178,6 +190,26 @@ export function backupIntact(backupDir: string): boolean {
     return false
   }
   return Object.keys(actual).length === Object.keys(sealed).length && Object.keys(actual).every((key) => sealed[key] === actual[key])
+}
+
+/**
+ * 目录树内是否存在晚于 sinceMs 写入的文件或目录（与 rollback.ts hasWritesAfter
+ * 同口径的最小等价实现）：用于判定释放写锁窗口内活动进程是否向原位追加了事件。
+ * 无法枚举/读取由调用方按「保留现场」保守处理；符号链接条目（dirent isFile/
+ * isDirectory 均为 false）无法经 readdir 判定其目标的写入状态，同口径保守判有
+ * 写入；目录条目同样检查自身 mtime——迁移后新增的空目录（内无任何文件）仅靠
+ * 文件判定会漏检而被递归清退静默吞掉；目录 rename 保留自身 mtime，迁移前目录
+ * 不会误报。
+ */
+function hasWritesAfter(dir: string, sinceMs: number): boolean {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (statSync(full).mtimeMs > sinceMs || hasWritesAfter(full, sinceMs)) return true
+    } else if (entry.isFile() && statSync(full).mtimeMs > sinceMs) return true
+    else if (entry.isSymbolicLink()) return true
+  }
+  return false
 }
 
 /** 迁移执行器：一个实例对应一个持久化后端 + 注册表 + 日志。 */
@@ -206,7 +238,11 @@ export class Migrator {
     const { sessionId, fromCwd, toCwd } = item
     // 外层失败日志的处置口径（默认「备份前早期失败」）：仅当内层 catch 实际
     // 执行过回滚且备份还原成功才允许宣称「已回滚」，不得虚报。
-    let rollbackResult: 'rolled-back' | 'no-backup' | 'restore-refused' | 'restore-done-cleanup-failed' = 'no-backup'
+    let rollbackResult: RollbackDisposition = { status: 'no-backup' }
+    // 释放写锁前打点（步骤 7 或内层 catch 释放前写入）：回滚原位 trash 残迹的
+    // 清退判定阈值——该时刻前 flock 持有中不存在任何应用侧写入，此后原位写入
+    // 均属释放窗口内活动进程的迁移后增量（详见 rollbackPartialMigration）。
+    let releaseAtMs: number | undefined
     try {
       // (1) 迁移前修订快照 + 计划基准复核。
       const before = await this.requireSnapshot(sessionId)
@@ -287,7 +323,7 @@ export class Migrator {
         //     释放前打点 releaseAtMs 供回滚 trash 清退判定：flock 持有中不存在任何
         //     应用侧写入，该时刻后目标位/原位的写入均属迁移后增量（台账 at 打点在
         //     attachAndLedger 尾部、晚于锁释放，以其为阈值会漏判窗口内追加的增量）。
-        const releaseAtMs = Date.now()
+        releaseAtMs = Date.now()
         await this.closeHandle(handle, sessionId)
         closed = true
         this.removeSourceSessionDir(srcLog, toCwd, sessionId)
@@ -296,8 +332,14 @@ export class Migrator {
         return await this.attachAndLedger(sessionId, newHeader, toCwdCanonical, fromCwd, toCwd, backupDir, releaseAtMs)
       } catch (error) {
         // 数据级失败：回滚到原状态，不留半迁移。
-        if (!closed) await this.closeHandle(handle, sessionId)
-        rollbackResult = this.rollbackPartialMigration(sessionId, fromCwd, toCwd)
+        if (!closed) {
+          // 判定阈值打点须先于释放写锁：flock 持有中不存在任何应用侧写入，该
+          // 时刻前原位写入均属迁移窗口内（备份已含），此后写入均属释放窗口内
+          // 其他进程的迁移后增量——与步骤 7 释放前打点同一口径。
+          releaseAtMs = Date.now()
+          await this.closeHandle(handle, sessionId)
+        }
+        rollbackResult = this.rollbackPartialMigration(sessionId, fromCwd, toCwd, releaseAtMs ?? Date.now())
         throw error
       }
     } catch (error) {
@@ -307,12 +349,12 @@ export class Migrator {
       // 显式断言加宽后再比较：TS 跨嵌套 catch 再抛路径的 CFA 跟不到内层 catch
       // 的赋值，会把 rollbackResult 收窄成初值字面量并误判比较无交集（TS2367）；
       // 运行时值域即此三者并集（内层 catch 实际写入），断言还原真实类型。
-      const result = rollbackResult as 'rolled-back' | 'no-backup' | 'restore-refused' | 'restore-done-cleanup-failed'
-      if (result === 'rolled-back') {
-        this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败已回滚：${detail}`)
-      } else if (result === 'restore-refused') {
+      const result = rollbackResult as RollbackDisposition
+      if (result.status === 'rolled-back') {
+        this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败已回滚${result.trashDir === undefined ? '' : `（原位残迹含迁移后追加的写入，保留于 ${result.trashDir} 待人工核对）`}：${detail}`)
+      } else if (result.status === 'restore-refused') {
         this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败（备份不可信，未执行还原，现场保留，详见回滚告警）：${detail}`)
-      } else if (result === 'restore-done-cleanup-failed') {
+      } else if (result.status === 'restore-done-cleanup-failed') {
         this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移失败（原目录已还原，仅目标残迹处置失败，残迹仍在目标位可人工找回，详见回滚告警）：${detail}`)
       } else {
         this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移早期失败（未改动数据，无需回滚）：${detail}`)
@@ -483,23 +525,25 @@ export class Migrator {
   /**
    * 数据级失败回滚：以备份为准恢复原目录、清理半迁移目标目录。
    * 备份不存在（失败发生在备份前）时数据未动，仅告警。
-   * 返回处置口径供外层失败日志如实措辞：'rolled-back' = 备份已还原就位；
-   * 'no-backup' = 无备份、数据未改动；'restore-refused' = 备份不可信或还原
-   * 中断，拒绝/未能还原，现场保留（详见告警）；'restore-done-cleanup-failed' =
+   * 返回处置口径供外层失败日志如实措辞：status 'rolled-back' = 备份已还原就位；
+   * 'no-backup' = 无备份、数据未改动；'restore-refused' = 备份不可信或还原前
+   * 拒绝/中断，拒绝/未能还原，现场保留（详见告警）；'restore-done-cleanup-failed' =
    * 备份已还原就位（还原已完成），仅其后的目标残迹清理/处置失败。
+   * trashDir = 还原前挪入 trash 的原位残迹经判定含迁移后追加写入（或无法判定/
+   * 清退失败）而保守保留的残目录路径，供人工核对（已清退则缺省）。
    */
-  private rollbackPartialMigration(sessionId: SessionId, fromCwd: string, toCwd: string): 'rolled-back' | 'no-backup' | 'restore-refused' | 'restore-done-cleanup-failed' {
+  private rollbackPartialMigration(sessionId: SessionId, fromCwd: string, toCwd: string, disposeSinceMs: number): RollbackDisposition {
     const root = this.lastKnownRoot
     const backupDir = backupDirFor(this.dshHome, sessionId)
     if (root === undefined || !existsSync(backupDir)) {
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 失败发生于备份前（root=${String(root)}，backup=${existsSync(backupDir)}），数据未改动，无需回滚`)
-      return 'no-backup'
+      return { status: 'no-backup' }
     }
     // 信任备份前先核验完整性：清单缺失/损坏/内容不符 ⇒ 备份不可信，拒绝还原
     // （保留现场供人工核查），绝不以残缺副本覆盖仍然完好的原目录。
     if (!backupIntact(backupDir)) {
       this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 备份完整性核验未通过（${backupDir}），拒绝还原以保留现场，请人工核查后处置`)
-      return 'restore-refused'
+      return { status: 'restore-refused' }
     }
     // 备份真实位置随回滚推进变化：backupDir → stagingDir（第一段 rename 后）→
     // originalDir（还原完成）。失败日志必须报告当下真实位置，排障者按提示才能
@@ -510,10 +554,28 @@ export class Migrator {
     const originalDir = join(root, targetSessionDirKey(fromCwd, sessionId))
     const stagingDir = `${originalDir}.rollback-${Date.now().toString(36)}`
     let backupLocation = backupDir
+    let retainedTrashDir: string | undefined
     try {
       mkdirSync(dirname(originalDir), { recursive: true })
-      // 先挪走半迁移残迹（若在），再把备份整目录就位（rename 原子）。
-      rmSync(originalDir, { recursive: true, force: true })
+      // 先挪走半迁移残迹（若在），再把备份整目录就位（rename 原子）。原目录不得
+      // 直接递归删除：closeHandle 释放写锁与本处还原之间存在窗口，持有该会话的
+      // 活动进程可重新获得写锁并向原目录追加事件，直接 rmSync 会把这些增量静默
+      // 吞掉——与 removeSourceSessionDir 及 rollback.ts restoreFromBackup 的
+      // trash 口径一致，先 rename 挪入 trash 残目录保留（原子搬移，判定或清退
+      // 失败时增量滞留可人工找回，而非无声丢失），备份就位后再以释放写锁前打点
+      // （disposeSinceMs）经 hasWritesAfter 同口径判定清退或保留。
+      let originalTrashDir: string | undefined
+      if (existsSync(originalDir)) {
+        originalTrashDir = `${originalDir}.trash-${Date.now().toString(36)}`
+        try {
+          renameSync(originalDir, originalTrashDir)
+        } catch (error) {
+          // 原目录不可挪动：保留现场拒绝还原（绝不以递归删除硬闯吞掉窗口内可能
+          // 的追加增量），备份完整保留于主备份区原位，人工核查后处置。
+          this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚还原前原目录无法挪入 trash 残目录（${originalTrashDir}），为保留现场拒绝还原，备份完整保留于 ${backupDir}，请人工核查后处置：${errorMessage(error)}`)
+          return { status: 'restore-refused' }
+        }
+      }
       renameSync(backupDir, stagingDir)
       backupLocation = stagingDir
       renameSync(stagingDir, originalDir)
@@ -524,6 +586,12 @@ export class Migrator {
         rmSync(backupManifestPath(backupDir), { force: true })
       } catch {
         // 清理失败不影响回滚结果。
+      }
+      // 原位残迹清退判定（retainOrDisposeOriginalTrash：与 rollback.ts
+      // retainOrDisposeTrash 同口径）：trash 内存在晚于释放写锁前打点的写入即
+      // 窗口内活动进程追加的增量，保留待人工核对；无更晚写入才清退。
+      if (originalTrashDir !== undefined) {
+        retainedTrashDir = this.retainOrDisposeOriginalTrash(originalTrashDir, disposeSinceMs, sessionId)
       }
       const targetDir = join(root, targetSessionDirKey(toCwd, sessionId))
       if (targetDir !== originalDir && existsSync(targetDir)) {
@@ -546,18 +614,45 @@ export class Migrator {
           // 目录已不存在/不可枚举：忽略。
         }
       }
-      this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚到迁移前状态（备份已还原至 ${originalDir}）`)
-      return 'rolled-back'
+      this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 已回滚到迁移前状态（备份已还原至 ${originalDir}${retainedTrashDir === undefined ? '' : `；原位残迹含迁移后追加的写入，保留于 ${retainedTrashDir} 待人工核对`}）`)
+      return { status: 'rolled-back', ...(retainedTrashDir === undefined ? {} : { trashDir: retainedTrashDir }) }
     } catch (error) {
       if (backupLocation === originalDir) {
         // 备份已 rename 就位（还原已完成），失败发生在其后的残迹清理/处置阶段：
         // 若按 'restore-refused' 上报，外层会宣称「备份不可信，未执行还原」，与
         // 已完成的还原事实矛盾（误导排障者寻找一个已不存在的备份），故区分口径。
-        this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 已还原至 ${originalDir}，但目标残迹处置失败（残迹仍在目标位，可人工找回）：${errorMessage(error)}`)
-        return 'restore-done-cleanup-failed'
+        this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 已还原至 ${originalDir}，但目标残迹处置失败（残迹仍在目标位，可人工找回${retainedTrashDir === undefined ? '' : `；原位残迹保留于 ${retainedTrashDir} 待人工核对`}）：${errorMessage(error)}`)
+        return { status: 'restore-done-cleanup-failed', ...(retainedTrashDir === undefined ? {} : { trashDir: retainedTrashDir }) }
       }
       this.log.error(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚自检失败（备份保留于 ${backupLocation}）：${errorMessage(error)}`)
-      return 'restore-refused'
+      return { status: 'restore-refused' }
     }
+  }
+
+  /**
+   * 原位 trash 残迹保守清退（与 rollback.ts retainOrDisposeTrash 同口径的最小
+   * 等价实现——rollback.ts 未导出该判定，且其已单向依赖本文件，反向 import 会
+   * 构成循环依赖）：trash 内存在晚于判定阈值写入的文件即释放写锁窗口内活动进程
+   * 追加的事件/产物，递归删除会静默丢失——保留并返回路径交人工核对；无更晚写入
+   * 才清退；时刻不可解析、判定或清退失败一律保守保留。阈值 disposeSinceMs 取
+   * 释放写锁前打点（flock 持有中不存在任何应用侧写入，此后原位写入均属迁移后
+   * 增量，严格大于判定完整覆盖）。返回 undefined 表示已清退。
+   */
+  private retainOrDisposeOriginalTrash(trashDir: string, sinceMs: number, sessionId: SessionId): string | undefined {
+    try {
+      if (Number.isNaN(sinceMs)) {
+        this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚清退判定时刻不可解析，无法判定原位是否有迁移后追加的写入，trash 残迹保留于 ${trashDir}，请人工核对后清理`)
+        return trashDir
+      }
+      if (hasWritesAfter(trashDir, sinceMs)) {
+        this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚后原位存在迁移后追加的写入，trash 残迹保留于 ${trashDir}，请人工核对后清理`)
+        return trashDir
+      }
+      rmSync(trashDir, { recursive: true, force: true })
+    } catch (error) {
+      this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 回滚后无法判定/清退原位 trash 残迹，保留于 ${trashDir} 待人工核对：${errorMessage(error)}`)
+      return trashDir
+    }
+    return undefined
   }
 }

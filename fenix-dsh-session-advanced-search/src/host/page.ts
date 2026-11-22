@@ -957,16 +957,20 @@ function bindAreaActions() {
   }
 }
 
-async function interrupt(token) {
+function interrupt(token) {
   runToken++;
   stopTimers();
   var id = jobId;
   jobId = null;
-  if (id) {
-    try { await api('DELETE', API + '/' + encodeURIComponent(id)); } catch (e) { /* 中断尽力而为 */ }
-  }
-  if (!beginFinish()) return;
-  finishCancelled();
+  /* 先收尾 UI 再尽力而为 DELETE：DELETE 自带 30s 超时，服务器无响应/反向代理
+     黑洞时请求挂满超时，押后收尾会让耗时 pill 停格「分析中 · N.Ns」、「中断」
+     按钮仍在——中断点击须即时反馈（口径同 runSearch 建任务窗口「点击须有反馈」）。
+     DELETE 幂等（未知 id 404/终态 noop），失败仅留服务端在途任务由其自身超时
+     收敛，不阻塞用户可见的中断反馈：改 fire-and-forget 并挂 catch 吞错（防
+     unhandled rejection）。beginFinish 落空（终态帧已抢先收尾）时不重复渲染
+     「已中断」，DELETE 照发（口径同原 await 版先发后闸）。 */
+  if (beginFinish()) finishCancelled();
+  if (id) api('DELETE', API + '/' + encodeURIComponent(id)).catch(function () { /* 中断尽力而为 */ });
 }
 
 /* ===== 装配 ===== */
