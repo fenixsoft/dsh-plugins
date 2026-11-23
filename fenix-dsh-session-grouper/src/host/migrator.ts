@@ -183,6 +183,12 @@ export function backupIntact(backupDir: string): boolean {
   } catch {
     return false
   }
+  // 形态守卫：合法 JSON 但非对象（null/数字/数组等）⇒ 视为清单损坏、备份不可信。
+  // 否则 Object.keys(sealed) 对 null 抛 TypeError，从回滚关键路径
+  // （rollbackPartialMigration / rollback.ts restoreFromBackup）直接崩溃；
+  // 清单虽由本工具写入，部分写入/手工编辑/外部工具污染均可能产生合法 JSON 的
+  // 坏形态（与 parseLedger 坏行守卫同口径）。
+  if (sealed === null || typeof sealed !== 'object' || Array.isArray(sealed)) return false
   let actual: Record<string, number>
   try {
     actual = collectManifest(backupDir)
