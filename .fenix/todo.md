@@ -667,7 +667,7 @@
 
 ### 可改进
 - **失败尝试的 181.6 秒空耗在指标中不可见**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：是
   - 影响：一次 429 失败的尝试空耗 181.6 秒，但该尝试在 run_metrics 里 latency_rounds=0、latency_max=null，只留一条按实例去重（同实例只报一次）的失明 WARNING；本期数据摘要第 6 节据此只报 63.3 秒停滞，漏掉该 run 实际 244.9 秒空耗中的 74%，最大的浪费不能自动进入回顾与告警视野。
   - 证据：fenixd.log 19424 行「run code-review-1794848697: 0 rounds（无 API 往返样本）」与 19425 行 WARNING「延迟观测疑似失明（latency_rounds=0 但 assistant 轮次=1）——事件流缺时间戳/无法配对出 API 往返样本」；同 run 首尝试 run_metrics（19426 行）latency_rounds=0、latency_stalls=0、latency_max=null；数据摘要第 6 节 api-stall 聚合为 stalls=1 total=63.3s。归档 jsonl 中 10 条 api_retry（重试事件）均无 timestamp 字段，仅 retry_delay_ms（计划退避毫秒数）可读。
   - 调查评估：问题源是 run_metrics 对失败 attempt 的观测面。已核实：失败尝试的事件流缺时间戳，延迟观测器无法配对往返样本（日志自述），于是该尝试既不计停滞也不计轮次，只剩 aggregate duration 181.6 秒一个数字；每日摘要的 api-stall 口径只读 latency_* 字段，真实空耗因此被系统性低估。与 11-16 既有条目（todo.md 625 行「周期审查 run 三成 API 往返停滞」建议把停滞升级为可消费信号）互补：那条针对成功尝试内的停滞，本条针对失败尝试整体不可见；本项目 spec/changes 与 /root/fenixd 活跃区均无覆盖该观测面的立项。结论：这是从证据源头漏掉浪费的缺口，比单次 181.6 秒更值得先修。
