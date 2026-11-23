@@ -799,19 +799,32 @@ function startStatusStream(id, token) {
      onerror 不触发，仅靠它自身则任务完成后界面仍无限显示「分析中」。SSE
      激活期间并行保留一条低频轮询兜底；handleStatus 的整帧 JSON 去重保证
      相同载荷不渲染、无闪烁，中途帧流停滞同样被下一次拉取对账到终态。单次
-     拉取失败静默容忍（真实断连由 onerror→轮询容错路径收尾，不在此误判终局）；
-     非法载荷不是网络类失败，静默吞掉会永停「分析中」，连续 2 次升级判失败
-     （口径对齐 startPolling，见下方守卫分支）；撤表随 stopStatusStream 统一进行。 */
+     网络类拉取失败静默容忍（鉴权类 401 失败除外，立即收尾见下方 catch；真实
+     断连由 onerror→轮询容错路径收尾，不在此误判终局）；非法载荷不是网络类
+     失败，静默吞掉会永停「分析中」，容忍连续 2 次（计数 <= 2 早退），第 3 次
+     升级判失败（口径对齐 startPolling，见下方守卫分支）；撤表随 stopStatusStream
+     统一进行。 */
   var watchdogBadCount = 0;
   watchdogTimer = setInterval(async function () {
     if (token !== runToken || finishingRun) { stopStatusStream(); return; }
     var status = null;
     try { status = parseJobStatus(await api('GET', API + '/' + encodeURIComponent(id))); }
-    catch (e) { return; }
+    catch (e) {
+      /* 鉴权类失败（401 authRequired）不静默容忍：SSE 假健康（连上却无帧、
+         onerror 不触发）时本看门狗是唯一仍在工作的拉取路径，吞掉 401 会无任何
+         路径收尾、界面永停「分析中」；与 startPolling 的 authRequired 跳过失败
+         计数立即判失败同口径（beginFinish→stopTimers→finishFail 同一套收尾）。 */
+      if (token !== runToken || !(e && e.authRequired)) return;
+      if (!beginFinish()) return;
+      stopTimers();
+      finishFail(e);
+      return;
+    }
     /* 载荷形状守卫升级：SSE 连接健康而载荷形状漂移/终态帧缺失时 onerror 不
        触发、handleStatus 对 null 静默早退，唯此处计数升级才不永停「分析中」。
-       连续 2 次非法载荷按 finishFail 收尾复位 runBtn（与 startPolling 连续
-       失败口径对齐）；网络类拉取异常仍静默容忍（断连由 onerror→轮询收尾）。 */
+       容忍连续 2 次非法载荷（计数 <= 2 早退），第 3 次按 finishFail 收尾复位
+       runBtn（与 startPolling 失败计数口径对齐）；网络类拉取异常仍静默容忍
+       （断连由 onerror→轮询收尾）。 */
     if (!status) {
       if (token !== runToken) return;
       watchdogBadCount++;
@@ -854,7 +867,7 @@ async function startPolling(id, token) {
       pollFailCount = 0;
     } catch (err) {
       if (token !== runToken) return;
-      /* 轮询容错：连续 2 次失败才判失败（与 client 半同策略） */
+      /* 轮询容错：容忍连续 2 次失败（计数 <= 2 早退），第 3 次失败才判失败（与 client 半同策略） */
       pollFailCount++;
       if (pollFailCount <= 2 && !(err && err.authRequired)) return;
       if (!beginFinish()) return;
