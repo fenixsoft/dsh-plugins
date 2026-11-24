@@ -278,10 +278,18 @@
 					return overrides[id] !== false
 				}
 
+				/* 快照缓存：useSyncExternalStore 要求 getSnapshot 在状态未变时返回
+				 * 稳定引用（每次返回新对象会被 React 判为状态变化 → 无限重渲 →
+				 * Maximum update depth exceeded，真机实证 React error #185）。
+				 * overrides 变化（set）时置空缓存，下次 snapshot 重建 */
+				var cachedSnapshot = null
 				function snapshot() {
-					var state = {}
-					for (var i = 0; i < FEATURE_IDS.length; i++) state[FEATURE_IDS[i]] = isEnabled(FEATURE_IDS[i])
-					return state
+					if (!cachedSnapshot) {
+						var state = {}
+						for (var i = 0; i < FEATURE_IDS.length; i++) state[FEATURE_IDS[i]] = isEnabled(FEATURE_IDS[i])
+						cachedSnapshot = state
+					}
+					return cachedSnapshot
 				}
 
 				/* 按开启集合重建注入串（D2：单标签内容重建，标签与 data-plugin-css
@@ -327,6 +335,7 @@
 					if (isEnabled(id) === next) return
 					if (next) delete overrides[id]
 					else overrides[id] = false
+					cachedSnapshot = null
 					syncStyle()
 					persist()
 					for (var i = 0; i < listeners.length; i++) {

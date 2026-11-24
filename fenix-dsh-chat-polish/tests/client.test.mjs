@@ -27,6 +27,7 @@ const STORAGE_KEY = 'fenix-chat-polish.toggles'
 /* ── 宿主环境 mock（client.js 是引用 window.__ModuleLoader__ 的 IIFE）── */
 
 function fakeReact() {
+	const hooks = { lastSnapshot: undefined }
 	return {
 		createElement(type, props, ...children) { return { type, props: props || {}, children } },
 		memo(fn) { return fn },
@@ -34,7 +35,23 @@ function fakeReact() {
 		useState(init) { return [init, function () {}] },
 		useRef(init) { return { current: init } },
 		useEffect() {},
-		useSyncExternalStore(subscribe, getSnapshot) { return getSnapshot() },
+		/* React 真实语义：getSnapshot 在「无通知窗口」内必须返回稳定引用——每次
+		 * 新对象会被 React 判为状态变化 → 无限重渲（真机实证 React error #185）。
+		 * set→通知之后的新引用合法（那是真状态变化） */
+		useSyncExternalStore(subscribe, getSnapshot) {
+			if (!hooks.subscribed) {
+				hooks.subscribed = true
+				hooks.notifyCount = 0
+				subscribe(function () { hooks.notifyCount += 1 })
+			}
+			const snap = getSnapshot()
+			if (hooks.lastSnapshot !== undefined && hooks.seenNotify === hooks.notifyCount && hooks.lastSnapshot !== snap) {
+				throw new Error('Minified React error #185: getSnapshot must return a stable reference')
+			}
+			hooks.lastSnapshot = snap
+			hooks.seenNotify = hooks.notifyCount
+			return snap
+		},
 	}
 }
 
@@ -534,4 +551,14 @@ test('fallback switch is used when host Switch export drifts away', () => {
 	})
 	assert.equal(toggles.length, 6, 'fallback switch renders for all 6 rows when host Switch is gone')
 	assert.equal(toggles[0].props.checked, true, 'fallback switch reflects default-on state')
+})
+
+test('store.snapshot returns a stable reference between sets (React #185 regression)', () => {
+	const env = loadClient()
+	const s1 = env.styleTag && null /* noop to keep env shape */
+	/* snapshot 稳定性经组件渲染路径间接验证（fakeReact 的 #185 检测在
+	 * PolishSection 渲染时已生效）；此处直接断言 store 语义 */
+	const section = env.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	assert.doesNotThrow(() => section.component(), 'first render must not trip stability guard')
+	assert.doesNotThrow(() => section.component(), 'second render must reuse the same snapshot reference')
 })
