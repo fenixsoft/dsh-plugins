@@ -1,6 +1,6 @@
 # dsh 插件真机安装与验收
-<!-- knowledge: capability=dsh-plugin-rollout rev=1
-     sources=spec/changes/verify-dsh-plugins-live -->
+<!-- knowledge: capability=dsh-plugin-rollout rev=2
+     sources=spec/changes/verify-dsh-plugins-live, spec/changes/add-sidebar-tabs-plugin -->
 
 把本仓 dsh 插件（cc-import、fenix-dsh-dashboard-bridge 等）装入真实 dsh web 实例并在真机上完成验收的能力：loader 注册 patch 语法、非 loopback 访问前置、隔离验证载体与验收清单的可自动化执行口径。
 
@@ -27,6 +27,24 @@
 
 - live profile 已建立插件 symlink 与 insert 注册，实现分支 merge-back 进主树后重启 dsh web 即加载新构建；token 每次重启轮换，从启动日志获取。
 - live 重启与对 live 数据的导入是文档化人工步骤，不作为实现任务（实现 Agent 不操作主树与 live 进程）。
+- **纯 client.js/CSS 内容改动无需重启**：live 的 node_modules symlink 直指主树，组合 bundle 按请求现读，重载页面即载新代码；仅注册条目/依赖变化才 restart（token 随之轮换，`grep -oP 'token=\S+' /var/log/dsh-web.log | tail -1`）。
+
+### 装载核实姿势（add-sidebar-tabs-plugin 实证）
+
+- 单插件 URL `/plugins/??<id>/client.js` 对任何插件恒 404——该探测姿势无效；组合 bundle `plugins/??a/client.js,b/client.js…&rev=<hash>` 才是真实服务形态，装载核实 = 抓 index.html 检查组合 href 含目标插件 `client.js`。
+- 页面访问流：`/?token=<启动日志 token>` → 303 set-cookie（dsh-auth-*）→ 带 cookie 后续访问。
+- 官方暗色主题驱动 = `body[data-ds-dark-theme]` 属性，手动设置即整站切暗——真机验证暗色路径无需找主题开关。
+
+### dsh web 侧栏布局事实（钉底/分区操作依据）
+
+- 侧栏根为 flex column 全高；官方导航 `<nav>` 原生 `display:flex; flex-direction:column; gap:2px`；「更多」= `nav.children` 末位（位置语义，i18n 与官方增删项免疫）；regionArea（Workspaces 区）`flex: 1 1 0%`；footArea（Account）`flex: 0 0 auto`。
+- 「更多」钉底常显用 **flex order 重排**（内联 order：region 1 / nav 2 / foot 3，controls/tab 栏缺省 0）+ 功能态 nav `flex:1 1 0` 且末子 `margin-top:auto`：零 DOM 搬移、零 absolute；内联样式变更不触发 childList MutationObserver → 自愈重贴无反馈环。
+- 隐藏区内的钉底参照容器（footArea 类）须防上浮：一并纳入 order 序列；锚点缺席只降级该效果、不放弃插件（软锚点模式）。
+
+### 原型自动化验证前置
+
+- 原型 annotator（annotator.js）`annotateMode` 默认 true：document capture 阶段对 click `stopPropagation`，目标元素监听一律不触发（`el.click()` 后 `fired=false` 的元凶）——先点 `.fpa-mode` 按钮切浏览模式再驱动原型交互。
+- playwright-cli 口径：会话易断（'browser not open' 需重 open 后重试）；eval 一律函数形态 `() => {...}`；screenshot 无参输出 `.playwright-cli/`；`file://` 被禁，原型验证用临时 `python3 -m http.server <port>`（收尾清理，kill 用 pid 不用 `pkill -f`）；布局断言在单次 eval 内「打开-点击-测量」一条龙完成，降低会话断连窗口。
 
 ### 验收清单口径
 
@@ -47,3 +65,4 @@
 ## 溯源
 
 - 2026-11-16 verify-dsh-plugins-live（spec/changes/verify-dsh-plugins-live/）— 新建本页：loader insert 语法、loopback-trust 前置、隔离 profile 验证载体、两插件真机验收清单与安装文档纪律的初始蒸馏。
+- 2026-11-24 add-sidebar-tabs-plugin 缺陷修批次（spec/changes/add-sidebar-tabs-plugin/）— rev=2：client.js 热更免重启、组合 bundle 装载核实姿势、`body[data-ds-dark-theme]` 主题探针、侧栏 flex order 钉底方案与布局事实、annotator 拦截前置、playwright-cli 会话口径。
