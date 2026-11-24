@@ -31,7 +31,7 @@
  * 契约面（零依赖）：
  *   - 仅依赖标准 Web API（fetch/AbortController/localStorage），不 require
  *     任何官方模块；`dsh.client.inject` 锚点仅为让 dsh 加载本 bundle。
- *   - 幂等白名单（pathname 精确/后缀匹配，POST-only）：
+ *   - 幂等白名单（pathname 精确匹配 + 末段 camelCase 词根全词匹配，POST-only）：
  *       /api/credentials/set | /api/credentials/unset
  *       /api/<channel>/list… | describe… | catalog… | get… | query…
  *     其余 /api POST（如 session/create 有副作用）只做超时、不自动重试，
@@ -81,15 +81,25 @@
 	/** 幂等端点（超时/断连后允许自动重试）。官方 RPC 全部形如
 	 * `/api/<channel>/<endpoint>`，endpoint 为 camelCase（listProviders、
 	 * listConfigurableProviders、modelCatalog、describe…）。credentials/set|unset
-	 * 是单 ref 整值覆写天然幂等；list/describe/catalog/get/query 词根类为只读
-	 * （对末段做大小写不敏感的词根子串匹配，避免 camelCase 漏判）。 */
+	 * 是单 ref 整值覆写天然幂等；list/describe/catalog/get/query 词根类为只读。
+	 * 判定：末段按 camelCase 词边界切分为词元（lowercase 归一）后与词根集合
+	 * 做**全词匹配**（任一词元等于词根才命中）——既避免 camelCase 漏判，也
+	 * 避免子串偶然命中（如 forget 含 get、resetConfiguration 含 set）把
+	 * reset/forget 类非幂等端点误判为可重试。 */
 	var IDEMPOTENT_EXACT = { '/api/credentials/set': true, '/api/credentials/unset': true }
-	var IDEMPOTENT_ROOT = /(list|describe|catalog|get|query)/i
+	var IDEMPOTENT_ROOTS = { list: true, describe: true, catalog: true, get: true, query: true }
 
 	function isIdempotent(pathname) {
 		if (IDEMPOTENT_EXACT[pathname] === true) return true
 		var last = pathname.slice(pathname.lastIndexOf('/') + 1)
-		return IDEMPOTENT_ROOT.test(last)
+		var tokens = last
+			.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+			.toLowerCase()
+			.split(/[^a-z0-9]+/)
+		for (var i = 0; i < tokens.length; i++) {
+			if (IDEMPOTENT_ROOTS[tokens[i]] === true) return true
+		}
+		return false
 	}
 
 	function delay(ms) {
@@ -115,8 +125,14 @@
 	}
 
 	/** body 可安全重放：string / URLSearchParams（官方 RPC 为 JSON 字符串）。
-	 * ReadableStream / FormData / Blob 等不可假定可回放，一律不重试。 */
-	function replayableBody(init) {
+	 * ReadableStream / FormData / Blob 等不可假定可回放，一律不重试。
+	 * input 为 Request 对象时改读 request.body：非 null 的 body 流在首次
+	 * fetch 后即 consumed，重放必以 body already used 的 TypeError 失败，
+	 * 故仅 body 为 null 的 Request 可重试（无 body 请求重放无风险）。 */
+	function replayableBody(input, init) {
+		if (typeof Request === 'function' && input instanceof Request) {
+			return input.body === null || input.body === undefined
+		}
 		if (!init) return true /* 无 body：POST /api 罕见，但重放无风险 */
 		var body = init.body
 		return body === null || body === undefined || typeof body === 'string' || body instanceof URLSearchParams
@@ -132,7 +148,7 @@
 		 * 改为在 runAttempt 内把应用 signal 与护栏超时 signal 合并。 */
 		if (init && init.signal && init.signal.aborted) return originalFetch(input, init)
 		if (init && init.keepalive) return originalFetch(input, init)
-		if (!replayableBody(init)) return originalFetch(input, init)
+		if (!replayableBody(input, init)) return originalFetch(input, init)
 
 		var limit = timeoutMs()
 		var canRetry = isIdempotent(call.pathname)

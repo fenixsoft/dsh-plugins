@@ -271,6 +271,10 @@
 
 			var STORAGE_KEY = 'fenix-chat-polish.toggles'
 			var FEATURE_IDS = ['whitespace', 'scrollbar', 'composer-width', 'markdown', 'hero-row', 'history-nav', 'settings-embed']
+			/* 0.3.x 起从面板移除独立开关的已下线功能 id：CSS 功能与 store 机制保留、
+			 * 默认仍开启，但面板已无开关可把历史 override 改回——残留 override 视同
+			 * 未知键忽略按开启处理（readOverrides 内提示一次） */
+			var RETIRED_FEATURE_IDS = ['scrollbar', 'hero-row']
 			/* 有 CSS 分块的功能 id（cssText 拼接顺序） */
 			var CSS_BLOCK_IDS = ['whitespace', 'composer-width', 'hero-row', 'scrollbar', 'markdown']
 
@@ -290,7 +294,14 @@
 						if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
 						var result = {}
 						for (var i = 0; i < FEATURE_IDS.length; i++) {
-							if (parsed[FEATURE_IDS[i]] === false) result[FEATURE_IDS[i]] = false
+							if (parsed[FEATURE_IDS[i]] !== false) continue
+							/* 已下线功能的 override 面板不可再改回：忽略按开启处理并提示一次，
+							 * 残留键在下次开关写入 persist 时自然清除 */
+							if (RETIRED_FEATURE_IDS.indexOf(FEATURE_IDS[i]) !== -1) {
+								console.info('[fenix-dsh-chat-polish] retired toggle "' + FEATURE_IDS[i] + '" override ignored (removed from panel in 0.3.x); stale key clears on next toggle write')
+								continue
+							}
+							result[FEATURE_IDS[i]] = false
 						}
 						return result
 					} catch (err) {
@@ -457,6 +468,10 @@
 				var timer = react.useRef(null)
 				var mounted = react.useRef(true)
 				react.useEffect(function () {
+					/* 重置放 effect 本体：StrictMode 双挂载等 effect 卸载重挂场景下，
+					 * 同一实例经 cleanup 置 false 后恢复 true——仅靠 useRef(true) 初值
+					 * 会让重挂后的复制成功回调被 mounted 守卫永久丢弃 */
+					mounted.current = true
 					return function () {
 						mounted.current = false
 						if (timer.current !== null) window.clearTimeout(timer.current)
@@ -1059,8 +1074,8 @@
 
 			/* 功能清单（行序 = 分区面板渲染序）：id 与 toggleStore/FEATURE_IDS 逐字对应。
 			 * 0.3.x 起滚动条样式（scrollbar）与 hero 工作区行对齐（hero-row）两行
-			 * 从面板移除——CSS 功能与 store 机制保留（默认仍开启，历史 override 仍
-			 * 生效），仅不再暴露独立开关 */
+			 * 从面板移除——CSS 功能与 store 机制保留（默认仍开启），仅不再暴露独立
+			 * 开关；二者历史 override 经 readOverrides 忽略按开启处理（无恢复死角） */
 			var FEATURES = [
 				{ id: 'whitespace', label: '对话列留白 24px', description: '消息列与输入卡两侧留白固定 24px，解除官方 920px 居中上限，隐藏列宽拖拽把手' },
 				{ id: 'composer-width', label: '输入框 80% 宽度居中', description: '输入卡、提示条与队列坞按 80% 宽度居中，与消息列同轴' },
@@ -1208,12 +1223,20 @@
 					/* 样式：插件自持生命周期（官方 client bundle 同款 data-plugin-css 约定）。
 					 * 注入串 = 开启集合拼接（store 初始态经 localStorage 读取），后续开关
 					 * 切换由 store.set 同步重建 textContent */
-					var styleTag = document.createElement('style')
-					styleTag.dataset.plugin = 'fenix-dsh-chat-polish'
-					styleTag.dataset.pluginCss = 'fenix-dsh-chat-polish/polish.css'
-					styleTag.textContent = toggleStore.cssText()
-					document.head.appendChild(styleTag)
-					toggleStore.attachStyleTag(styleTag)
+					var styleTag = null
+					try {
+						styleTag = document.createElement('style')
+						styleTag.dataset.plugin = 'fenix-dsh-chat-polish'
+						styleTag.dataset.pluginCss = 'fenix-dsh-chat-polish/polish.css'
+						styleTag.textContent = toggleStore.cssText()
+						document.head.appendChild(styleTag)
+						toggleStore.attachStyleTag(styleTag)
+					} catch (err) {
+						/* head 缺失等极端时序：仅跳过样式注入（stage 降级留痕），不阻断
+						 * 后续激活步——与其余激活步逐段降级纪律同口径 */
+						styleTag = null
+						stage('style inject', err)
+					}
 
 					/* keyed 遮蔽：priority -10 < 官方 0，cell 内最低优先级者渲染；
 					 * inject 对未声明 slot 不生效不崩（官方 ui-renderer 契约），崩溃时
@@ -1315,7 +1338,7 @@
 						if (unembedSub) unembedSub()
 						restoreEmbed()
 						toggleStore.detachStyleTag()
-						var removed = styleTag.parentNode !== null
+						var removed = styleTag !== null && styleTag.parentNode !== null
 						if (removed) styleTag.remove()
 						/* 返回值口径对齐兄弟插件 fenix-dsh-brand-fenix（其 dispose 注释明示语义
 						 * 为「清理是否实际执行」，failures 仅为激活期状态）：本插件只以本地资源

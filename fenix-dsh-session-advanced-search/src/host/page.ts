@@ -450,7 +450,8 @@ function parseJobStatus(v) {
 
 /* ===== 面板渲染 ===== */
 function stopTimers() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  /* pollTimer 现持串行自调度的待触发 setTimeout 句柄（原 setInterval）：clearTimeout 即断自调度链 */
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
   if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
   stopStatusStream();
 }
@@ -784,7 +785,7 @@ var watchdogTimer = null;
 function stopStatusStream() {
   /* 看门狗轮询与 SSE 同生命周期：撤流即撤表（终态三分支/中断/换 run 均经
      stopTimers→stopStatusStream 汇合，见下方 startStatusStream 内看门狗注释）。 */
-  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
+  if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
   if (statusSource) { try { statusSource.close(); } catch (e) { /* 已关闭 */ } statusSource = null; }
 }
 function startStatusStream(id, token) {
@@ -805,7 +806,7 @@ function startStatusStream(id, token) {
      升级判失败（口径对齐 startPolling，见下方守卫分支）；撤表随 stopStatusStream
      统一进行。 */
   var watchdogBadCount = 0;
-  watchdogTimer = setInterval(async function () {
+  var watchdogTick = async function () {
     if (token !== runToken || finishingRun) { stopStatusStream(); return; }
     var status = null;
     try { status = parseJobStatus(await api('GET', API + '/' + encodeURIComponent(id))); }
@@ -836,7 +837,19 @@ function startStatusStream(id, token) {
     }
     watchdogBadCount = 0;
     handleStatus(status, token);
-  }, 5000);
+  };
+  /* 看门狗同理串行自调度（与 startPolling 同模式）：固定 setInterval 叠加慢请求
+     时在途拉取无界堆积、迟到响应乱序进 handleStatus；改为上一轮 settle 后
+     （无论成败）再计时 5s，频率语义不变（首轮仍 5s 后起拉）。watchdogTimer 现
+     持待触发 setTimeout 句柄，撤表仍随 stopStatusStream→clearTimeout 断链；
+     watchdogNext 以 token/finishingRun/watchdogTimer 三重守卫保证终态后停止
+     （终态三分支/中断经 beginFinish 与 ++runToken 收敛），不破坏既有终止条件。 */
+  var watchdogNext = function () {
+    if (token !== runToken || finishingRun || !watchdogTimer) return;
+    watchdogTimer = setTimeout(watchdogKick, 5000);
+  };
+  var watchdogKick = function () { watchdogTick().then(watchdogNext, watchdogNext); };
+  watchdogTimer = setTimeout(watchdogKick, 5000);
   es.addEventListener('status', function (ev) {
     if (token !== runToken) { stopStatusStream(); return; }
     var data = null;
@@ -877,8 +890,21 @@ async function startPolling(id, token) {
     }
     handleStatus(status, token);
   };
-  pollTimer = setInterval(poll, 700);
-  await poll();
+  /* 串行自调度：上一轮 poll settle 后（无论成败）再 setTimeout 下一轮，天然防
+     重叠——固定 setInterval 叠加 30s 慢请求时旧请求未 settle 新请求已发出，
+     30s 超时窗口内在途 GET 可无界堆积（~40 个），多个迟到响应还会按 settle
+     顺序乱序进 handleStatus。间隔保持 700ms 语义（settle 后再计 700ms，慢请求
+     下天然退避）；首轮仍立即拉取（setTimeout 0）。pollTimer 现持当前待触发的
+     setTimeout 句柄，stopTimers→clearTimeout 即断自调度链；scheduleNext 以
+     token/finishingRun/pollTimer 三重守卫保证终态后停止（终态三分支先
+     beginFinish 置 finishingRun 再 stopTimers，中断先 ++runToken），不破坏
+     既有轮询终止条件。 */
+  var scheduleNext = function () {
+    if (token !== runToken || finishingRun || !pollTimer) return;
+    pollTimer = setTimeout(pollKick, 700);
+  };
+  var pollKick = function () { poll().then(scheduleNext, scheduleNext); };
+  pollTimer = setTimeout(pollKick, 0);
 }
 
 function finishDone(status, token) {
@@ -952,7 +978,13 @@ function animateBars() {
   var fills = document.querySelectorAll('#dynamicArea .c-fill');
   for (var i = 0; i < fills.length; i++) {
     (function (el) {
-      requestAnimationFrame(function () { el.style.width = el.getAttribute('data-pct') + '%'; });
+      requestAnimationFrame(function () {
+        /* 先同步读 offsetWidth 强制 insertAdjacentHTML 插入的初始 width:0%
+           入计算树（一次已完成的样式计算 = 过渡的「前状态」），随后写终值才有
+           可动画的前后差异；否则首次样式计算直接落终值，width .6s ease 不播放。 */
+        void el.offsetWidth;
+        el.style.width = el.getAttribute('data-pct') + '%';
+      });
     })(fills[i]);
   }
 }

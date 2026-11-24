@@ -292,7 +292,16 @@ export class Migrator {
         // 是合并语义（逐项覆盖、不删除多出文件），直接并入会让陈旧 generation
         // 跨周期残留，回滚还原时又被带回会话目录。
         const backupDir = backupDirFor(this.dshHome, sessionId)
-        this.discardBackup(sessionId)
+        if (!this.discardBackup(sessionId)) {
+          // 上轮失败（如 restore-refused）保留的人工核查现场未被清退：拒绝本轮，
+          // 绝不让后续步骤静默销毁现场。先释放写声明再返回（与 revision-changed
+          // 拒绝路径同型）；正常返回不经过回滚，现场原样保留待人工处置。
+          await this.closeHandle(handle, sessionId)
+          closed = true
+          const detail = `既往备份 ${backupDir} 存在但台账无对应成功迁移行（疑似上轮失败保留的人工核查现场），拒绝本轮迁移以免静默销毁现场，请人工核查处置备份后再迁移`
+          this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 迁移被拒绝（备份现场待人工核查）：${detail}`)
+          return { status: 'failed', sessionId, detail }
+        }
         const srcLog = await this.requireCurrentLog(sessionId)
         const backupStaging = `${backupDir}.staging-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
         try {
@@ -326,13 +335,14 @@ export class Migrator {
         await this.verifyRewritten(targetPath, sessionId, toCwd)
 
         // (7) 释放写锁后删除旧目录（顺序不可颠倒：同 id 双目录共存 = duplicate）。
-        //     释放前打点 releaseAtMs 供回滚 trash 清退判定：flock 持有中不存在任何
-        //     应用侧写入，该时刻后目标位/原位的写入均属迁移后增量（台账 at 打点在
-        //     attachAndLedger 尾部、晚于锁释放，以其为阈值会漏判窗口内追加的增量）。
+        //     释放前打点 releaseAtMs 供回滚与旧目录 trash 清退判定：flock 持有中
+        //     不存在任何应用侧写入，该时刻后目标位/原位的写入均属迁移后增量
+        //     （台账 at 打点在 attachAndLedger 尾部、晚于锁释放，以其为阈值会漏判
+        //     窗口内追加的增量）。
         releaseAtMs = Date.now()
         await this.closeHandle(handle, sessionId)
         closed = true
-        this.removeSourceSessionDir(srcLog, toCwd, sessionId)
+        this.removeSourceSessionDir(srcLog, toCwd, sessionId, releaseAtMs)
 
         // (8) 注册表实例状态校正 + 官方 attach 归组 + 台账。
         return await this.attachAndLedger(sessionId, newHeader, toCwdCanonical, fromCwd, toCwd, backupDir, releaseAtMs)
@@ -427,7 +437,7 @@ export class Migrator {
     }
   }
 
-  private removeSourceSessionDir(srcLog: string, toCwd: string, sessionId: SessionId): void {
+  private removeSourceSessionDir(srcLog: string, toCwd: string, sessionId: SessionId, releaseAtMs: number): void {
     const root = this.lastKnownRoot
     if (root === undefined) return
     const srcSessionDir = dirname(srcLog)
@@ -437,7 +447,10 @@ export class Migrator {
     // 窗口语义：closeHandle 释放写锁与本处删除之间存在窗口，持有该会话的活动
     // 进程可重新获得写锁并向旧目录追加事件，直接 rmSync 会把这些增量静默吞掉。
     // 与 rollback.ts 的 trash 口径一致：先 rename 挪入 trash 残目录（原子搬移，
-    // 清退失败或中途被杀时增量滞留可人工找回，而非无声丢失），再清退残目录。
+    // 清退失败或中途被杀时增量滞留可人工找回，而非无声丢失），清退前再以
+    // releaseAtMs（释放写锁前打点）经 hasWritesAfter 做与
+    // retainOrDisposeOriginalTrash 同口径的窗口增量判定：命中即增量尚未进入
+    // 目标位产物，保留残目录待人工核对；无更晚写入才清退。
     const srcTrashDir = `${srcSessionDir}.trash-${Date.now().toString(36)}`
     let movedToTrash = false
     try {
@@ -448,10 +461,15 @@ export class Migrator {
       // 目录是 no-op）。
     }
     if (movedToTrash) {
+      // 判定/清退失败一律保守保留残目录（与 retainOrDisposeOriginalTrash 同口径）。
       try {
-        rmSync(srcTrashDir, { recursive: true, force: true })
+        if (hasWritesAfter(srcTrashDir, releaseAtMs)) {
+          this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 旧目录存在迁移后追加的写入，残目录保留于 ${srcTrashDir}，请人工核对后清理`)
+        } else {
+          rmSync(srcTrashDir, { recursive: true, force: true })
+        }
       } catch (error) {
-        this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 旧目录残迹清退失败，增量滞留于 ${srcTrashDir} 可人工找回：${errorMessage(error)}`)
+        this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 旧目录残迹无法判定/清退，保留于 ${srcTrashDir} 待人工核对：${errorMessage(error)}`)
       }
     } else {
       rmSync(srcSessionDir, { recursive: true, force: true })
@@ -521,11 +539,32 @@ export class Migrator {
     return { status: 'migrated', sessionId, fromCwd, toCwd }
   }
 
-  /** 清退备份目录与其完整性清单（既往周期遗留备份绝不充当本次「迁移前状态」）。 */
-  private discardBackup(sessionId: SessionId): void {
+  /**
+   * 清退备份目录与其完整性清单（既往周期遗留备份绝不充当本次「迁移前状态」）。
+   * 例外：备份目录存在但台账无对应成功迁移行（migrated/pending-attach 且
+   * backupDir 指向该路径）⇒ 该备份是某轮未走完迁移的滞留现场（如上轮
+   * restore-refused 保留待人工核查的现场，或迁移中途被杀留下的未消费备份），
+   * 此时 rmSync 会静默销毁人工尚未核查的现场，违背「现场保留待人工核查」的
+   * 承诺——跳过清退并返回 false，由调用方拒绝本轮，把处置权留给人工。
+   * 返回 false = 现场保留、调用方须拒绝本轮；true = 已清退（或本无备份）。
+   */
+  private discardBackup(sessionId: SessionId): boolean {
     const backupDir = backupDirFor(this.dshHome, sessionId)
+    if (existsSync(backupDir) && !this.hasLedgerRowForBackup(sessionId, backupDir)) {
+      this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 既往备份 ${backupDir} 存在但台账无对应成功迁移行（疑似上轮失败保留的人工核查现场），跳过清退，拒绝本轮迁移，请人工核查后处置`)
+      return false
+    }
     rmSync(backupDir, { recursive: true, force: true })
     rmSync(backupManifestPath(backupDir), { force: true })
+    return true
+  }
+
+  /** 台账中是否存在指向该备份路径的成功迁移行（migrated/pending-attach 且 backupDir 一致）。 */
+  private hasLedgerRowForBackup(sessionId: SessionId, backupDir: string): boolean {
+    for (const entry of parseLedger(this.dshHome)) {
+      if (entry.sessionId === sessionId && (entry.status === 'migrated' || entry.status === 'pending-attach') && entry.backupDir === backupDir) return true
+    }
+    return false
   }
 
   /**
