@@ -2,6 +2,10 @@
 
 dsh web 对话区打磨插件（纯 client 半，零构建，先例 `dsh-plugin-loopback-trust`）。
 
+**0.3.0 起**全部 6 个功能在官方设置页「对话区打磨」分区内带独立开关，默认全开
+（等于安装即用形态），关闭某项即时回退官方原生形态，无需刷新页面——见下文
+[设置页独立开关](#设置页独立开关0310-起)。
+
 ## 功能
 
 1. **对话列左右留白固定 24px**
@@ -60,6 +64,48 @@ dsh web 对话区打磨插件（纯 client 半，零构建，先例 `dsh-plugin-
    - 监听为 document 捕获阶段单例，先于 Lexical 命令处理；组件异常由宿主
      SlotErrorBoundary/abdicate 兜底。
 
+## 设置页独立开关（0.3.0 起）
+
+### 设置页入口
+
+打开 dsh web **设置页**，左侧分区导航在既有分区（账户/通用/模型/内置插件）之后
+出现**「对话区打磨」**条目（带对话气泡图标），点击进入分区面板，可见 6 个功能行，
+每行含功能名、一句话说明与独立开关控件（复用宿主基线包 `Switch`，宿主升级致导出
+漂移时降级为同构自绘 toggle）。
+
+### 六功能开关
+
+| 功能行 | 开关 id | 关闭后的官方回退形态 |
+| --- | --- | --- |
+| 对话列留白 24px | `whitespace` | 官方 920px 居中布局恢复、列宽把手重新可见 |
+| 滚动条样式 | `scrollbar` | dsh 自绘滚动条 |
+| 输入框 80% 宽度居中 | `composer-width` | 官方宽度轴（952px 上限） |
+| 用户消息 Markdown 渲染 | `markdown` | 官方等效纯文本投影气泡（附件/图片卡不变） |
+| hero 工作区行对齐 | `hero-row` | hero 行官方边距 |
+| 输入框 ↑/↓ 历史导航 | `history-nav` | ↑/↓ 光标原生行为 |
+
+任一开关切换**即时生效**（无需刷新页面）：关闭 = 该功能即时回退官方原生形态，
+开启 = 恢复插件形态；其余功能互不影响。6 个开关全部关闭 = 对话区呈现官方原生
+形态（嵌入形态豁免除外）。
+
+### 持久化与降级口径
+
+- 开关状态持久化于 **localStorage** 键 `fenix-chat-polish.toggles`（JSON
+  `{功能ID: false}`，**只记录关闭项**，缺省即开启，向前加功能免迁移）；
+- 刷新页面 / 重开浏览器后状态保持（按浏览器持久化，不跨浏览器、不进宿主 settings）；
+- 存储值**损坏**（非 JSON / 未知功能键 / true 值）→ 忽略损坏部分按全开处理，
+  页面正常加载、无未处理异常；
+- localStorage **不可用**（隐私模式 / 配额满）→ 开关降级为会话内生效，控制台仅留
+  一条降级告警，刷新后回默认全开，无未处理异常。
+
+### 插槽失配降级行为
+
+设置分区经官方 keyed 插槽 `settings.section` / `settings.section.icon` 注册。
+dsh 升级致槽契约漂移时：**仅设置分区菜单缺席**（console 留一条降级告警），6 个
+功能的默认行为不受影响、不出现页面报错；此前经 localStorage 关闭的功能保持关闭
+（开关 store 独立于分区 UI）。**嵌入形态**（fenixd dashboard embed，root 带
+`.embeddedBody`）整体验免不受任何开关影响。
+
 ## 版本韧性（0.2.1 起）
 
 留白覆盖选择器**不再钉扎构建哈希**。CSS-modules 类名 = 构建哈希前缀 + 语义后缀，
@@ -99,4 +145,7 @@ grep -i "did not activate" /var/log/dsh-web.log | tail -1
 # - .EvIC1a_scroll computed padding-left == 24px
 # - 输入卡宽度 == 消息列宽度
 # - [data-chat-user-markdown] 节点内含 _markdown_* 类（MarkdownText 已挂载）
+# - 设置分区：nav 含「对话区打磨」条目；[data-fdx-polish-feature="…"] 六行，
+#   行内 [role="switch"][aria-checked] 与实际生效状态一致
+# - markdown 关闭态：[data-chat-user-plain] 节点为纯文本气泡（无 MarkdownText）
 ```
