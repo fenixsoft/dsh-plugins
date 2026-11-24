@@ -29,6 +29,11 @@ Admin 盘点信号 `maintree_stray_wip_stale`（主树 tracked 散件 WIP 无主
 - 现状：该特征集 tracked 面干净入库（panels.tsx 冻结 WIP 收编于 commit 0f995cb），同指纹告警 saga 不再活动；同现场 market.yml（aria snapshot 转储）属 untracked 族信号管辖，不入本清单。
 - 复发口径：该文件集再现新的人工直改 WIP → 按同文件集口径重新计度并回到零触碰口径（活 WIP 不收编，冻结 WIP 走规则 5）。
 
+### 度数台账（同文件集口径，各特征集处置度数起点）
+
+- dashboard-bridge/brand-fenix 特征集：第 34 度（2026-11-24，run admin-dsh-plugins-1795499155）；第 4 度起零触碰口径维持中，见规则 4/6。
+- fenix-dsh-chat-polish 特征集（README.zh.md/client.js/tests/client.test.mjs/tests/v0.2.2-baseline.css）：第 1 度（2026-11-24，run admin-dsh-plugins-1795512362）——0.3.x 迭代快照（设置分区更名「Fenix 插件设置」+ data-composer-input 宽度锚定修复 + settings-embed 嵌入设置页）测试自洽 33/33 后收编提交 923e430；无同特征 untracked 兄弟（rpc-guard 零引用，独立特征集归 untracked 族）。主树直改开发会话形态（写完离场），再现新 WIP 按同文件集口径计第 2 度并挂本页跟踪项。
+
 ## 关键行为
 
 - 处置轮流程：读本页规则 → 归因（在飞 worktree 车道 diff、stash、在飞进程核查）→ 按度数选动作 → 回填处置记录（`suggested_choice`）→ 本页回写。
@@ -43,3 +48,4 @@ Admin 盘点信号 `maintree_stray_wip_stale`（主树 tracked 散件 WIP 无主
 - 2026-10-16 / 2026-11-12 admin 处置轮（c97b6ddf8a51、298f844aee26、add1bdf366c0）— 初始蒸馏本页：信号形态、处置规则 1-3、跟踪项挂载与复查时机条款。
 - 2026-11-14 → 2026-11-24 admin 盘点处置轮第 4–34 度回写（run `admin-dsh-plugins-1794625487` → `1795499155`，共 31 轮）— 复查时机条款落地：第 4 度起零触碰 + escalate 转人工，逐度维持；逐度告警指纹/文件清单/处置明细存 admin_alerts 历史与本页 git 历史。
 - 2026-11-24 add-bridge-theme-channel（spec/changes/add-bridge-theme-channel/）— mergeback_wip_overlap 碰撞解阻塞收编终局：panels.tsx 冻结 WIP 验证自洽（tsc 0 错、vitest 182/182）+ merge-tree 预演干净后提交 0f995cb，该改动集 saga 终结；沉淀处置规则 5 与规则 6 挂起口径。
+- 2026-11-24 admin 处置轮（run admin-dsh-plugins-1795512362）— fenix-dsh-chat-polish 特征集第 1 度收编：0.3.x 迭代快照测试自洽 33/33 后提交 923e430，铁律 10 首次处置「提交+建议」口径实证；新增度数台账节承载各特征集本页度数。
