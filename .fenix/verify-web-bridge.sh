@@ -55,6 +55,38 @@ case "$cmd" in
     #    prepare 先于 serve boot 执行，在此清扫保证 boot 永见干净盘面；夹具本体
     #    由种子场景每轮以 zstd 形态重写，与彼处清扫构成双层防御。
     find "$VHOME/sessions" -type f -name 'session.v4.jsonl' -delete 2>/dev/null || true
+    # 0b) 快照断链清扫（admin 2026-11-24，spec=add-bridge-theme-channel env 阻塞
+    #     根治）：验证引擎快照轮（verify.exec_tree_snapshot）在快照根跑本脚本，
+    #     dsh plugin add 把插件 link: 写成 .fenix/verify-snapshot/<spec>-<ts>/
+    #     路径，落入跨轮持久的共享 VHOME profile；轮终快照回收后残留 dangling
+    #     symlink + link: dependency → 下轮 prepare 的 plugin add reconcile 报
+    #     「cannot resolve profile bundle」整轮 env（本轮实证）。pnpm 依
+    #     package.json 忠实重建断链、reconcile 在其后必炸——清扫必须落在
+    #     package.json 层面（删指向不存在路径的 dependency 条目）+ node_modules
+    #     断链 symlink；本轮 $ROOT 的插件由后续 plugin add 步骤重写回在场路径。
+    for link in "$VHOME"/profiles/web/node_modules/fenix-dsh-*; do
+      if [ -L "$link" ] && [ ! -e "$link" ]; then rm -f "$link"; fi
+    done
+    PKG_JSON="$VHOME/profiles/web/package.json"
+    if [ -f "$PKG_JSON" ]; then
+      python3 - "$PKG_JSON" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as f:
+    cfg = json.load(f)
+deps = cfg.get("dependencies") or {}
+stale = [k for k, v in deps.items()
+         if isinstance(v, str) and v.startswith("link:")
+         and not os.path.isdir(v[len("link:"):])]
+if stale:
+    for k in stale:
+        del deps[k]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    print(f"[verify-web-bridge] 快照断链清扫: 移除 profile 断链 dependency {stale}")
+PY
+    fi
     # 插件产物在场性守卫（构建由 verify.yaml prepare 前置步骤完成）
     if [ ! -f "$PLUGIN_DIR/lib/index.js" ] || [ ! -f "$PLUGIN_DIR/lib/client.js" ]; then
       echo "[verify-web-bridge] 插件 lib/ 缺失：先跑 pnpm --dir fenix-dsh-dashboard-bridge install && pnpm --dir fenix-dsh-dashboard-bridge run build" >&2
