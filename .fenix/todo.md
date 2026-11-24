@@ -948,12 +948,14 @@
 
 ### 浪费
 - **bridge 验证链 11 次 admin 处置后冻结搁浅 8 小时**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：add-bridge-theme-channel 单日验证链吃掉 11 次 admin 处置 run（含 1 件 4.2 倍成本离群件）与 6 次 judge 派发，框架自记累计重新出题成本 $27.87 / 28.9M tokens；终局 09:57Z 冻结转人工后，实现已并入 main、验证报告已入库的 spec 搁浅冻结 8 小时（至窗口末，回顾执行时 STATE 仍 frozen=True），每日 STATE 持续占用一个 blocked 名额。
   - 证据：11 次 admin run 逐一可数（admin_alerts.json 窗口内处置组）：1795505758、1795506514、1795506515、1795509468、1795510561、1795511223、1795511224、1795512062、1795512962、1795514267、1795514268；离群件 admin-add-bridge-theme-channel-1795509468 cost_usd=4.896 对组中位 1.165（4.2 倍）、83 turns 对 21.5、1015 秒对 235 秒（数据摘要第 6 节）；STATE.md _cost_usd=27.868、_tokens_in=28908790（cache 读 27883968），冻结 error 自述「[成本参考] 重新出题成本：累计 $27.87 / 28.9M tokens」。
   - 调查评估：问题源是 add-bridge-theme-channel 的验证链。已核实三种 env 形态逐一现地根治且当日落地：共享隔离 profile 快照断链（prepare 第 4 步退出码 1，根治 5c3f71d 增设清扫步）、账户区冷启动 10 秒竞态（根治 67afce7 预热门）、同批并发重负载争抢（根治=串行重验，仅停留为处置建议未执行），5c3f71d/67afce7 经 git show 核实内容与时间相符。根因归属：前两种是环境存量缺陷的一次性根治支出，属生产性硬化不算浪费；冻结搁浅部分是系统性缺口所致——并发争抢型的机械处置缺标准选项只能冻结等人工（见 improvements 对应条目）。与存量关系：mergeback_wip_overlap（merge-back 撞主树未提交改动的拦截信号）一段耗 1 次 admin run 后由收编 0f995cb 解阻塞，属 maintree-stray-wip 域规则 5 首例应用、已蒸馏不另立；spec/changes 活跃区无验证链处置成本相关立项。结论：11 次处置中 9 次有效收口，冻结搁浅 8 小时是本窗口最大真实浪费，一次人工放行即可收口。
   - 建议：人工对 add-bridge-theme-channel 放行一次串行重验（STATE 写 _verify_parallel_override=1 并解冻，健康轮自复位）或明示豁免 env 归因，解除搁浅；同类冻结的机制预防见 improvements 条目。
 
 - **verify prepare 断链 6 秒级三连发 fail-fast 空转**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：验证契约 prepare（验证前环境装配脚本）同一断链错误以 6 秒间隔三连发 fail-fast（07:48:22/28/34，每轮场景执行数=0），验证链停滞约 10 分钟，并触发 1 条 critical 级 daemon_errors 告警误建议「检查根因并重启 daemon」。
   - 证据：fenixd.log 三条同指纹 ERROR（2026-11-24T07:48:22/28/34Z，指纹 75c8c420）+ 告警 cb618206b1e1（同指纹 ≥3 次/10 分钟判 critical，handled=False）；处置 65d5a5a4b880 诊断记录：/root/.fenix-verify 共享隔离 profile 残留断链（fenix-dsh-session-advanced-search bundle 指向已 GC 快照目录），信号里截断的 dsh-atomic-write:214 栈帧仅为 withFileLock 包装层、非真因。
   - 调查评估：问题源是 add-bridge-theme-channel 验证链的环境装配面。已核实根因与根治：快照 GC 后共享 profile 的 bundle 解析断链，admin 当日根治（5c3f71d 给 verify-web-bridge.sh prepare 增设快照断链清扫步 +32 行，git show 核实）；告警的「重启 daemon」建议与真因不符（环境数据问题非进程问题），被 evo-add-daemon-signal-spec-attribution-dedup 去重守卫正确跳过（处置 0e7e77ceb53a result=skipped）。残余缺口两点：prepare 同因失败按 6 秒节奏三连重试、无退避与同因合并；信号仅附截断栈帧，真因需 admin 手动复现才取得。结论：直接损失小（3 个零产出轮 + 1 条误向告警），但重试节奏与信号截断结构性可复发。
@@ -961,6 +963,7 @@
 
 ### 失误
 - **冻结落地 0.3 秒后仍派发 admin run，被绞杀留 failed 记录**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：add-bridge-theme-channel 冻结写入 STATE 0.3 秒后，处置链仍派发 admin run admin-add-bridge-theme-channel-1795514268，0.05 秒即被冻结绞杀（duration 0.008 秒、turns=0）；连同冻结前 0.1 秒派发的 1795514267，两个 run 零产出、各落 1 条 result=failed 处置记录，其承接的 warning_stale_triage（连续 warning 需人工甄别信号，theme-initial-inject-current-scheme 连续 2 轮）与 manual-intervention 至今未处置。
   - 证据：毫秒时序（admin_alerts.json + STATE.md updated 字段 + fenixd.log 9882-9891 行）：09:57:47.869 派发 1795514267 → 09:57:47.983 冻结写入 → 09:57:48.278 派发 1795514268（冻结之后）→ 48.329/49.590 两 run 被「killed_without_cli_result(source=frozen)」击杀（run_metrics terminal=error）；数据摘要 runs 统计「其他终态: 2」即此两件。
   - 调查评估：问题源是处置链派发面与验证环境阻塞冻结（连续 2 轮 env 阻塞即冻结转人工的既定规则）的时序竞态。已核实：第二件派发发生在冻结落地之后（48.278 > 47.983，毫秒级证据充分），说明派发面缺 frozen 前置闸，非纯不可避竞态；第一件（冻结前 0.1 秒派发）属窄窗竞态难全免。与存量关系：todo 既有「散件 WIP 收编双路径重放空转误报」（10-16 条）覆盖的是 monitor 重放面，本条是派发面 ordering 缺口，互补不重复；spec/changes 无处置链相关立项。结论：直接 token 损失近零，但 failed 处置记录污染告警台账，且冻结语义（转人工等待）与派发动作（继续自动处置）自相矛盾，凡「冻结时有待派发处置」即复发。
@@ -968,12 +971,14 @@
 
 ### 可改进
 - **串行重验处置选项未注册，机械可解 env 阻塞升级人工冻结**
+  - 自进化：问题部分成立 / 建议部分合理 / — 不需要
   - 影响：复发敞口：并发争抢型 env 阻塞每次都会走满「admin 给出方案→注册表无对应选项→冻结转人工」全程，本次实测代价=add-bridge-theme-channel 冻结搁浅 8 小时 + 每日 blocked 名额占用（$27.87 累计出题成本中的冻结段）。
   - 证据：处置 860d6754a449（11-24 09:26Z）明确建议注册新选项 derate_verify_parallel_reverify（对 spec 写 _verify_parallel_override=N 触发降档重验，健康轮自复位），并指出注册表现仅 revise_scenario_reverify（场景缺陷载荷型）语义不符；STATE.md _verify_parallel_override 至今 null、frozen=True；处置 80153fb49d6f 引用当日蒸馏记忆 dsh-verify-web-coldboot-account-lag 实证「并发窗口型 STATE 写 _verify_parallel_override=1 串行根治（健康轮自复位）」为已验证口径。
   - 调查评估：问题源是 add-bridge-theme-channel 的验证环境阻塞处置面。已核实：09:02-09:36Z 第二轮验证的 env 形态为同批并发重负载（链头场景撞引擎 wait 10 秒硬上限 + 2 个依赖传播场景零执行），admin 已给出调度面处置方案但无选项可挂，09:57Z 冻结先至、根治方案被冻结搁置。根因归属：系统性缺口——裁决选项注册表缺「调度面处置」类目，机械可解的问题被迫升级人工债。与存量关系：与本窗口 mistakes 派发竞态条互补（一个缺选项、一个缺闸），与既有 todo 无重复。结论：选项落地后此类 env 阻塞可在冻结前自动收口，是低框架成本高回报的小进化。
   - 建议：按处置建议把 derate_verify_parallel_reverify 注册进 verify_env_blocked 桶（框架侧进化小改）；当前冻结件由人工执行一次串行重验解冻收口。
 
 - **repair 车道凭据链 3 天不可判定，告警刷屏 8600 行**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：arbiter/repair 车道（裁决/修复派发车道）环境自检持续 unhealthy 3 天（11-21 18:08Z 起），窗口内实证拦截 2 次仲裁派发（09:57:49Z 冻结后零状态变更跳过）；同指纹 WARNING 以每分钟 2 条节奏刷屏约 8622 行零消费，复发敞口=下一次 verifier 打回修复派发将被回落冻结闸拦截、修复循环停摆。
   - 证据：告警 3b3a4abe8b0b（lane_env_unavailable，即车道环境不可用前置自检告警，2026-11-22T03:58Z major，handled=False，自述「随恢复自动关闭、无需人工处置」却挂账 2 天 14 小时+）；fenixd.log 首行即 unhealthy 记录（2026-11-21T18:08:27Z），「车道前置探针 unhealthy」4310 行 + 「车道前置自检 unhealthy」4312 行；拦截实证 09:57:49.748/.934（pm_engine.arbiter 组件日志）。
   - 调查评估：问题源是框架 repair/arbiter 回落链环境本身，不涉任何 SPEC。已核实形态：探针判定「repair 回落 harness 默认链凭据不可判定（daemon 进程环境无 ANTHROPIC_BASE_URL/AUTH_TOKEN/API_KEY 路由痕迹，OAuth/CLI 默认档形态本地不可判定）→ fallback=true」，同期其余车道经 bigmodel.cn 正常出勤（35 run 成功 33），仅回落链不可用；条件真实持续存在，自动关闭未触发属判定正确而非核销缺口，与 todo 既有「条件消失后不核销」族方向相反。根因写到形态层、两假说并存：回落链凭据路由配置缺口（真不可用），或 OAuth/CLI 默认档实际可用而探测面只认 env 痕迹（误判）——窗口内无一次实际派发被尝试，证据不足以裁决，不落单因结论。与存量关系：todo.md 与 spec/changes 均无 lane_env 相关条目，首次立项。结论：车道停摆 3 天零修复动作 + 告警面每日约 3000 行纯噪声，够格立项。
