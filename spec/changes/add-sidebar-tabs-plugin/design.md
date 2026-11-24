@@ -29,3 +29,4 @@ dsh web（`@deepseek-ai/dsh` 0.2.x）左侧栏由 `@deepseek-ai/dsh-client-ui-la
 - **dsh 升级锚点漂移** → D5 失配静默退出（功能消失不破坏侧栏）；README 记录签名字证与重钉方法。
 - **官方未来自带侧栏 tab 化** → 双份 UI 重叠（低概率）；届时用户停用本插件即可（enabled=false 零动作）。
 - **官方对导航/Workspaces 容器做条件卸载**（如虚拟化列表） → D4 自愈重贴可能闪断一帧，属可接受视觉抖动；MUST NOT 因此阻塞官方渲染。
+- **与共装注入插件共存**：`fenix-dsh-settings-dock`（几何停靠，同锚 `[class*="sidebarCol"]` 测量列几何）与 `fenix-dsh-session-advanced-search`（Workspaces 区搜索框内注入）均已在真机共装。D2 display 级切换只改官方容器的可见性，不触碰两者的挂载点与测量基面（dock 以列元素几何定位、advanced-search 以搜索框容器为锚，均非本插件 display 目标的子节点改写方）；三方 MutationObserver 各自只维护自有元素，MUST NOT 互写对方 DOM。真机共装回归走查见 tasks.md 3.1。
