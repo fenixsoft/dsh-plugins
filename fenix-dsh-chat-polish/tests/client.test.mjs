@@ -34,6 +34,7 @@ function fakeReact() {
 		useState(init) { return [init, function () {}] },
 		useRef(init) { return { current: init } },
 		useEffect() {},
+		useSyncExternalStore(subscribe, getSnapshot) { return getSnapshot() },
 	}
 }
 
@@ -41,6 +42,8 @@ function fakePrimitives() {
 	return {
 		MarkdownText: function MarkdownText() { return null },
 		FileTypeIcon: function FileTypeIcon() { return null },
+		Switch: function Switch() { return null },
+		IconNewChatOutlineMedium: function IconNewChatOutlineMedium() { return null },
 		fileExtension() { return '' },
 		fileSizeText() { return '' },
 	}
@@ -394,3 +397,141 @@ test('keydown handler stays mounted and routed regardless of toggle (listener ke
 	assert.equal(envOff.listeners.input.length, 1, 'capture input still registered when off')
 })
 
+
+/* ── 设置分区 UI（tasks 2.1）── */
+
+test('settings.section and settings.section.icon are registered with trailing order probe', () => {
+	const env = loadClient({
+		initialEntries: {
+			'settings.section': [
+				{ options: { order: -10 } },
+				{ options: { order: 0 } },
+				{ options: { order: 10 } },
+				{ options: { order: 15 } },
+			],
+		},
+	})
+	const section = env.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	const icon = env.registered.find((r) => r.spec && r.spec.name === 'settings.section.icon')
+	assert.ok(section, 'settings.section registered')
+	assert.ok(icon, 'settings.section.icon registered')
+	assert.equal(section.spec.id, 'fenix-chat-polish')
+	assert.equal(icon.spec.id, 'fenix-chat-polish')
+	assert.equal(section.spec.order, 16, 'trailing probe: max known order 15 + 1')
+	/* label 是函数（宿主按需调用取文案） */
+	assert.equal(typeof section.spec.label, 'function')
+	assert.equal(section.spec.label(), '对话区打磨')
+	/* 探测失败（entries 抛异常/畸形）回退 FALLBACK_MAX_ORDER+1 */
+	const env2 = loadClient({
+		initialEntries: {
+			'settings.section': [null, {}, { options: {} }, { options: { order: 'bogus' } }],
+		},
+	})
+	const section2 = env2.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	assert.equal(section2.spec.order, 16, 'fallback order when probe yields nothing usable')
+})
+
+test('polish section renders 6 feature rows with switches, all on by default', () => {
+	const env = loadClient()
+	const section = env.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	const Section = section.component
+	const tree = Section()
+	const rows = []
+	const switches = []
+	walk(tree, (el) => {
+		if (el.props && el.props['data-fdx-polish-feature']) rows.push(el.props['data-fdx-polish-feature'])
+		if (el.type && el.type.name === 'Switch') switches.push(el)
+	})
+	assert.deepEqual(
+		[...rows].sort(),
+		['composer-width', 'hero-row', 'history-nav', 'markdown', 'scrollbar', 'whitespace'].sort(),
+		'exactly 6 feature rows, one per feature id',
+	)
+	assert.equal(switches.length, 6, 'one switch control per row')
+	for (const sw of switches) {
+		assert.equal(sw.props.checked, true, `switch for ${sw.props.label} defaults to on`)
+		assert.equal(typeof sw.props.onChange, 'function')
+	}
+})
+
+test('clicking a switch writes the store and the next render reflects the new state', () => {
+	const env = loadClient()
+	const section = env.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	const Section = section.component
+	const firstTree = Section()
+	const markdownSwitch = { el: null }
+	walk(firstTree, (el) => {
+		if (el.type && el.type.name === 'Switch' && el.props.label === '用户消息 Markdown 渲染') markdownSwitch.el = el
+	})
+	assert.ok(markdownSwitch.el, 'markdown switch found')
+	markdownSwitch.el.props.onChange(false)
+	assert.equal(env.styleTag.textContent.includes('.fdxchat-bubble{'), false, 'css rebuilt immediately on toggle')
+	const secondTree = Section()
+	let after = null
+	walk(secondTree, (el) => {
+		if (el.type && el.type.name === 'Switch' && el.props.label === '用户消息 Markdown 渲染') after = el
+	})
+	assert.equal(after.props.checked, false, 'row switch state matches the effective state after re-render')
+	/* 其余开关不受影响 */
+	let others = []
+	walk(secondTree, (el) => {
+		if (el.type && el.type.name === 'Switch' && el.props.label !== '用户消息 Markdown 渲染') others.push(el.props.checked)
+	})
+	assert.deepEqual(others, [true, true, true, true, true], 'other 5 switches stay on')
+	/* 持久化只记录关闭项 */
+	assert.deepEqual(JSON.parse(env.store.dump()[STORAGE_KEY]), { markdown: false })
+	/* 再开回：键清除（全开后 removeItem 由 store 内部处理） */
+	after.props.onChange(true)
+	assert.equal(env.store.dump()[STORAGE_KEY], undefined, 'storage key removed when all back on')
+})
+
+test('fallback switch is used when host Switch export drifts away', () => {
+	/* client.js 的 primitives require 由 fakePrimitives 提供；此处通过单独装载
+	 * 验证 FallbackSwitch 分支：注入不含 Switch 的 primitives */
+	const env = loadClient()
+	/* 正常路径用宿主 Switch（上面已验证）。Fallback 分支经代码检查 + 独立加载
+	 * 验证：移除 Switch/Icon 导出后 FallbackSwitch（role=switch 同构）接管 */
+
+	const react = fakeReact()
+	const primitivesWithoutSwitch = {
+		MarkdownText: function MarkdownText() { return null },
+		FileTypeIcon: function FileTypeIcon() { return null },
+		fileExtension() { return '' },
+		fileSizeText() { return '' },
+	}
+	const styleTags = []
+	const fakeDocument = {
+		createElement(tag) { return { tag, dataset: {}, textContent: '', parentNode: null, remove() { this.parentNode = null } } },
+		head: { appendChild(el) { el.parentNode = this; styleTags.push(el) } },
+		addEventListener() {}, removeEventListener() {},
+	}
+	const windowMock = {
+		localStorage: fakeStorage(),
+		document: fakeDocument,
+		requestAnimationFrame(fn) { fn() },
+	}
+	windowMock.window = windowMock
+	let loaded = null
+	windowMock.__ModuleLoader__ = { load(def) { loaded = def } }
+	new Function('window', 'document', 'require', clientCode)(windowMock, fakeDocument, function (name) {
+		if (name === 'react') return react
+		if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitivesWithoutSwitch
+		throw new Error('unexpected require: ' + name)
+	})
+	const registered = []
+	loaded.factory(function (name) {
+		if (name === 'react') return react
+		if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitivesWithoutSwitch
+		throw new Error('unexpected require: ' + name)
+	}).apply({
+		slots: { inject(name, fn) { fn() }, register(spec, comp) { registered.push({ spec, comp }); return spec }, entries() { return [] } },
+	})
+	const section = registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	const tree = section.comp()
+	const toggles = []
+	walk(tree, (el) => {
+		if (el.type && el.type.name === 'FallbackSwitch') toggles.push(el)
+	})
+	assert.equal(toggles.length, 6, 'fallback switch renders for all 6 rows when host Switch is gone')
+	assert.equal(toggles[0].props.checked, true, 'fallback switch reflects default-on state')
+})

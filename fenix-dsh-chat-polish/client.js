@@ -95,6 +95,11 @@
 			/* 辅助函数漂移时降级为空扩展名/空尺寸文案（fileMeta filter(Boolean) 自然收敛） */
 			var fileExtension = typeof primitives.fileExtension === 'function' ? primitives.fileExtension : function () { return '' }
 			var fileSizeText = typeof primitives.fileSizeText === 'function' ? primitives.fileSizeText : function () { return '' }
+			/* 设置分区控件：优先复用宿主基线包现成 Switch（role="switch" + aria-checked，
+			 * 与官方分区观感一致）；漂移缺失时降级为自绘 toggle（D4，对齐官方视觉变量）。
+			 * 图标同理漂移降级为 null（菜单条目无图标但不缺席） */
+			var HostSwitch = componentExport(primitives.Switch, null)
+			var SectionIconGlyph = componentExport(primitives.IconNewChatOutlineMedium, null)
 
 			/* ── 样式（0.3.0 起按功能分块，注入串 = 开启块拼接） ──────────────── */
 
@@ -855,6 +860,143 @@
 				})
 			}
 
+			/* ═══ 设置分区 UI（0.3.0，design D4）═════════════════════════════════ */
+
+			/* 功能清单（行序 = 分区面板渲染序）：id 与 toggleStore/FEATURE_IDS 逐字对应 */
+			var FEATURES = [
+				{ id: 'whitespace', label: '对话列留白 24px', description: '消息列与输入卡两侧留白固定 24px，解除官方 920px 居中上限，隐藏列宽拖拽把手' },
+				{ id: 'scrollbar', label: '滚动条样式', description: '滚动条对齐 dashboard 观感（10px 宽、加深滑块、补全四向箭头按钮）' },
+				{ id: 'composer-width', label: '输入框 80% 宽度居中', description: '输入卡、提示条与队列坞按 80% 宽度居中，与消息列同轴' },
+				{ id: 'markdown', label: '用户消息 Markdown 渲染', description: '用户消息气泡按 Markdown 渲染（标题/列表/代码高亮），关闭后回退官方纯文本投影' },
+				{ id: 'hero-row', label: 'hero 工作区行对齐', description: '新会话页 hero 工作区/模式行左右缘对齐输入卡' },
+				{ id: 'history-nav', label: '输入框 ↑/↓ 历史导航', description: '输入框首行按 ↑ 召回上一条已发送消息，↓ 切回，Esc 恢复草稿' },
+			]
+
+			/* React 侧订阅（design D1）：React 18 useSyncExternalStore 直连 store；
+			 * 未来宿主 React 降级漂移时退回 useState+useEffect 订阅（两个实现内部
+			 * hook 调用序列各自稳定，模块加载期一次性选定） */
+			var useToggles = typeof react.useSyncExternalStore === 'function'
+				? function () {
+					return react.useSyncExternalStore(toggleStore.subscribe, toggleStore.snapshot)
+				}
+				: function () {
+					var state = react.useState(toggleStore.snapshot)
+					var snapshot = state[0]
+					var setSnapshot = state[1]
+					react.useEffect(function () {
+						return toggleStore.subscribe(function () { setSnapshot(toggleStore.snapshot()) })
+					}, [])
+					return snapshot
+				}
+
+			/* 主题变量快捷引用（对齐 fenix-dsh-auth 先例的内联样式口径，缺省值兜底
+			 * 浅色形态，暗色由宿主变量接管） */
+			var COLOR_LABEL = 'var(--dsw-alias-label-primary, #1a1a1a)'
+			var COLOR_LABEL_SECONDARY = 'var(--dsw-alias-label-secondary, #555)'
+			var COLOR_BORDER = 'var(--dsw-alias-border-l2, rgba(0,0,0,0.12))'
+
+			var sectionRowStyle = {
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				gap: '16px',
+				padding: '12px 0',
+				borderBottom: '1px solid ' + COLOR_BORDER,
+			}
+			var sectionRowTextStyle = { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }
+			var sectionRowTitleStyle = { fontSize: '14px', fontWeight: '500', color: COLOR_LABEL, lineHeight: '22px' }
+			var sectionRowDescStyle = { fontSize: '12px', color: COLOR_LABEL_SECONDARY, lineHeight: '18px' }
+			var sectionRootStyle = { display: 'flex', flexDirection: 'column' }
+			var sectionIntroStyle = {
+				margin: '0 0 4px',
+				fontSize: '12px',
+				color: COLOR_LABEL_SECONDARY,
+				lineHeight: '18px',
+			}
+
+			/* 自绘 toggle 降级替身（宿主 Switch 漂移缺失时）：role/aria-checked 同构，
+			 * 视觉对齐官方分区（胶囊轨道 + 圆点，主题变量着色） */
+			var FallbackSwitch = function FallbackSwitch(props) {
+				var checked = props.checked === true
+				return react.createElement('span', {
+					role: 'switch',
+					'aria-checked': checked ? 'true' : 'false',
+					title: props.title,
+					onClick: function () { if (typeof props.onChange === 'function') props.onChange(!checked) },
+					style: {
+						display: 'inline-flex',
+						alignItems: 'center',
+						width: '36px',
+						height: '20px',
+						padding: '2px',
+						borderRadius: '100px',
+						boxSizing: 'border-box',
+						cursor: 'pointer',
+						background: checked ? 'var(--dsw-alias-brand-major, #4d6bfe)' : 'var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.08))',
+						justifyContent: checked ? 'flex-end' : 'flex-start',
+						transition: 'none',
+					},
+				},
+				react.createElement('span', {
+					style: {
+						display: 'inline-block',
+						width: '14px',
+						height: '14px',
+						borderRadius: '50%',
+						background: '#fff',
+					},
+				}))
+			}
+			var ToggleControl = HostSwitch || FallbackSwitch
+
+			/* 「对话区打磨」分区组件（settings.section 槽）：渲染 6 个功能行（功能名 +
+			 * 一句话说明 + 开关控件）。点击开关写 store 即时生效（store.set 内先重建
+			 * 样式后通知，本组件经订阅重渲同步行内开关态——行内开关态与实际生效状态
+			 * 单一数据源一致）；data-fdx-polish-feature/-switch 属性供真机验证定位 */
+			var PolishSection = function PolishSection() {
+				var toggles = useToggles()
+				var rows = FEATURES.map(function (feature) {
+					var on = toggles[feature.id] !== false
+					return react.createElement(
+						'div',
+						{ key: feature.id, style: sectionRowStyle, 'data-fdx-polish-feature': feature.id },
+						react.createElement(
+							'div',
+							{ style: sectionRowTextStyle },
+							react.createElement('div', { style: sectionRowTitleStyle }, feature.label),
+							react.createElement('div', { style: sectionRowDescStyle }, feature.description),
+						),
+						react.createElement(
+							'span',
+							{ 'data-fdx-polish-switch': feature.id, style: { flex: 'none', display: 'inline-flex' } },
+							react.createElement(ToggleControl, {
+								checked: on,
+								onChange: function (next) { toggleStore.set(feature.id, next) },
+								label: feature.label,
+								title: feature.label,
+							}),
+						),
+					)
+				})
+				return react.createElement(
+					'div',
+					{ style: sectionRootStyle, 'data-fdx-polish-section': '' },
+					react.createElement('p', { style: sectionIntroStyle }, '对话区各打磨功能可独立开关；默认全部开启（与安装即用形态一致），关闭某项即时回退官方原生形态。开关仅对当前浏览器生效。'),
+					rows,
+				)
+			}
+
+			/* 分区图标（settings.section.icon 槽，收 {size, active}）；字形漂移降级
+			 * 为空节点（菜单条目仍在、无专属图标） */
+			var PolishIcon = function PolishIcon(props) {
+				if (!SectionIconGlyph) return null
+				return react.createElement(SectionIconGlyph, { size: (props && props.size) || 16 })
+			}
+
+			/* settings.section 注册尾兜底值（fenix-dsh-auth 先例同款：0.2.2-rc.1 实测
+			 * 官方 plugins=15；动态探测失败时本分区落在官方尾部 +1，不与官方分区争序） */
+			var FALLBACK_MAX_ORDER = 15
+
 			/* ── 插件体：样式注入 + keyed 插槽遮蔽注册 ── */
 			return {
 				inject: ['slots'],
@@ -916,6 +1058,43 @@
 					}
 					document.addEventListener('keydown', onHistoryKeydown, true)
 					document.addEventListener('input', onHistoryInput, true)
+
+					/* 设置分区注册（fenix-dsh-auth 先例同构写法）：注册回调由宿主在渲染时
+					 * 声明，此刻官方分区已注册可探测排序尾；枚举失败回退 FALLBACK_MAX_ORDER。
+					 * 逐槽 try/catch 降级——宿主升级致槽契约漂移时仅菜单缺席（console.warn），
+					 * 功能本体（样式/插槽/监听）不依赖分区存在，不出现页面报错 */
+					try {
+						ctx.slots.inject('settings.section', function () {
+							var maxOrder = FALLBACK_MAX_ORDER
+							try {
+								var entries = ctx.slots.entries('settings.section')
+								for (var i = 0; i < entries.length; i += 1) {
+									var order = entries[i] && entries[i].options && entries[i].options.order
+									if (typeof order === 'number' && order > maxOrder) maxOrder = order
+								}
+							} catch (err) { /* 探测失败用兜底尾值 */ }
+							return ctx.slots.register({
+								name: 'settings.section',
+								id: 'fenix-chat-polish',
+								order: maxOrder + 1,
+								label: function () {
+									return '对话区打磨'
+								},
+							}, PolishSection)
+						})
+					} catch (err) {
+						stage('settings.section', err)
+					}
+					try {
+						ctx.slots.inject('settings.section.icon', function () {
+							return ctx.slots.register({
+								name: 'settings.section.icon',
+								id: 'fenix-chat-polish',
+							}, PolishIcon)
+						})
+					} catch (err) {
+						stage('settings.section.icon', err)
+					}
 
 					return function dispose() {
 						document.removeEventListener('keydown', onHistoryKeydown, true)
