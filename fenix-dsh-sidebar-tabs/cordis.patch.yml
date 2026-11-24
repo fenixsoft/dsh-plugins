@@ -1,0 +1,8 @@
+# fenix-dsh-sidebar-tabs
+# dsh web 侧栏顶部功能/工作区双 Tab 切换。
+# 全部逻辑位于 client.js；此处仅把本插件插入 web profile 的 loader 清单。
+# 注册语法（plugin-rollout 口径）：必须 - insert: 列表形式，裸 - id: 是对既有条目的覆盖补丁、目标不存在时被 dsh 静默跳过。
+
+- insert:
+    - id: fenix-dsh-sidebar-tabs
+      name: fenix-dsh-sidebar-tabs
