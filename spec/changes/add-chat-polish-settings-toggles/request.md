@@ -1,0 +1,1 @@
+fenix-dsh-chat-polish插件在dsw web的设置页面中增加一个菜单，允许对它内部每个功能进行单独开关
