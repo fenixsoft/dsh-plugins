@@ -4,7 +4,7 @@
 
 ### Requirement: 初始主题参数注入
 
-`buildPanelSrc(prefix, hashRoute, theme?)` SHALL 支持第三可选参数：值域白名单 `dark|light`，提供时在 `apiBase` 之后、hash 之前拼 `&theme=<档>`；参数未提供或值非法时 SHALL 产出与现状逐字符一致的 URL。插件 SHALL 在三个挂载点（固定条目面板、项目 main 面板、右缘页签）以宿主主题快照 `active.colorScheme` 注入初始档；宿主主题 API 缺席时不注入。
+`buildPanelSrc(prefix, hashRoute, theme?)` SHALL 支持第三可选参数：值域白名单 `dark|light`，提供时在 `apiBase` 之后、hash 之前拼 `&theme=<档>`；参数未提供或值非法时 SHALL 产出与现状逐字符一致的 URL。插件 SHALL 在三个挂载点（固定条目面板、项目 main 面板、右缘页签）以宿主主题快照 `active.colorScheme` 注入初始档（快照缓存随每次 `theme/change` 刷新，注入档 SHALL 为宿主最近档而非插件安装时快照）；宿主主题 API 缺席时不注入。
 
 #### Scenario: 深色宿主初始注入
 
@@ -18,7 +18,7 @@
 
 ### Requirement: theme/change 实时广播
 
-插件 SHALL 订阅宿主 `ctx.on("theme/change")` 事件，把 `snapshot.active.colorScheme` 经白名单映射后向全部已挂载 dashboard iframe 的 `contentWindow` 广播 postMessage，消息形状 `{kind:'fenix-theme', theme:'dark'|'light'}`（目标 origin 为 dashboard 同源前缀）。`colorScheme` 非白名单值时 SHALL NOT 发送。事件订阅 SHALL 随插件生命周期注销。
+插件 SHALL 订阅宿主 `ctx.on("theme/change")` 事件，把 `snapshot.active.colorScheme` 经白名单映射后向全部已挂载 dashboard iframe 的 `contentWindow` 广播 postMessage，消息形状 `{kind:'fenix-theme', theme:'dark'|'light'}`（目标 origin 为宿主页面自身 origin——反代同源，即 `window.location.origin`，而非路径前缀，`postMessage` 的 targetOrigin 不接受路径）。`colorScheme` 非白名单值时 SHALL NOT 发送。事件订阅 SHALL 随插件生命周期注销。
 
 #### Scenario: 宿主切换实时跟随
 

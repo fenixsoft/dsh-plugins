@@ -31,7 +31,7 @@
 
 ### D3 订阅点与快照时机
 
-`installThemeFollow(ctx)` 在插件 client 启动时调用一次：先读 `ctx.theme.getTheme()` 供挂载点取初始档（经模块级缓存供 `buildPanelSrc` 调用方同步取值）；再 `ctx.on("theme/change", snapshot => broadcastTheme(snapshot.active.colorScheme))`，返回 disposer 随插件清理。`colorScheme` 经白名单映射（`dark|light`，其它值不发）。理由：事件快照即权威值，无需二次读取；模块级缓存让三挂载点零签名变更。
+`installThemeFollow(ctx)` 在插件 client 启动时调用一次：先读 `ctx.theme.getTheme()` 供挂载点取初始档（经模块级缓存供 `buildPanelSrc` 调用方同步取值）；再 `ctx.on("theme/change", snapshot => { 缓存刷新为 snapshot.active.colorScheme；broadcastTheme(snapshot.active.colorScheme) })`，返回 disposer 随插件清理。**事件处理先刷新模块级缓存再广播**：右缘页签首次打开、项目面板新注册等「晚于宿主切换」的挂载从缓存取初始注入档，只广播不刷新缓存则这些面板首帧错档且无后续广播可补（评审 2026-11-24 补）。`installThemeFollow(ctx)` 接入点须先于项目同步注册——`projectEntrySink` 的 src 在 `registerProjectPanel` 时即拼串（非渲染惰性求值，`src/client/index.ts:522`）。`colorScheme` 经白名单映射（`dark|light`，其它值不发；theme 包类型声明本就收窄 `'light'|'dark'`，白名单作运行时漂移防御）。理由：事件快照即权威值，无需二次读取；模块级缓存让三挂载点零签名变更。
 
 ### D4 宿主 API 缺席降级
 
@@ -40,6 +40,7 @@
 ## Risks / Trade-offs
 
 - [宿主快照与 iframe 首帧竞态：参数注入后宿主立即切主题] → `theme/change` 事件紧随广播补齐，iframe 侧 postMessage 校验兜底，最终一致。
+- [宿主切主题后新挂载面板读到安装时旧缓存] → 事件处理先刷新模块级缓存再广播，晚挂载初始注入即最新档（评审 2026-11-24 补）。
 - [广播给已销毁 iframe 窗口抛错] → 注册表成员资格为唯一发送闸，注销先于销毁（组件卸载序）；try/catch 包裹 postMessage 兜底。
 - [与既有 iframe→host 消息通道混淆] → 方向相反（host→iframe）、kind 独立命名空间（`fenix-theme`），互不干扰。
 - [三挂载点漏改] → `buildPanelSrc` 调用点 grep 对账（三处全部注入），合同测试断言固定条目产出含 theme 段。
