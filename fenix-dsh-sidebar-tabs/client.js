@@ -115,8 +115,14 @@
 					var tabbar = null
 					var tabButtons = {}
 					var watchedRoot = null
-					var warnedMissing = false
+					var warnedMissing = null
+					var missingColSince = null
+					var graceTimer = null
 					var scheduled = false
+					/* 侧栏列挂载宽限期：超过此时长仍未见列元素按失配告警（健康路径
+					 * ~1s 挂载；隔离实例冷启动首访需在线装配组合 bundle，实测可到
+					 * 10s+，15s 覆盖之） */
+					var LOAD_GRACE_MS = 15000
 
 					function setDisplay(el, visible) {
 						if (visible) {
@@ -147,6 +153,21 @@
 						var ws = col.querySelector(SEL.workspaces)
 						if (!nav.parentElement || !nav.parentElement.contains(ws)) return 'sidebarRoot(nav.parentElement)'
 						return null
+					}
+
+					/* 失配告警（限流按失配锚点名：同锚只 warn 一次，命中恢复即复位；
+					 * 不同锚各自报——启动瞬态不得吞掉真失配的锚点名，2026-11-24 真机
+					 * 演练返工点：warn-once 全局限流曾把真失配告警吞掉）。 */
+					function warnMissing(anchor) {
+						teardownDom()
+						if (warnedMissing !== anchor) {
+							warnedMissing = anchor
+							console.warn(
+								'fenix-dsh-sidebar-tabs: 侧栏锚点失配（' +
+									anchor +
+									' 未命中），放弃注入 tab 控件，侧栏保持官方原生形态；官方 UI 升级后请按 README「签名字证与重钉指引」修缝',
+							)
+						}
 					}
 
 					function ensureStyle() {
@@ -235,24 +256,48 @@
 
 					function ensure() {
 						if (disposed) return
-						var missing = firstMissingAnchor()
-						if (missing) {
-							/* 失配：零注入/零残留 + warn 一次（含失配锚点名；命中恢复时复位限流） */
-							teardownDom()
-							if (!warnedMissing) {
-								warnedMissing = true
-								console.warn(
-									'fenix-dsh-sidebar-tabs: 侧栏锚点失配（' +
-										missing +
-										' 未命中），放弃注入 tab 控件，侧栏保持官方原生形态；官方 UI 升级后请按 README「签名字证与重钉指引」修缝',
-								)
+						var col = document.querySelector(SEL.col)
+						if (!col) {
+							/* 侧栏列未挂载（应用启动中/无侧栏页面）：静默宽限等待挂载，
+							 * 超时（LOAD_GRACE_MS）仍未出现按失配告警——启动瞬态 MUST
+							 * NOT 消耗失配限流（真失配的锚点名必须能进日志）。 */
+							if (missingColSince === null) {
+								missingColSince = Date.now()
+								graceTimer = setTimeout(scheduleEnsure, LOAD_GRACE_MS)
+								/* 首见缺失：静默起表等待挂载（MUST NOT 落穿到告警——
+								 * 落穿即「首次 miss 必告警」，宽限期形同虚设，
+								 * 2026-11-24 真机演练返工点） */
+								return
 							}
+							if (Date.now() - missingColSince < LOAD_GRACE_MS) {
+								return
+							}
+							warnMissing('sidebarCol(' + SEL.col + ')')
 							return
 						}
-						warnedMissing = false
-						var col = document.querySelector(SEL.col)
+						missingColSince = null
+						if (graceTimer) {
+							clearTimeout(graceTimer)
+							graceTimer = null
+						}
 						var nav = col.querySelector(SEL.nav)
-						var anchors = { col: col, nav: nav, root: nav.parentElement, workspaces: col.querySelector(SEL.workspaces) }
+						if (!nav) {
+							warnMissing('panelList(' + SEL.nav + ')')
+							return
+						}
+						var ws = col.querySelector(SEL.workspaces)
+						if (!ws) {
+							warnMissing('regionArea(' + SEL.workspaces + ')')
+							return
+						}
+						var root = nav.parentElement
+						if (!root || !root.contains(ws)) {
+							warnMissing('sidebarRoot(nav.parentElement)')
+							return
+						}
+						/* 命中恢复：失配限流复位（失配→修复→再失配可再次告警） */
+						warnedMissing = null
+						var anchors = { col: col, nav: nav, root: root, workspaces: ws }
 						watchRoot(anchors.root)
 						ensureStyle()
 						placeTabbar(anchors)
@@ -281,6 +326,10 @@
 						disposed = true
 						treeObserver.disconnect()
 						if (rootObserver) rootObserver.disconnect()
+						if (graceTimer) {
+							clearTimeout(graceTimer)
+							graceTimer = null
+						}
 						teardownDom()
 						if (styleTag && styleTag.parentNode) styleTag.remove()
 						styleTag = null
