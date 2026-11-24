@@ -39,8 +39,8 @@ function fakeReact() {
 
 function fakePrimitives() {
 	return {
-		MarkdownText: function () { return null },
-		FileTypeIcon: function () { return null },
+		MarkdownText: function MarkdownText() { return null },
+		FileTypeIcon: function FileTypeIcon() { return null },
 		fileExtension() { return '' },
 		fileSizeText() { return '' },
 	}
@@ -100,8 +100,9 @@ function loadClient({ storage, initialEntries } = {}) {
 		const registered = []
 		const ctx = {
 			slots: {
-				inject() {},
-				register(spec) { registered.push(spec); return spec },
+				/* inject 回调即调（宿主在渲染时机声明回调；单测立即执行以捕获 register） */
+				inject(name, fn) { fn() },
+				register(spec, component) { registered.push({ spec, component }); return spec },
 				entries(name) { return (initialEntries && initialEntries[name]) || [] },
 			},
 		}
@@ -250,3 +251,146 @@ test('dispose removes the style tag and detaches the store binding', () => {
 	/* 重复 dispose 幂等（removed=false：标签已不在文档） */
 	assert.equal(env.dispose(), false)
 })
+
+/* ── markdown 开关分流（tasks 1.2）── */
+
+function walk(el, visit) {
+	if (!el || typeof el !== 'object' || Array.isArray(el)) return
+	visit(el)
+	const kids = Array.isArray(el.children) ? el.children.flat(Infinity) : []
+	for (const k of kids) walk(k, visit)
+}
+
+function findUserView(env) {
+	const entry = env.registered.find((r) => r.spec && r.spec.key === 'user')
+	assert.ok(entry, 'user node renderer registered')
+	return entry.component
+}
+
+const SAMPLE_TEXT = '# 标题 **粗体** `code`'
+
+test('markdown on (default): bubble keeps class-based visuals with MarkdownText and copy button', () => {
+	const env = loadClient()
+	const View = findUserView(env)
+	const tree = View({
+		node: { data: { content: [{ type: 'text', text: SAMPLE_TEXT }] } },
+		renderMessageImages() { return null },
+	})
+	let sawMarkdownWrapper = false
+	let sawMarkdownText = false
+	let sawCopyButton = false
+	let sawPlainFlag = false
+	walk(tree, (el) => {
+		if (el.props) {
+			if (el.props.className === 'fdxchat-markdown') sawMarkdownWrapper = true
+			if (el.props['data-chat-user-markdown'] === '') sawPlainFlag = true
+		}
+		if (el.type && el.type.name === 'MarkdownText') sawMarkdownText = true
+		if (el.type && el.type.name === 'CopyButton') sawCopyButton = true
+	})
+	assert.ok(sawMarkdownWrapper, 'markdown wrapper present')
+	assert.ok(sawMarkdownText, 'MarkdownText mounted')
+	assert.ok(sawCopyButton, 'copy button mounted')
+	assert.ok(sawPlainFlag, 'data-chat-user-markdown flag present')
+	/* 气泡走样式表类（无内联 style 副本） */
+	let bubbleEl = null
+	walk(tree, (el) => { if (el.props && el.props.className === 'fdxchat-bubble') bubbleEl = el })
+	assert.ok(bubbleEl, 'bubble element found')
+	assert.equal(bubbleEl.props.style, undefined, 'bubble uses stylesheet class, no inline copy')
+})
+
+test('markdown off: official-equivalent plain-text projection (no MarkdownText, no copy button, inline visuals)', () => {
+	const env = loadClient({ storage: fakeStorage({ [STORAGE_KEY]: JSON.stringify({ markdown: false }) }) })
+	const View = findUserView(env)
+	const tree = View({
+		node: { data: { content: [{ type: 'text', text: SAMPLE_TEXT }] } },
+		renderMessageImages() { return null },
+	})
+	let sawMarkdownWrapper = false
+	let sawMarkdownText = false
+	let sawCopyButton = false
+	let plainFlag = false
+	let bubbleEl = null
+	walk(tree, (el) => {
+		if (el.props) {
+			if (el.props.className === 'fdxchat-markdown') sawMarkdownWrapper = true
+			if (el.props['data-chat-user-plain'] === '') plainFlag = true
+		}
+		if (el.type && el.type.name === 'MarkdownText') sawMarkdownText = true
+		if (el.type && el.type.name === 'CopyButton') sawCopyButton = true
+		if (el.props && el.props.style && el.props.style.background === 'var(--dsw-specific-bubble)') bubbleEl = el
+	})
+	assert.ok(!sawMarkdownWrapper, 'no markdown wrapper')
+	assert.ok(!sawMarkdownText, 'MarkdownText not mounted')
+	assert.ok(!sawCopyButton, 'copy button not mounted')
+	assert.ok(plainFlag, 'data-chat-user-plain flag present')
+	assert.ok(bubbleEl, 'bubble carries inline visual replica (same BUBBLE_VISUALS source)')
+	/* 纯文本作为气泡 children（React 安全转义的字符串形态） */
+	const bubbleKids = (bubbleEl.children || []).flat(Infinity)
+	assert.ok(
+		bubbleKids.some((k) => typeof k === 'string' && k.includes('标题')),
+		'raw text rendered as plain string children',
+	)
+})
+
+test('markdown off keeps attachments: file card renders with inline visuals and image path untouched', () => {
+	const env = loadClient({ storage: fakeStorage({ [STORAGE_KEY]: JSON.stringify({ markdown: false }) }) })
+	const View = findUserView(env)
+	const renderedImages = []
+	const tree = View({
+		node: { data: { content: [
+			{ type: 'text', text: '看这个' },
+			{ type: 'file', attachment: { name: 'report.pdf', bytes: 2048 } },
+			{ type: 'image', attachment: { id: 'img1' } },
+		] } },
+		renderMessageImages(opts) { renderedImages.push(opts); return { type: 'img', props: {} } },
+	})
+	let sawFileCardInline = false
+	let sawFileContent = false
+	walk(tree, (el) => {
+		if (el.props && el.props.style && el.props.style.display === 'inline-flex' && el.props.title === 'report.pdf') sawFileCardInline = true
+		if (el.props && el.props.style && el.props.style.flex === '1') sawFileContent = true
+	})
+	assert.ok(sawFileCardInline, 'file card keeps card visuals via inline style')
+	assert.ok(sawFileContent, 'file content stack present')
+	assert.equal(renderedImages.length, 1, 'image attachment path unchanged (renderMessageImages called)')
+})
+
+/* ── history-nav 开关分流（tasks 1.2）── */
+
+function fakeEditorTarget() {
+	const composerInput = { dataset: { phase: 'plain' } }
+	return {
+		closest(sel) { return sel === '[data-composer-input]' ? composerInput : null },
+	}
+}
+
+test('history-nav off: capture keydown handler passes through (no takeover, no preventDefault)', () => {
+	const env = loadClient({ storage: fakeStorage({ [STORAGE_KEY]: JSON.stringify({ 'history-nav': false }) }) })
+	const handler = env.listeners.keydown[0]
+	let prevented = 0
+	let stopped = 0
+	const e = {
+		key: 'ArrowUp', isComposing: false, keyCode: 0,
+		target: fakeEditorTarget(),
+		preventDefault() { prevented += 1 },
+		stopPropagation() { stopped += 1 },
+	}
+	handler(e)
+	assert.equal(prevented, 0, 'no preventDefault when history-nav is off')
+	assert.equal(stopped, 0, 'no stopPropagation when history-nav is off')
+})
+
+test('history-nav off: input handler passes through as well', () => {
+	const env = loadClient({ storage: fakeStorage({ [STORAGE_KEY]: JSON.stringify({ 'history-nav': false }) }) })
+	const handler = env.listeners.input[0]
+	/* 无 owner/关闭态下不应抛异常、不应触碰任何状态（入口即放行） */
+	assert.doesNotThrow(() => handler({ target: fakeEditorTarget() }))
+})
+
+test('keydown handler stays mounted and routed regardless of toggle (listener kept per design D3)', () => {
+	const envOff = loadClient({ storage: fakeStorage({ [STORAGE_KEY]: JSON.stringify({ 'history-nav': false }) }) })
+	assert.equal(envOff.listeners.keydown.length, 1, 'capture keydown still registered when off')
+	assert.equal(envOff.listeners.input.length, 1, 'capture input still registered when off')
+})
+

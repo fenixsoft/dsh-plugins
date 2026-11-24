@@ -455,13 +455,29 @@
 				 * 防止下方 join('、') 抛 TypeError 击穿整个遮蔽渲染器（宿主 abdicate 整体
 				 * 退位回官方纯文本），与附件 name/bytes、useInput/useChat 的显式守卫同口径 */
 				var referenceLabels = Array.isArray(data.referenceLabels) ? data.referenceLabels : []
+				/* 开关分流（design D3）：markdown 关闭 → 官方等效纯文本投影分支（同一
+				 * 气泡结构、text 纯文本、附件/图片卡行为不变，仅不挂 MarkdownText 与
+				 * 复制按钮）；开启 → 现行 Markdown 渲染。读 store 每渲染一次，切换经
+				 * 订阅驱动重渲 */
+				var markdownOn = toggleStore.get('markdown') !== false
+				/* 视觉承载：开启态走样式表类（MARKDOWN_CSS 规则），关闭态样式表随块
+				 * 移除、改内联 style 复刻同一份值（BUBBLE_VISUALS 单源，两态不漂移） */
+				function visProps(key, extra) {
+					var v = BUBBLE_VISUALS[key]
+					var base = markdownOn ? { className: v.cls } : { style: v.style }
+					if (extra) {
+						var names = Object.keys(extra)
+						for (var i = 0; i < names.length; i++) base[names[i]] = extra[names[i]]
+					}
+					return base
+				}
 
 				var children = []
 				if (parts.attachments.length > 0) {
 					children.push(
 						react.createElement(
 							'div',
-							{ className: 'fdxchat-attachmentRow', key: 'attachments', 'data-message-attachments': '' },
+							visProps('attachmentRow', { key: 'attachments', 'data-message-attachments': '' }),
 							parts.attachments.map(function (attachment, index) {
 								if (attachment.type === 'image') {
 									/* 宿主注入面缺失时降级跳过图片渲染，与 useInput/useChat 同口径守卫 */
@@ -480,13 +496,15 @@
 								].filter(Boolean).join(' ')
 								return react.createElement(
 									'span',
-									{ key: 'file:' + index, className: 'fdxchat-fileCard', title: fileName },
-									react.createElement(FileTypeIcon, { path: fileName, className: 'fdxchat-fileIcon' }),
+									visProps('fileCard', { key: 'file:' + index, title: fileName }),
+									react.createElement(FileTypeIcon, markdownOn
+										? { path: fileName, className: 'fdxchat-fileIcon' }
+										: { path: fileName, style: BUBBLE_VISUALS.fileIcon.style }),
 									react.createElement(
 										'span',
-										{ className: 'fdxchat-fileContent' },
-										react.createElement('span', { className: 'fdxchat-fileName' }, fileName),
-										react.createElement('span', { className: 'fdxchat-fileMeta' }, fileMeta),
+										visProps('fileContent'),
+										react.createElement('span', visProps('fileName'), fileName),
+										react.createElement('span', visProps('fileMeta'), fileMeta),
 									),
 								)
 							}),
@@ -494,30 +512,39 @@
 					)
 				}
 				if (showBubble) {
+					/* 气泡内层：开启态挂 MarkdownText（.fdxchat-markdown 排版包装）；
+					 * 关闭态官方等效纯文本投影——text 直接作为气泡 children（React
+					 * 安全转义），不挂 MarkdownText */
+					var bubbleInner = markdownOn
+						? react.createElement('div', { className: 'fdxchat-markdown' },
+							react.createElement(MarkdownText, { text: parts.text, labels: LABELS }))
+						: parts.text
 					children.push(
 						react.createElement(
 							'div',
-							{ className: 'fdxchat-bubble', key: 'bubble' },
-							react.createElement('div', { className: 'fdxchat-markdown' },
-								react.createElement(MarkdownText, { text: parts.text, labels: LABELS })),
+							visProps('bubble', { key: 'bubble' }),
+							bubbleInner,
 						),
 					)
 				}
 				for (var r = 0; r < parts.rest.length; r++) {
-					children.push(react.createElement('pre', { className: 'fdxchat-extra', key: 'rest:' + r }, safeJson(parts.rest[r])))
+					children.push(react.createElement('pre', visProps('extra', { key: 'rest:' + r }), safeJson(parts.rest[r])))
 				}
 				if (referenceLabels.length > 0) {
-					children.push(react.createElement('div', { className: 'fdxchat-referenceSummary', key: 'references' }, referenceLabels.join('、')))
+					children.push(react.createElement('div', visProps('referenceSummary', { key: 'references' }), referenceLabels.join('、')))
 				}
-				/* 纯附件/无文本消息不追加复制按钮：避免悬停可点复制空串并误报「已复制」 */
-				if (parts.text !== '') {
+				/* 纯附件/无文本消息不追加复制按钮：避免悬停可点复制空串并误报「已复制」；
+				 * 关闭态纯文本投影亦不挂复制按钮（design D3） */
+				if (markdownOn && parts.text !== '') {
 					children.push(react.createElement(CopyButton, { text: parts.text, key: 'copy' }))
 				}
 
 				return react.createElement(
 					'div',
-					{ className: 'fdxchat-userRow', 'data-chat-user-markdown': '' },
-					react.createElement('div', { className: 'fdxchat-userStack' }, children),
+					visProps('userRow', markdownOn
+						? { 'data-chat-user-markdown': '' }
+						: { 'data-chat-user-plain': '' }),
+					react.createElement('div', visProps('userStack'), children),
 				)
 			})
 
@@ -697,10 +724,13 @@
 				return ownerRoot === editorEl.closest('[class*="_root"]')
 			}
 
-			/* document 捕获阶段 keydown：先于 Lexical 命令处理 */
+			/* document 捕获阶段 keydown：先于 Lexical 命令处理。
+			 * history-nav 关闭 → 处理器入口直接放行（不接管、不 preventDefault），
+			 * 控制器与监听保持挂载（design D3，关闭态开销为一次布尔读） */
 			function onHistoryKeydown(e) {
 				var nav = null
 				try {
+					if (toggleStore.get('history-nav') !== true) return
 					if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return
 					if (e.isComposing || e.keyCode === 229) return
 					var target = e.target
@@ -768,9 +798,10 @@
 
 			/* composer 编辑（键入/粘贴/发送清空）→ 静默退出浏览态；setDraft 自身触发的
 			 * input 用 applying 闸门豁免，晚于窗口到达的回声再以「文本仍等于召回目标」
-			 * 确定性判据兜底豁免 */
+			 * 确定性判据兜底豁免。history-nav 关闭 → 入口直接放行 */
 			function onHistoryInput(e) {
 				try {
+					if (toggleStore.get('history-nav') !== true) return
 					if (applying) return
 					var target = e.target
 					if (!(target instanceof Element)) return
