@@ -128,15 +128,20 @@ export function opsAlertDotElement(): ReactElement {
 }
 
 /**
- * 条目 label 元素：「运维」文字 + 红底白字计数 pill（2026-11-13 用户指令：
- * 计数移到菜单文字后清晰显示，fenixd dashboard OpsMenuName 行内 Badge 同款
- * 形态——16px 高 / 11px 字 / minWidth 16 / 超百 `99+` 截断）。宿主侧栏把
- * label 原样作为 14px 文字 span children 渲染（dsh-client-ui-sidebar
- * panelTitle），pill 随文字基线 inline 排布、无绝对定位裁剪面。
+ * 条目 label 元素：「运维」文字 + 红底白字计数徽标（2026-11-13 用户指令：
+ * 计数移到菜单文字后显示；2026-11-17 用户指令两连改：①缩小并成圆形——
+ * 单字计数锁正圆盒（width=height=14、padding 0、borderRadius 50%、flex none
+ * 防宿主 flex 拉伸撑宽），多字计数（10..99/99+）退短胶囊（borderRadius 9999、
+ * padding 0 4px）；②上对齐——verticalAlign text-top 把徽标顶边抬到与文字
+ * 顶边对齐（inline-flex 默认基线对齐会整体下沉，实测底边超出文字 2px）。
+ * 宿主侧栏把 label 原样作为 14px 文字 span children 渲染（dsh-client-ui-sidebar
+ * panelTitle），徽标 inline 排布、无绝对定位裁剪面。
  * count≤0/尚无成功拉取回落纯文字（零告警隐匿）。
  */
 export function opsAlertLabelElement(text: string, count: number | null): ReactElement {
   if (count === null || count <= 0) return <span>{text}</span>
+  const label = opsBadgeLabel(count)
+  const circle = label.length === 1
   return (
     <span>
       {text}
@@ -146,21 +151,24 @@ export function opsAlertLabelElement(text: string, count: number | null): ReactE
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          marginLeft: 6,
-          minWidth: 16,
-          height: 16,
-          padding: '0 5px',
-          borderRadius: 8,
+          verticalAlign: 'text-top',
+          marginLeft: 5,
+          flex: 'none',
+          minWidth: circle ? undefined : 14,
+          width: circle ? 14 : undefined,
+          height: 14,
+          padding: circle ? 0 : '0 4px',
+          borderRadius: circle ? '50%' : 9999,
           background: OPS_BADGE_RED,
           color: '#fff',
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: 600,
-          lineHeight: '16px',
+          lineHeight: '14px',
           fontVariantNumeric: 'tabular-nums',
           whiteSpace: 'nowrap',
         }}
       >
-        {opsBadgeLabel(count)}
+        {label}
       </span>
     </span>
   )
