@@ -1,0 +1,8 @@
+# fenix-dsh-rpc-guard
+# dsh web RPC 韧性护栏（同源 /api POST 响应头超时 + 幂等端点自动重试）。
+# 全部逻辑位于 client.js（浏览器半）；此处仅把本插件插入 web profile 的
+# loader 清单（对齐 fenix-dsh-auth / fenix-dsh-chat-polish 的先例形态）。
+
+- insert:
+    - id: fenix-dsh-rpc-guard
+      name: fenix-dsh-rpc-guard

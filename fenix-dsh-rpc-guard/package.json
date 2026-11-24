@@ -1,0 +1,32 @@
+{
+  "name": "fenix-dsh-rpc-guard",
+  "version": "0.1.0",
+  "description": "dsh web RPC 韧性护栏：/api/* POST 请求加响应头超时（默认 20s），超时/断连时对幂等端点自动重试；修复 onboarding「保存并继续」等按钮因响应丢失（frp 隧道断流、代理挂起、半开连接）永久 busy 冻死的问题（上游 dsh-client-connection createWebConnectionRpc 无超时保护）",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.0 <0.3"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings-general"
+      ]
+    }
+  }
+}
