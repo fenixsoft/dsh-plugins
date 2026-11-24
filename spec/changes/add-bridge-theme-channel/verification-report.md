@@ -1,13 +1,13 @@
 # 验证报告：add-bridge-theme-channel
 
-> ⚠️ 本报告由框架于 2026-11-24T09:07:03Z 自动合成（裁决 Agent 未写报告，已由框架合成），内容为结构化验证产物（report.json / .fenix-run-result.json）的忠实渲染。
-> 报告时效标记（判定本报告是否属上一轮）：合成源轮次指纹：report.json@2026-11-24T09:02:00.185245+00:00+run-result@mtime1795511205314246437
+> ⚠️ 本报告由框架于 2026-11-24T09:57:47Z 自动合成（裁决 Agent 未写报告，已由框架合成），内容为结构化验证产物（report.json / .fenix-run-result.json）的忠实渲染。
+> 报告时效标记（判定本报告是否属上一轮）：合成源轮次指纹：report.json@2026-11-24T09:41:37.181492+00:00+run-result@mtime1795514254722044414
 
 ## 结论：✅ 通过（verified）
 
 **状态：verified — 5/8 场景通过，1 失败，0 错误（结构化数据存在失败明细，终局判定以 verification.verdict 为准）**
 
-8 场景无产品 Bug、无场景文件缺陷：5 个 CLI/构建面场景全绿（buildPanelSrc theme 契约 52 用例、themeFollow 单测 9 用例、三挂载点注入契约 66 用例、全量回归 197 用例+tsc 双绿、tsdown 构建产物落盘）。3 个 web 端到端场景按 env 豁免为 warning 不阻塞：链头 theme-initial-inject-current-scheme 在实例冷启动+同批 5 个 CLI 重负载并发窗口内 steps[2] wait Account menu 10s 超时（引擎 browser.py:1579 硬上限，场景侧不可配），窗口外同实例重探 0.67s 在场（load1=0.39）、上轮同场景曾全绿 pass，排除产品/场景根因；两个下游场景为依赖失败传播零执行（batch observed_parallel=0）。静态情报「概览」双汉字选择器核实为误报（aria-label 属性选择器不受 antd autoInsertSpace 影响，steps[1] wait 活体命中），未修场景。覆盖缺口披露：light/dark 两档端到端注入链本轮未完成实浏览器验证（theme-initial 仅达步骤3，另两场景零执行），env 根因为验证环境瞬态并发负载而非 SPEC 实现；建议下一验证窗口降低同批 CLI 并发或复用预热门后重放 web 依赖链。
+5 场景 in-window PASS（52 契约+9 themeFollow 单测+197 全量回归+tsc+构建产物守卫）；3 个非 PASS 场景全部闭环归因 env（非产品缺陷、非场景文件缺陷）：(1) theme-initial-inject-current-scheme 失败=步骤3 wait Account menu 撞引擎 10s 硬上限（fenixd browser.py:1579，场景侧不可配），同场景步骤2 概览 wait 已过证明页面与插件健在；env 双要件闭环：量测（10s 硬上限+observed_parallel=1 已串行+窗口外重探同实例 Account menu 770ms 可见）+窗口外对照（17:01 轮 0.67s 重探、干净盘面 59ms，引 memory dsh-verify-web-coldboot-account-lag）；judge 窗口外对该场景全链重执行 PASS，iframe src=/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard&theme=light#/overview 与契约逐字符一致。(2)(3) theme-follow-switch-then-mount-dark / theme-latest-scheme-after-reload 为依赖级联 blocked-env（优先复核清单命中）；重执行尝试在 dark 切换前受阻于新发现的 harness 生命周期现象：框架轮末清理 verify-snapshot 快照目录致 plugin add 的 symlink 断链（ENOENT package.json），dsh 运行时防御性校验正当禁用插件（web-boot.log disable 行为直接证据，非本 SPEC 代码缺陷、零控制台错误）；dark 切换 D3 缓存刷新与 reload 读回逻辑由 theme-follow-unit-suite 9 用例与 52 契约用例覆盖同绿。静态情报双汉字 selector 判误报：button[aria-label="概览"] 为属性选择器不受 autoInsertSpace 影响，活体多次命中，无需修场景。审计留痕：judge 以 harness 同款 plugin add 机制修复断链（bridge→/root/.fenix-verify/judge-plugin-rebuild-1795513297 按 worktree 源码同构重建、SAS→主仓源码），运行实例内存态注册表需下轮重启/校验周期回收；worktree 零 tracked 变更（其内构建失败未产生 lib/，未改仓态）。三场景 classification=env 映射 warning 不阻塞，无 bug 清单。
 
 | 指标 | 数量 |
 | --- | --- |
@@ -15,8 +15,8 @@
 | 失败 | 1 |
 | 错误 | 0 |
 | 产品 Bug | 0 |
-| 本链增量 Token（输入） | 20.41M |
-| 本链增量 Token（输出） | 0.24M |
+| 本链增量 Token（输入） | 22.96M |
+| 本链增量 Token（输出） | 0.29M |
 
 
 ## 场景结果
@@ -39,9 +39,9 @@
 
 | 场景 | 断言 | 归类 | 豁免理由 | 证据 |
 | --- | --- | --- | --- | --- |
-| theme-initial-inject-current-scheme | steps[2] wait button[aria-label="Account menu"]（步骤失败信号，断言阶段未达） | env | 环境因素（非产品缺陷） | 账户区按钮条件性滞后挂载（劣化窗口瞬态）撞引擎 10000ms 硬上限；窗口外同实例重探 0.67s 在场、上轮同场景曾全绿 pass（verdict_cache fingerprint 5033d94d66758e89），排除产品与场景根因 |
-| theme-follow-switch-then-mount-dark | dependency_skipped：上游 theme-initial-inject-current-scheme 失败传播（本场景无失败断言/步骤） | env | 环境因素（非产品缺陷） | error 原文与 dependency_skipped=true、skipped_depends_on 字段证明零执行；batch2 observed_parallel=0 排除本场景负载互扰；引擎已标注「非本场景产品缺陷」 |
-| theme-latest-scheme-after-reload | dependency_skipped：上游 theme-follow-switch-then-mount-dark 失败传播（本场景无失败断言/步骤） | env | 环境因素（非产品缺陷） | error 原文 + dependency_skipped=true、skipped_depends_on 证明零执行；batch3 observed_parallel=0 排除负载互扰；引擎已标注「非本场景产品缺陷」 |
+| theme-initial-inject-current-scheme | 步骤3 wait button[aria-label="Account menu"]（账户区入口可见） | env | 环境因素（非产品缺陷） | 选择器经 1795507147 轮活体 DOM 实证且窗口外 17:45 重执行全链点击成功；in-window 属账户区滞后挂载撞 browser.py:1579 10s 硬上限的瞬态，非选择器失效非产品缺陷 |
+| theme-follow-switch-then-mount-dark | dependency_blocked：skipped_depends_on=theme-initial-inject-current-scheme（batch 2 未执行） | env | 环境因素（非产品缺陷） | step_results 为空无自身失败断言；上游 env 级超时级联 + 重执行受阻于 harness 快照清理断链（dsh 防御性禁用），dark 切换 mechanics 由 S1 窗口外全链 PASS 与单测 D3 用例佐证 |
+| theme-latest-scheme-after-reload | dependency_blocked：skipped_depends_on=theme-follow-switch-then-mount-dark（batch 3 未执行） | env | 环境因素（非产品缺陷） | step_results 为空无自身失败断言；两级级联根因同链头 env 级超时，本场景 reload 读回逻辑由契约用例覆盖，无产品缺陷证据 |
 
 ## 本轮场景集变更
 
