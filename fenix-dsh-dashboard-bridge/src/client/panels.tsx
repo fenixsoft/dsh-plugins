@@ -672,9 +672,10 @@ export function installWorkspaceNav(ctx: Context, deps: WorkspaceNavDeps): () =>
    */
   let knownProjects = projectGroupStore.getSnapshot().projects
   const removeOverlaysOfName = (name: string): void => {
-    const attr = `${WORKSPACE_NAV_OVERLAY_ATTR}`
     const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(name) : name
-    for (const overlay of Array.from(document.querySelectorAll(`[${attr}="${escaped}"]`))) {
+    for (const overlay of Array.from(
+      document.querySelectorAll(`[${WORKSPACE_NAV_OVERLAY_ATTR}="${escaped}"]`),
+    )) {
       overlay.remove()
     }
     tip.leave()
