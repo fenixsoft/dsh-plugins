@@ -9,9 +9,9 @@ dsh web 左侧栏当前单列纵向堆叠两类异质内容：全局功能导航
 - 新增 dsh web 插件 **fenix-dsh-sidebar-tabs**：零构建双半插件（client 端 DOM/CSS 注入，对齐 fenix-dsh-settings-dock 先例），不改 dsh 本体与其余插件
 - 侧栏顶部（品牌区与 New Session 按钮下方）注入「功能 / 工作区」双 tab 分段控件
 - 「功能」tab：承载现有全局导航（8 项）；「工作区」tab：承载现有 Workspaces 区整体（搜索框、高级搜索入口、View options、Add workspace、会话树）
-- 切换实现为**容器可见性切换**（非 DOM 搬移）：两个区块保持官方 React 渲染的原生 DOM 位置与各自独立滚动位置
+- 切换实现为**容器/导航项可见性切换 + 根 flex 列 order 重排**（非 DOM 搬移）：两个区块保持官方 React 渲染的原生 DOM 位置与各自独立滚动位置
 - tab 选择持久化（localStorage，记住上次选择）；无记忆时默认「工作区」
-- New Session 按钮与底部 Account 菜单位置不变，两种 tab 状态下常显
+- New Session 按钮与底部 Account 菜单位置不变，两种 tab 状态下常显；全局导航末项「更多」两态常显并钉在侧栏列底、Account 区上方同一位置（2026-11-24 用户验收反馈）
 - 侧栏收起态（56px 窄轨）行为不变：tab 栏不渲染，窄轨维持现状；展开后恢复记忆 tab
 - 锚点失配（dsh 升级结构漂移）时零注入退出，零副作用；`enabled=false` 零动作停用
 
@@ -19,7 +19,7 @@ dsh web 左侧栏当前单列纵向堆叠两类异质内容：全局功能导航
 
 ### New Capabilities
 
-- `sidebar-tabs`: 侧栏顶部功能/工作区双 tab 切换——tab 栏注入、分区可见性切换与独立滚动、选择记忆与缺省 tab、常显元素保障、收起态行为、锚失配回退与停用语义
+- `sidebar-tabs`: 侧栏顶部功能/工作区双 tab 切换——tab 栏注入、分区可见性切换与独立滚动、「更多」钉底常显、选择记忆与缺省 tab、常显元素保障、收起态行为、锚失配回退与停用语义
 
 ### Modified Capabilities
 

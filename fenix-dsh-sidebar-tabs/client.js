@@ -15,14 +15,19 @@
  *     div.<hash>_footArea                 ← 底部（footerActions + Account/设置区）
  *
  * 行为（对齐 SPEC specs/sidebar-tabs）：
- *   - 切换 = 容器 display 级可见性切换，MUST NOT reparent（官方 React 管理子树，
- *     搬移与 reconciliation 冲突）；两容器保持各自独立滚动位置与官方更新能力；
+ *   - 切换 = flex order 重排 + display 级可见性切换，MUST NOT reparent（官方 React
+ *     管理子树，搬移与 reconciliation 冲突）；两容器保持各自独立滚动位置与官方更新能力；
+ *   - 「更多」钉底常显：全局导航末项（更多）在两 tab 下均钉在侧栏列底、footArea
+ *     （Account）上方——root flex column 内联 order（region=1/nav=2/foot=3），
+ *     功能 tab nav flex:1 拉伸、末项 margin-top:auto；工作区 tab nav 仅显末项
+ *     （前 n-1 项 display:none，nav 不再整体隐藏）；窄轨/teardown 全部 inline 复原；
  *   - 选择记忆：localStorage 键 fenix-dsh-sidebar-tabs.tab（'func'|'workspace'），
  *     缺失/非法值缺省 'workspace'；写入失败（存储禁用）不抛错、退化为会话内记忆；
  *   - 收起窄轨（root 带 collapsed 类）：tab 栏 display:none 不渲染、两容器恢复
- *     官方现状可见性；展开后恢复记忆 tab；
- *   - 常显：新会话按钮（controls）与 Account/footArea 均不在 display 切换目标内，
- *     两 tab 态天然常显、行为不变；
+ *     官方现状可见性、钉底 inline 清除；展开后恢复记忆 tab；
+ *   - 常显：新会话按钮（controls）与 Account/footArea 不在 display 切换目标内，
+ *     两 tab 态天然常显、行为不变；footArea 仅作钉底参照软锚点（缺席只降级钉底，
+ *     不触发失配回退）；
  *   - 自愈：MutationObserver（结构子树 + root class）监听官方重渲染/收起切换，
  *     重贴 display 状态与 tab 栏在位（对齐 fenix-dsh-session-advanced-search
  *     持续维护模式；失配后恢复命中则自动重注入）；
@@ -30,11 +35,11 @@
  *     官方元素、零异常；warn 含失配锚点名且按锚点名限流（同锚一次、命中恢复复位），
  *     侧栏列未挂载（启动中）走 15s 静默宽限期，健康路径启动零告警噪声。
  *
- * 主题：颜色全部引用官方 token —— 轨道/活动块/文字/指示条随暗（body[data-ds-dark-theme]）
+ * 主题：颜色全部引用官方 token —— 轨道/活动块/文字随暗（body[data-ds-dark-theme]）
  * 浅主题自适应（原型 specs/add-sidebar-tabs-plugin/prototype 仅视觉参照）：
- *   轨道 浅 bluish-150 / 暗 bluish-850；活动块 --dsw-specific-sidebar-nav-item-active
- *   （浅 bluish-100 / 暗 bluish-750，官方导航项活动态同源）；文字 --dsw-alias-label-*；
- *   指示条 浅 deepseek-500 / 暗 deepseek-400。
+ *   轨道 浅 bluish-150 / 暗 bluish-850；活动块背景 = 轨道上的增白区分块（2026-11-24
+ *   用户反馈：去底部指示条、选中背景增白）——浅 bluish-00（白）/ 暗 bluish-700；
+ *   文字 --dsw-alias-label-*。
  */
 (function () {
 	'use strict'
@@ -57,20 +62,23 @@
 				nav: 'nav[class*="panelList"]',
 				/* Workspaces 区容器：sidebar.workspaces 槽位挂载壳 */
 				workspaces: '[class*="regionArea"]',
+				/* 底部区（footerActions + Account）：仅作「更多」钉底的参照软锚点，
+				 * 不入 firstMissingAnchor 硬校验——footArea 缺席只降级钉底，不放弃整个插件 */
+				foot: '[class*="footArea"]',
 			}
 
 			var TABS_CSS = [
-				/* 分段控件轨道：原型分段控件（深色轨道 + 活动态圆角块 + 底部品牌色指示条），
-				 * 高 30px tab、栏含 3px 内边距、左右 12px 边距；token 随官方暗/浅主题自适应 */
-				'.fdx-sbt-bar { --fdx-sbt-track: var(--dsw-static-neutral-bluish-150); --fdx-sbt-accent: var(--dsw-static-deepseek-500); margin: 0 12px 8px; flex: none; background: var(--fdx-sbt-track); border-radius: 8px; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }',
-				'body[data-ds-dark-theme] .fdx-sbt-bar { --fdx-sbt-track: var(--dsw-static-neutral-bluish-850); --fdx-sbt-accent: var(--dsw-static-deepseek-400); }',
+				/* 分段控件轨道：原型分段控件（深色轨道 + 增白活动块，无指示条——
+				 * 2026-11-24 用户反馈调整），高 30px tab、栏含 3px 内边距、左右 12px 边距；
+				 * token 随官方暗/浅主题自适应 */
+				'.fdx-sbt-bar { --fdx-sbt-track: var(--dsw-static-neutral-bluish-150); --fdx-sbt-active-bg: var(--dsw-static-neutral-bluish-00); margin: 0 12px 8px; flex: none; background: var(--fdx-sbt-track); border-radius: 8px; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }',
+				'body[data-ds-dark-theme] .fdx-sbt-bar { --fdx-sbt-track: var(--dsw-static-neutral-bluish-850); --fdx-sbt-active-bg: var(--dsw-static-neutral-bluish-700); }',
 				/* 收起窄轨：tab 栏不渲染（窄轨内容与官方现状一致） */
 				'.fdx-sbt-bar[data-rail="true"] { display: none; }',
 				'.fdx-sbt-tab { all: unset; box-sizing: border-box; position: relative; height: 30px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--dsw-alias-label-secondary); font-size: 13px; font-weight: 500; font-family: inherit; cursor: pointer; }',
 				'.fdx-sbt-tab:hover { color: var(--dsw-alias-label-primary); }',
 				'.fdx-sbt-tab:focus-visible { outline: 2px solid var(--dsw-static-deepseek-400); outline-offset: -2px; }',
-				'.fdx-sbt-tab[aria-selected="true"] { background: var(--dsw-specific-sidebar-nav-item-active); color: var(--dsw-alias-label-primary); }',
-				'.fdx-sbt-tab[aria-selected="true"]::after { content: ""; position: absolute; left: 22%; right: 22%; bottom: 0; height: 2px; border-radius: 2px; background: var(--fdx-sbt-accent); }',
+				'.fdx-sbt-tab[aria-selected="true"] { background: var(--fdx-sbt-active-bg); color: var(--dsw-alias-label-primary); }',
 				'.fdx-sbt-tab svg { flex: none; opacity: .85; }',
 			].join('\n')
 
@@ -133,6 +141,57 @@
 						}
 					}
 
+					/* 「更多」钉底常显（2026-11-24 用户验收反馈：菜单栏最下方的「更多」
+					 * 菜单应一直保持在屏幕最底部）。全部经 flex order 重排实现——root 官方
+					 * 即 flex column，DOM 顺序不动、零 reparent、无 absolute/pointer hack：
+					 *   视觉序 = controls(0), tab栏(0), region(1), nav(2), foot(3)；
+					 *   功能 tab：nav 拉伸填满（flex 1 1 0）+ 末项 margin-top:auto，
+					 *     前 7 项顶部聚簇、「更多」钉在列底 foot 上方（region 隐藏导致
+					 *     foot 上浮的连带缺陷同批修复——nav 拉伸即补位撑住 foot）；
+					 *   工作区 tab：nav 复原 flex 0 0 auto，前 n-1 项 display:none，
+					 *     仅「更多」留在流内贴 foot 上方（nav 不再整体隐藏）；
+					 *   「更多」定位 = nav 最后一个子元素（位置语义：官方增删导航项自动跟随，
+					 *     不做文案匹配，i18n 免疫）。
+					 * inline style 变更是 attribute 变更，不触发 childList treeObserver，
+					 * 无反馈环；syncState 每轮自愈重贴，幂等。 */
+					function applyPinning(root, nav, ws, func) {
+						var foot = root ? root.querySelector(SEL.foot) : null
+						nav.style.setProperty('order', '2')
+						if (ws) ws.style.setProperty('order', '1')
+						if (foot) foot.style.setProperty('order', '3')
+						var kids = nav.children
+						var more = kids.length > 0 ? kids[kids.length - 1] : null
+						for (var i = 0; i < kids.length; i++) {
+							if (func) {
+								kids[i].style.removeProperty('display')
+							} else if (i < kids.length - 1) {
+								kids[i].style.setProperty('display', 'none')
+							}
+						}
+						if (func) {
+							nav.style.setProperty('flex', '1 1 0')
+							if (more) more.style.setProperty('margin-top', 'auto')
+						} else {
+							nav.style.setProperty('flex', '0 0 auto')
+							if (more) more.style.removeProperty('margin-top')
+						}
+					}
+
+					/* 清除全部钉底 inline（窄轨复原官方原生形态；teardown 同源） */
+					function clearPinning(root, nav, ws) {
+						if (nav) {
+							nav.style.removeProperty('order')
+							nav.style.removeProperty('flex')
+							for (var i = 0; i < nav.children.length; i++) {
+								nav.children[i].style.removeProperty('display')
+								nav.children[i].style.removeProperty('margin-top')
+							}
+						}
+						if (ws) ws.style.removeProperty('order')
+						var foot = root ? root.querySelector(SEL.foot) : null
+						if (foot) foot.style.removeProperty('order')
+					}
+
 					/* 按 D5 失配语义回退：移除 tab 栏、清掉全部本插件对官方元素的可见性改写 */
 					function teardownDom() {
 						if (tabbar && tabbar.parentNode) tabbar.remove()
@@ -140,6 +199,7 @@
 						if (col) {
 							var nav = col.querySelector(SEL.nav)
 							var ws = col.querySelector(SEL.workspaces)
+							clearPinning(nav ? nav.parentElement : null, nav, ws)
 							if (nav) nav.style.removeProperty('display')
 							if (ws) ws.style.removeProperty('display')
 						}
@@ -231,12 +291,16 @@
 							}
 						}
 						if (rail) {
-							/* 窄轨：两容器恢复官方现状可见性（tab 切换语义只在展开形态生效） */
+							/* 窄轨：两容器恢复官方现状可见性、钉底 inline 全清
+							 * （tab 切换与钉底语义只在展开形态生效） */
 							setDisplay(anchors.nav, true)
 							setDisplay(anchors.workspaces, true)
+							clearPinning(anchors.root, anchors.nav, anchors.workspaces)
 						} else {
-							setDisplay(anchors.nav, state === TAB_FUNC)
-							setDisplay(anchors.workspaces, state === TAB_WORKSPACE)
+							/* nav 双 tab 常显（「更多」钉底要求），分区语义由子元素可见性表达 */
+							setDisplay(anchors.nav, true)
+							setDisplay(anchors.workspaces, state !== TAB_FUNC)
+							applyPinning(anchors.root, anchors.nav, anchors.workspaces, state === TAB_FUNC)
 						}
 					}
 

@@ -24,12 +24,12 @@
 
 ### Requirement: 分区可见性切换
 
-点击「工作区」tab SHALL 使全局导航容器不可见、Workspaces 区（会话搜索框、高级搜索入口、View options、Add workspace、会话树）可见；点击「功能」tab SHALL 反向切换。切换 SHALL 以容器可见性（display 级）实现，MUST NOT 搬移（reparent）任何官方 DOM 节点；切换 MUST NOT 改变两区块内部的官方交互行为。两个区块 SHALL 各自保持独立的纵向滚动，切换 tab 不重置未显示区块的滚动位置。当前活动 tab SHALL 有明确的视觉活动态（对齐批准原型 specs/add-sidebar-tabs-plugin/prototype/index.html 的分段控件样式，主题色随官方暗/浅主题变量自适应）。
+点击「工作区」tab SHALL 使全局导航除末项「更多」外的导航项不可见、Workspaces 区（会话搜索框、高级搜索入口、View options、Add workspace、会话树）可见；点击「功能」tab SHALL 使 Workspaces 区隐藏、全局导航全部 8 项可见。切换 SHALL 以 display 级可见性 + 侧栏根 flex 容器内的内联 order 重排实现，MUST NOT 搬移（reparent）任何官方 DOM 节点；切换 MUST NOT 改变各区块内部的官方交互行为。两个区块 SHALL 各自保持独立的纵向滚动，切换 tab 不重置未显示区块的滚动位置。当前活动 tab SHALL 有明确的视觉活动态（对齐批准原型 specs/add-sidebar-tabs-plugin/prototype/index.html 的分段控件样式，主题色随官方暗/浅主题变量自适应）。
 
 #### Scenario: 切到工作区
 
 - **WHEN** 用户点击「工作区」tab
-- **THEN** 全局导航隐藏、Workspaces 区完整可见且可交互
+- **THEN** 全局导航除「更多」外的导航项隐藏、Workspaces 区完整可见且可交互
 - **AND** 滚动位置不因切换被重置
 
 #### Scenario: 切到功能
@@ -60,11 +60,25 @@
 
 「新会话」按钮与底部 Account 菜单 SHALL 在两种 tab 状态下保持常显，位置与行为不变；全局导航与 Workspaces 区之间的分区切换 MUST NOT 影响它们的可见性。Workspaces 区内的既有官方功能（含高级搜索入口）在「工作区」tab 下 SHALL 全部可用。
 
+全局导航末项「更多」SHALL 在两种 tab 状态下常显，且始终钉在侧栏列底、footArea（Account 区）上方，两个 tab 态下位置一致（2026-11-24 用户验收反馈）；钉底 SHALL 以 flex order/margin 内联样式实现，MUST NOT 搬移「更多」节点。「更多」的定位 SHALL 取导航容器末位子元素（位置语义），官方导航项增删时自动跟随，MUST NOT 依赖文案匹配。收起窄轨 SHALL 清除全部钉底内联样式、恢复官方原生形态，展开后重新钉底。
+
 #### Scenario: 常显保障
 
 - **WHEN** 用户在功能/工作区两个 tab 之间任意切换
 - **THEN** 新会话按钮与 Account 菜单始终可见、可点
 - **AND** 高级搜索等 Workspaces 区既有功能在工作区 tab 下正常可用
+
+#### Scenario: 「更多」钉底常显
+
+- **WHEN** 用户在功能/工作区两个 tab 之间任意切换或收起再展开侧栏
+- **THEN** 全局导航末项「更多」始终可见，且两 tab 态下均钉在侧栏列底、Account 区上方同一位置
+- **AND** 功能 tab 下导航前 7 项顶部聚簇，「更多」与 Account 区间距不超过一个导航项高度
+
+#### Scenario: 窄轨不钉底
+
+- **WHEN** 用户收起侧栏进入窄轨形态
+- **THEN** 导航 8 项全部恢复官方原生排列，无钉底内联样式残留
+- **AND** 重新展开侧栏后「更多」恢复钉底、记忆 tab 恢复活动态
 
 ### Requirement: 失配回退与停用语义
 
