@@ -922,13 +922,19 @@
 			 * data-shortcut-modal="settings"，全安装包唯一）。本功能把 overlay 几何
 			 * 内联改写为内容区矩形——不 reparent、不碰 React 树，纯内联样式覆盖官方
 			 * 类样式：overlay: position:fixed + top/left/width/height=rect（right/bottom
-			 * 置 auto 抵消官方 inset:0 的过约束）；panel: 100%×100%、去圆角/阴影；
-			 * mask: display:none（点击遮罩关闭退场；关闭走面板右上角关闭钮与 Esc）。
-			 * ResizeObserver 跟随内容区尺寸（侧栏折叠/窗口缩放）重算矩形；面板卸载/
-			 * 开关关闭/dispose 清内联恢复官方模态。 */
+			 * 置 auto 抵消官方 inset:0 的过约束）；panel: 100%×100%、去圆角/阴影，
+			 * 且 position 置 static 内联认领——内联是唯一稳压样式表的层叠来源，
+			 * 不认领 position 时任何针对面板的样式表 fixed 定位（实证：共存插件
+			 * fenix-dsh-settings-dock 的 `position:fixed; left:侧栏宽`，2026-11-24
+			 * 真机返工：面板 left=280px + 内联 width:100%vw 过约束 → 右缘出屏
+			 * 280px）都会把面板拽出 overlay 文档流，嵌入几何整体失效；static 下面板
+			 * 回归 overlay 常规流内子元素，left/top/right/bottom 对 static 不生效，
+			 * 无需逐项抵消；mask: display:none（点击遮罩关闭退场；关闭走面板右上角
+			 * 关闭钮与 Esc）。ResizeObserver 跟随内容区尺寸（侧栏折叠/窗口缩放）
+			 * 重算矩形；面板卸载/开关关闭/dispose 清内联恢复官方模态。 */
 			var embedState = { overlay: null, panel: null, mask: null, anchor: null, ro: null, roAnchor: null }
 			var EMBED_OVERLAY_PROPS = ['position', 'top', 'left', 'right', 'bottom', 'width', 'height']
-			var EMBED_PANEL_PROPS = ['width', 'height', 'maxWidth', 'borderRadius', 'boxShadow']
+			var EMBED_PANEL_PROPS = ['position', 'width', 'height', 'maxWidth', 'borderRadius', 'boxShadow']
 
 			function clearInline(el, props) {
 				for (var i = 0; i < props.length; i++) el.style.removeProperty(camelToKebab(props[i]))
@@ -972,6 +978,7 @@
 				os.width = rect.width + 'px'
 				os.height = rect.height + 'px'
 				var ps = panel.style
+				ps.position = 'static'
 				ps.width = '100%'
 				ps.height = '100%'
 				ps.maxWidth = 'none'

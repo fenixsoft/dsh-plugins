@@ -680,8 +680,26 @@ test('settings-embed: panel mount adopts overlay inline geometry over the conten
 	assert.equal(world.panel.style.maxWidth, 'none')
 	assert.equal(world.panel.style.borderRadius, '0')
 	assert.equal(world.panel.style.boxShadow, 'none')
+	assert.equal(world.panel.style.position, 'static',
+		'panel inline-owns position: escapes stylesheet fixed-positioning (settings-dock coexistence, 2026-11-24 真机返工)')
 	assert.equal(world.mask.style.display, 'none', 'backdrop mask hidden')
 	assert.equal(env.warns.length, 0, 'no activation stage warnings with intact anchors')
+})
+
+test('settings-embed: RO re-sync re-owns panel position against external inline writers', () => {
+	const world = buildEmbedWorld()
+	const env = loadClient({ documentOverrides: world.fakeDocument })
+	const mo = bodyObserver(env, world)
+	world.panelOpen = true
+	mo.cb([{ target: world.body }])
+	assert.equal(world.panel.style.position, 'static')
+	/* 模拟第三方对 panel position 的改写（样式表规则无法单测，内联改写是
+	 * 最强干扰形态；applyEmbedGeometry 全量重写面板内联集应自愈复位） */
+	world.panel.style.position = 'fixed'
+	const ro = env.observers.find((o) => o !== mo && o.connected && o.target === world.anchor)
+	assert.ok(ro, 'ResizeObserver follows the content anchor')
+	ro.cb([])
+	assert.equal(world.panel.style.position, 'static', 're-sync restores inline position ownership')
 })
 
 test('settings-embed: ResizeObserver re-syncs geometry when the content area resizes', () => {
@@ -710,6 +728,7 @@ test('settings-embed: closing the panel restores the official modal styles', () 
 	assert.equal(world.overlay.style.position, undefined)
 	assert.equal(world.overlay.style.width, undefined)
 	assert.equal(world.panel.style.width, undefined)
+	assert.equal(world.panel.style.position, undefined, 'panel position ownership released on close')
 	assert.equal(world.mask.style.display, undefined)
 })
 
@@ -722,6 +741,7 @@ test('settings-embed: turning the toggle off while open restores the official mo
 	assert.equal(world.panel.style.width, '100%')
 	setEmbedToggle(env, false)
 	assert.equal(world.overlay.style.position, undefined, 'restored via store subscription')
+	assert.equal(world.panel.style.position, undefined, 'panel position ownership released on toggle off')
 	assert.deepEqual(JSON.parse(env.store.dump()[STORAGE_KEY]), { 'settings-embed': false }, 'persisted off')
 })
 
