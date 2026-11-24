@@ -1,14 +1,19 @@
 /**
  * fenix-dsh-chat-polish — Client 半单测（node:test，零外部依赖）。
  *
- * 覆盖 0.3.0 开关化改造的测试面：
- *  - 全开态注入串与 v0.2.2 基线等效（规则集合逐字一致，tasks 1.1 字面验收）；
+ * 覆盖 0.3.0 开关化改造与 0.3.x 调整的测试面：
+ *  - 全开态注入串与预期基线等效（规则集合逐字一致；2026-11-24 起 4 条 composer
+ *    规则为锚定修复后的形态，见 baseline 头注）；
  *  - 开关 store：默认全开、set 切换样式即时重建、只记录关闭项、键清空回退
  *    removeItem、损坏/未知键容错按开启、写失败降级 console.warn 一次 + 会话内
  *    生效、subscribe 通知、先改样式后通知、dispose 摘除样式标签；
  *  - 分块正确性：whitespace/scrollbar/composer-width/hero-row/markdown 各块
  *    规则归属（关闭任一块后其特征规则从注入串消失、其余块保留）；
- *  - history-nav 无 CSS：关闭不影响注入串。
+ *  - history-nav 无 CSS：关闭不影响注入串；
+ *  - 设置分区：label「Fenix 插件设置」、5 个功能行（scrollbar/hero-row 两行
+ *    已移除、settings-embed 新增）、开关点击写 store 即时生效；
+ *  - 嵌入设置页面（settings-embed）：面板挂载经 MO 同步内联几何、开关关闭/
+ *    面板卸载/锚点缺席还原官方模态、dispose 断开观察器。
  *
  * 运行：`node --test fenix-dsh-chat-polish/tests/`
  */
@@ -78,10 +83,12 @@ function fakeStorage(initial) {
 	}
 }
 
-/** 装载 client.js 模块并 apply，返回 {styleTag, registered, listeners, dispose, warns} */
-function loadClient({ storage, initialEntries } = {}) {
+/** 装载 client.js 模块并 apply，返回 {styleTag, registered, listeners, observers, dispose, warns}。
+ * documentOverrides：按测试合并进 fakeDocument（如 embed 测试的 querySelector 桩）。 */
+function loadClient({ storage, initialEntries, documentOverrides } = {}) {
 	const store = storage || fakeStorage()
 	const warns = []
+	const observers = []
 	const originalWarn = console.warn
 	console.warn = function (...args) { warns.push(args.join(' ')) }
 	try {
@@ -102,6 +109,10 @@ function loadClient({ storage, initialEntries } = {}) {
 				const idx = list.indexOf(fn)
 				if (idx >= 0) list.splice(idx, 1)
 			},
+			/* embed 控制器的 DOM 查询桩：默认查无（面板未挂载），测试可整体覆盖 */
+			body: { tag: 'body', style: { removeProperty(k) { delete this[k] } } },
+			querySelector() { return null },
+			...documentOverrides,
 		}
 		const windowMock = {
 			localStorage: store,
@@ -111,11 +122,21 @@ function loadClient({ storage, initialEntries } = {}) {
 		windowMock.window = windowMock
 		let loaded = null
 		windowMock.__ModuleLoader__ = { load(def) { loaded = def } }
-		new Function('window', 'document', 'require', clientCode)(windowMock, fakeDocument, function (name) {
-			if (name === 'react') return react
-			if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitives
-			throw new Error('unexpected require: ' + name)
-		})
+		/* MutationObserver/ResizeObserver 以形参注入（遮蔽 Node 缺失的全局，
+		 * 实例登记进 observers 供测试手动触发回调/断言 disconnect） */
+		class FakeObserver {
+			constructor(cb) { this.cb = cb; this.connected = false; observers.push(this) }
+			observe(target, options) { this.target = target; this.options = options; this.connected = true }
+			disconnect() { this.connected = false; this.target = null }
+		}
+		new Function('window', 'document', 'require', 'MutationObserver', 'ResizeObserver', clientCode)(
+			windowMock, fakeDocument, function (name) {
+				if (name === 'react') return react
+				if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitives
+				throw new Error('unexpected require: ' + name)
+			},
+			FakeObserver, FakeObserver,
+		)
 		assert.ok(loaded, '__ModuleLoader__.load must be invoked')
 		const registered = []
 		const ctx = {
@@ -139,6 +160,7 @@ function loadClient({ storage, initialEntries } = {}) {
 			styleTags,
 			registered,
 			listeners,
+			observers,
 			warns,
 			store,
 			dispose,
@@ -149,12 +171,17 @@ function loadClient({ storage, initialEntries } = {}) {
 }
 
 function rules(cssText) {
-	return cssText.split('\n').filter((line) => line.trim() !== '')
+	/* 剥离块注释后按非空行计（基线文件允许注释头；规则一行一条） */
+	return cssText
+		.replace(/\/\*[\s\S]*?\*\//g, '')
+		.split('\n')
+		.map((line) => line.trim())
+		.filter((line) => line !== '')
 }
 
 /* ── 全开态与 v0.2.2 基线等效 ── */
 
-test('all-on injected css is rule-for-rule identical to the v0.2.2 baseline', () => {
+test('all-on injected css is rule-for-rule identical to the expected baseline', () => {
 	const env = loadClient()
 	const injected = rules(env.styleTag.textContent)
 	const base = rules(baselineCss)
@@ -437,7 +464,7 @@ test('settings.section and settings.section.icon are registered with trailing or
 	assert.equal(section.spec.order, 16, 'trailing probe: max known order 15 + 1')
 	/* label 是函数（宿主按需调用取文案） */
 	assert.equal(typeof section.spec.label, 'function')
-	assert.equal(section.spec.label(), '对话区打磨')
+	assert.equal(section.spec.label(), 'Fenix 插件设置')
 	/* 探测失败（entries 抛异常/畸形）回退 FALLBACK_MAX_ORDER+1 */
 	const env2 = loadClient({
 		initialEntries: {
@@ -448,7 +475,7 @@ test('settings.section and settings.section.icon are registered with trailing or
 	assert.equal(section2.spec.order, 16, 'fallback order when probe yields nothing usable')
 })
 
-test('polish section renders 6 feature rows with switches, all on by default', () => {
+test('polish section renders 5 feature rows with switches, all on by default', () => {
 	const env = loadClient()
 	const section = env.registered.find((r) => r.spec && r.spec.name === 'settings.section')
 	const Section = section.component
@@ -461,10 +488,10 @@ test('polish section renders 6 feature rows with switches, all on by default', (
 	})
 	assert.deepEqual(
 		[...rows].sort(),
-		['composer-width', 'hero-row', 'history-nav', 'markdown', 'scrollbar', 'whitespace'].sort(),
-		'exactly 6 feature rows, one per feature id',
+		['composer-width', 'history-nav', 'markdown', 'settings-embed', 'whitespace'].sort(),
+		'exactly 5 feature rows: scrollbar/hero-row removed, settings-embed added',
 	)
-	assert.equal(switches.length, 6, 'one switch control per row')
+	assert.equal(switches.length, 5, 'one switch control per row')
 	for (const sw of switches) {
 		assert.equal(sw.props.checked, true, `switch for ${sw.props.label} defaults to on`)
 		assert.equal(typeof sw.props.onChange, 'function')
@@ -494,7 +521,7 @@ test('clicking a switch writes the store and the next render reflects the new st
 	walk(secondTree, (el) => {
 		if (el.type && el.type.name === 'Switch' && el.props.label !== '用户消息 Markdown 渲染') others.push(el.props.checked)
 	})
-	assert.deepEqual(others, [true, true, true, true, true], 'other 5 switches stay on')
+	assert.deepEqual(others, [true, true, true, true], 'other 4 switches stay on')
 	/* 持久化只记录关闭项 */
 	assert.deepEqual(JSON.parse(env.store.dump()[STORAGE_KEY]), { markdown: false })
 	/* 再开回：键清除（全开后 removeItem 由 store 内部处理） */
@@ -549,8 +576,202 @@ test('fallback switch is used when host Switch export drifts away', () => {
 	walk(tree, (el) => {
 		if (el.type && el.type.name === 'FallbackSwitch') toggles.push(el)
 	})
-	assert.equal(toggles.length, 6, 'fallback switch renders for all 6 rows when host Switch is gone')
+	assert.equal(toggles.length, 5, 'fallback switch renders for all 5 rows when host Switch is gone')
 	assert.equal(toggles[0].props.checked, true, 'fallback switch reflects default-on state')
+})
+
+/* ── composer 宽度锚定修复（2026-11-24 发送态失配回归）── */
+
+test('composer width rules anchor stable attributes instead of runtime contenteditable state', () => {
+	const env = loadClient()
+	const css = env.styleTag.textContent
+	assert.ok(css.includes('[data-composer-card]{width:80%;max-width:none}'), 'card anchors data-composer-card')
+	assert.ok(css.includes('[class*="_root"]:has([data-composer-input]) [class$="_notice"]'), 'notice anchors data-composer-input')
+	assert.ok(css.includes('[class*="_root"]:has([data-composer-input]) [class$="_dock"]'), 'dock anchors data-composer-input')
+	assert.ok(css.includes('[class*="_root"]:has([data-composer-input]){padding-left:24px'), 'root padding anchors data-composer-input')
+	assert.ok(!css.includes('contenteditable="true"'), 'runtime-variant anchor fully removed')
+})
+
+/* ── 嵌入设置页面（settings-embed）── */
+
+function fakeEmbedEl(tag) {
+	return {
+		tag,
+		style: { removeProperty(k) { delete this[k] } },
+		dataset: {},
+		parentNode: null,
+		parentElement: null,
+		children: [],
+		firstElementChild: null,
+		isConnected: true,
+		closest() { return null },
+		getBoundingClientRect() { return { top: 0, left: 0, width: 0, height: 0 } },
+	}
+}
+
+/* 官方设置面板 DOM 复刻：overlay > [mask, panel[data-shortcut-modal=settings]]，
+ * 内容区锚 [data-conversation-content] closest [class$="_centerCol"] */
+function buildEmbedWorld() {
+	const overlay = fakeEmbedEl('overlay')
+	const mask = fakeEmbedEl('mask')
+	const panel = fakeEmbedEl('panel')
+	overlay.children = [mask, panel]
+	overlay.firstElementChild = mask
+	mask.parentElement = overlay
+	panel.parentElement = overlay
+	const anchor = fakeEmbedEl('centerCol')
+	const RECT = { top: 64, left: 260, width: 1024, height: 700 }
+	anchor.getBoundingClientRect = () => ({ ...RECT })
+	const content = fakeEmbedEl('conversationContent')
+	content.closest = (sel) => (sel === '[class$="_centerCol"]' ? anchor : null)
+	const body = fakeEmbedEl('body')
+	const world = { overlay, mask, panel, anchor, content, body, RECT, panelOpen: false, contentMounted: true }
+	/* 仅覆盖 body 与 querySelector；createElement/head 等沿用 loadClient 的桩，
+	 * 保证样式标签照常注入并被捕获 */
+	world.fakeDocument = {
+		body,
+		querySelector(sel) {
+			if (sel === '[data-shortcut-modal="settings"]') return world.panelOpen ? panel : null
+			if (sel === '[data-conversation-content]') return world.contentMounted ? content : null
+			return null
+		},
+	}
+	return world
+}
+
+function bodyObserver(env, world) {
+	const mo = env.observers.find((o) => o.connected && o.target === world.body)
+	assert.ok(mo, 'body MutationObserver connected on activation')
+	return mo
+}
+
+/* 走真实 UI 路径切换 settings-embed：渲染设置分区、定位该行开关容器
+ * span[data-fdx-polish-switch] 下的 Switch、调用 onChange（等价用户点击） */
+function setEmbedToggle(env, next) {
+	const section = env.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	const tree = section.component()
+	let holder = null
+	walk(tree, (el) => {
+		if (el.props && el.props['data-fdx-polish-switch'] === 'settings-embed') holder = el
+	})
+	assert.ok(holder, 'settings-embed switch holder rendered')
+	const sw = (holder.children || []).find((c) => c && c.type && c.type.name === 'Switch') ||
+		(holder.children || [])[0]
+	assert.ok(sw && typeof sw.props.onChange === 'function', 'switch control present')
+	sw.props.onChange(next)
+}
+
+test('settings-embed: panel mount adopts overlay inline geometry over the content area', () => {
+	const world = buildEmbedWorld()
+	const env = loadClient({ documentOverrides: world.fakeDocument })
+	const mo = bodyObserver(env, world)
+	world.panelOpen = true
+	mo.cb([{ target: world.body }])
+	const os = world.overlay.style
+	assert.equal(os.position, 'fixed')
+	assert.equal(os.top, world.RECT.top + 'px')
+	assert.equal(os.left, world.RECT.left + 'px')
+	assert.equal(os.width, world.RECT.width + 'px')
+	assert.equal(os.height, world.RECT.height + 'px')
+	assert.equal(os.right, 'auto', 'official inset:0 over-constraint cancelled')
+	assert.equal(os.bottom, 'auto')
+	assert.equal(world.panel.style.width, '100%')
+	assert.equal(world.panel.style.height, '100%')
+	assert.equal(world.panel.style.maxWidth, 'none')
+	assert.equal(world.panel.style.borderRadius, '0')
+	assert.equal(world.panel.style.boxShadow, 'none')
+	assert.equal(world.mask.style.display, 'none', 'backdrop mask hidden')
+	assert.equal(env.warns.length, 0, 'no activation stage warnings with intact anchors')
+})
+
+test('settings-embed: ResizeObserver re-syncs geometry when the content area resizes', () => {
+	const world = buildEmbedWorld()
+	const env = loadClient({ documentOverrides: world.fakeDocument })
+	const mo = bodyObserver(env, world)
+	world.panelOpen = true
+	mo.cb([{ target: world.body }])
+	const ro = env.observers.find((o) => o !== mo && o.connected && o.target === world.anchor)
+	assert.ok(ro, 'ResizeObserver follows the content anchor')
+	world.anchor.getBoundingClientRect = () => ({ top: 0, left: 200, width: 800, height: 600 })
+	ro.cb([])
+	assert.equal(world.overlay.style.left, '200px')
+	assert.equal(world.overlay.style.width, '800px')
+})
+
+test('settings-embed: closing the panel restores the official modal styles', () => {
+	const world = buildEmbedWorld()
+	const env = loadClient({ documentOverrides: world.fakeDocument })
+	const mo = bodyObserver(env, world)
+	world.panelOpen = true
+	mo.cb([{ target: world.body }])
+	assert.equal(world.panel.style.width, '100%')
+	world.panelOpen = false
+	mo.cb([{ target: world.body }])
+	assert.equal(world.overlay.style.position, undefined)
+	assert.equal(world.overlay.style.width, undefined)
+	assert.equal(world.panel.style.width, undefined)
+	assert.equal(world.mask.style.display, undefined)
+})
+
+test('settings-embed: turning the toggle off while open restores the official modal immediately', () => {
+	const world = buildEmbedWorld()
+	const env = loadClient({ documentOverrides: world.fakeDocument })
+	const mo = bodyObserver(env, world)
+	world.panelOpen = true
+	mo.cb([{ target: world.body }])
+	assert.equal(world.panel.style.width, '100%')
+	setEmbedToggle(env, false)
+	assert.equal(world.overlay.style.position, undefined, 'restored via store subscription')
+	assert.deepEqual(JSON.parse(env.store.dump()[STORAGE_KEY]), { 'settings-embed': false }, 'persisted off')
+})
+
+test('settings-embed: missing content anchor keeps the official modal (safe degrade)', () => {
+	const world = buildEmbedWorld()
+	world.contentMounted = false
+	const env = loadClient({ documentOverrides: world.fakeDocument })
+	const mo = bodyObserver(env, world)
+	world.panelOpen = true
+	mo.cb([{ target: world.body }])
+	assert.equal(world.overlay.style.position, undefined, 'no inline geometry without anchor')
+	assert.equal(world.mask.style.display, undefined)
+})
+
+test('settings-embed: without a shell frame the conversation root itself becomes the anchor', () => {
+	const world = buildEmbedWorld()
+	world.content.closest = () => null
+	world.content.getBoundingClientRect = () => ({ top: 0, left: 0, width: 500, height: 400 })
+	const env = loadClient({ documentOverrides: world.fakeDocument })
+	const mo = bodyObserver(env, world)
+	world.panelOpen = true
+	mo.cb([{ target: world.body }])
+	assert.equal(world.overlay.style.width, '500px', 'falls back to the conversation content element')
+	assert.equal(world.panel.style.width, '100%')
+})
+
+test('settings-embed off: persisted override honored and the toggle has no css block', () => {
+	const world = buildEmbedWorld()
+	const storage = fakeStorage({ [STORAGE_KEY]: JSON.stringify({ 'settings-embed': false }) })
+	const env = loadClient({ storage, documentOverrides: world.fakeDocument })
+	const mo = bodyObserver(env, world)
+	world.panelOpen = true
+	mo.cb([{ target: world.body }])
+	assert.equal(world.overlay.style.position, undefined, 'embed inactive when persisted off')
+	const cssBefore = env.styleTag.textContent
+	setEmbedToggle(env, true)
+	assert.equal(env.styleTag.textContent, cssBefore, 'settings-embed injects no css block')
+})
+
+test('settings-embed: dispose disconnects observers and clears embedded styles', () => {
+	const world = buildEmbedWorld()
+	const env = loadClient({ documentOverrides: world.fakeDocument })
+	const mo = bodyObserver(env, world)
+	world.panelOpen = true
+	mo.cb([{ target: world.body }])
+	assert.equal(world.panel.style.width, '100%')
+	env.dispose()
+	assert.equal(mo.connected, false, 'MutationObserver disconnected')
+	assert.equal(env.observers.find((o) => o !== mo && o.connected), undefined, 'ResizeObserver disconnected')
+	assert.equal(world.overlay.style.position, undefined, 'inline styles cleared')
 })
 
 test('store.snapshot returns a stable reference between sets (React #185 regression)', () => {

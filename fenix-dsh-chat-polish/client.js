@@ -1,8 +1,8 @@
 /**
  * fenix-dsh-chat-polish — Client 半（零构建，形态对齐 dsh-plugin-loopback-trust）。
  *
- * 对话区打磨功能（dsh 0.2.0-rc.2 实测约束，升级失配时各覆盖自动失效回官方布局），
- * 0.3.0 起每项功能在官方设置页「对话区打磨」分区内带独立开关（默认全开 = 与
+ * Fenix 插件打磨功能（dsh 0.2.0-rc.2 实测约束，升级失配时各覆盖自动失效回官方布局），
+ * 0.3.0 起每项功能在官方设置页「Fenix 插件设置」分区内带独立开关（默认全开 = 与
  * 0.2.2 无开关形态一致；关闭 = 该功能即时回退官方原生形态，无需刷新页面）：
  *
  * 1. 对话列左右留白固定 24px（开关 whitespace）。
@@ -17,6 +17,11 @@
  *      - ConversationRoot 的列宽拖拽把手隐藏（固定留白后无拖拽空间，且防止
  *        拖拽把 px 偏好写进 localStorage 覆盖本方案）；
  *      - 「回到底部」浮钮右距对齐 24px。
+ *      - 0.3.x 宽度锚定修复：官方在 agent 运行期把输入面 contenteditable 置
+ *        false（machineBusy → editable=false，DOM 结构不换树），0.3.0 的
+ *        :has([contenteditable="true"]) 匹配在发送后失配 → 卡片从 80% 骤缩回
+ *        官方 712px。改锚官方稳定结构属性 data-composer-input / data-composer-card
+ *        （值恒定，全安装包唯一），发送中/hero inert 态均恒匹配。
  *    嵌入形态（fenixd dashboard embed，root 带 .embeddedBody）整体豁免，维持官方
  *    自身的宽度轴。选择器全部带 body:not(:has(...)) 前缀抬高特异性，不依赖注入
  *    顺序压过宿主样式。
@@ -58,10 +63,10 @@
  *    常驻），事件处理器入口读开关状态直接放行（不接管、不 preventDefault）。
  *
  * 4. 设置分区开关（0.3.0）。
- *    经官方 keyed 插槽 settings.section / settings.section.icon 注册「对话区打磨」
+ *    经官方 keyed 插槽 settings.section / settings.section.icon 注册「Fenix 插件设置」
  *    分区（先例 fenix-dsh-auth「登录」分区的同构写法：order 经 ctx.slots.entries
  *    尾随探测、失败回退 FALLBACK_MAX_ORDER、逐槽 try/catch 失配仅 console.warn
- *    菜单缺席）。分区面板渲染 6 个功能行（功能名 + 一句话说明 + 开关控件，控件
+ *    菜单缺席）。分区面板渲染各功能行（功能名 + 一句话说明 + 开关控件，控件
  *    复用基线包 primitives Switch），点击开关写模块级开关 store 即时生效。
  *    开关状态持久化于 localStorage 键 fenix-chat-polish.toggles（JSON
  *    {功能ID: bool}，只记录关闭项，缺省即开启）；读取容错（损坏/未知键忽略按
@@ -69,6 +74,16 @@
  *    开关 store 独立于分区 UI：菜单缺席（宿主升级失配）时持久化键仍生效。
  *    样式注入为单标签按「开启集合」重建：开关切换在 store.set 内同步重写样式
  *    标签 textContent（先改样式后通知订阅者），样式即时性不依赖 React 重渲。
+ *
+ * 5. 嵌入设置页面（0.3.x，开关 settings-embed，默认开启）。
+ *    官方设置面板经 createPortal 挂 document.body 弹出为居中模态（overlay fixed
+ *    inset:0 + 遮罩 + 800×800 圆角阴影面板）。开启后由 MutationObserver 捕获面板
+ *    挂载，纯内联样式把 overlay 几何改写为内容区（dsh-client-ui-layout AppFrame
+ *    centerCol，锚 [data-conversation-content] 向上 closest [class$="_centerCol"]）
+ *    矩形：panel 铺满、去圆角/阴影，mask 隐藏——观感为嵌入内容区的页面而非弹窗。
+ *    不 reparent、不碰 React 树；ResizeObserver 跟随内容区尺寸（侧栏折叠/窗口
+ *    缩放）重算；关闭面板/关开关/dispose 清内联恢复官方模态。锚点缺席（会话区
+ *    未挂载、dashboard embed 无 frame）时安全降级，本次保持官方模态。
  */
 (function () {
 	'use strict'
@@ -144,9 +159,13 @@
 					 * "uV2eYG_root uV2eYG_hero"（变体修饰类在后），不以 _root 结尾，
 					 * 后缀匹配在新建会话页全体失配 → 卡片回落官方 952px 与行错位
 					 * （2026-11-17 用户报障）。contains 匹配对 token 顺序免疫；
-					 * 误伤由 :has(textarea)/:has(editable) 收窄兜底（全文档实测仅
-					 * 命中 wSkVaW_root 与 uV2eYG_root[_hero] 两元素，弹层根不含编辑器） */
-					'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea),body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"]){padding-left:24px;padding-right:24px}',
+					 * 误伤由 :has() 收窄兜底（全文档实测仅命中 wSkVaW_root 与
+					 * uV2eYG_root[_hero] 两元素，弹层根不含编辑器）。
+					 * 0.3.x: 收窄锚改 [data-composer-input]（官方稳定结构属性）——
+					 * agent 运行期官方把 contenteditable 置 false（DOM 不换树），
+					 * 旧 :has([contenteditable="true"]) 在发送后失配 → 侧距回落
+					 * 16px。textarea 分支保留作老版本兜底 */
+					'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea),body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([data-composer-input]){padding-left:24px;padding-right:24px}',
 					/* hero（空会话）栈铺满，卡片经上方 24px 侧距落到同一基线。
 					 * width:auto 是 fit-content——hero 栈缩成标题行自然宽（~368px）
 					 * 「中间一小块」（2026-11-05 用户实证）；width:100% 才是铺满，
@@ -158,11 +177,17 @@
 					'body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_toBottomSlot"]{padding-right:24px}',
 				].join('\n'),
 				/* 输入卡/提示条/队列坞 80% 宽度居中（根节点 align-items:center 自动居中），
-				 * 与消息列同轴。依赖 whitespace 的 24px 侧距基线但样式自持 */
+				 * 与消息列同轴。依赖 whitespace 的 24px 侧距基线但样式自持。
+				 * 0.3.x 锚定修复：卡片直接锚官方稳定结构属性 [data-composer-card]
+				 * （InputBar 卡片专有，值恒定不随 agent 运行态变化），彻底摆脱
+				 * :has([contenteditable="true"]) 的运行态失配——发送后 editable=false
+				 * 时旧选择器失配，卡片从 80% 骤缩回官方 712px、回合结束又弹宽。
+				 * notice/dock 无专属属性，经 [data-composer-input]（contenteditable
+				 * 输入面恒带）收窄，同理全态恒匹配 */
 				'composer-width': [
-					'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea)>[class$="_card"],body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"])>[class$="_card"]{width:80%;max-width:none}',
-					'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea) [class$="_notice"],body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"]) [class$="_notice"]{width:80%;max-width:none}',
-					'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea) [class$="_dock"],body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"]) [class$="_dock"]{width:80%}',
+					'body:not(:has([class$="_embeddedBody"])) [data-composer-card]{width:80%;max-width:none}',
+					'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([data-composer-input]) [class$="_notice"]{width:80%;max-width:none}',
+					'body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([data-composer-input]) [class$="_dock"]{width:80%}',
 				].join('\n'),
 				/* hero 工作区/模式行与输入卡两缘对齐（2026-11-05 左缘对齐；2026-11-10
 				 * 右缘对齐：git 分支/worktree 复选经 .wSkVaW_heroOptions margin-left:auto
@@ -245,7 +270,7 @@
 			/* ── 开关 store（模块级单例，design D1）────────────────────────── */
 
 			var STORAGE_KEY = 'fenix-chat-polish.toggles'
-			var FEATURE_IDS = ['whitespace', 'scrollbar', 'composer-width', 'markdown', 'hero-row', 'history-nav']
+			var FEATURE_IDS = ['whitespace', 'scrollbar', 'composer-width', 'markdown', 'hero-row', 'history-nav', 'settings-embed']
 			/* 有 CSS 分块的功能 id（cssText 拼接顺序） */
 			var CSS_BLOCK_IDS = ['whitespace', 'composer-width', 'hero-row', 'scrollbar', 'markdown']
 
@@ -890,16 +915,151 @@
 				})
 			}
 
+			/* ═══ 嵌入设置页面（0.3.x，开关 settings-embed）══════════════════════ */
+
+			/* 官方设置面板经 createPortal 挂 document.body：overlay（fixed inset:0
+			 * z-index:1000 flex 居中）> [_mask（点击关闭）+ _panel（稳定属性
+			 * data-shortcut-modal="settings"，全安装包唯一）。本功能把 overlay 几何
+			 * 内联改写为内容区矩形——不 reparent、不碰 React 树，纯内联样式覆盖官方
+			 * 类样式：overlay: position:fixed + top/left/width/height=rect（right/bottom
+			 * 置 auto 抵消官方 inset:0 的过约束）；panel: 100%×100%、去圆角/阴影；
+			 * mask: display:none（点击遮罩关闭退场；关闭走面板右上角关闭钮与 Esc）。
+			 * ResizeObserver 跟随内容区尺寸（侧栏折叠/窗口缩放）重算矩形；面板卸载/
+			 * 开关关闭/dispose 清内联恢复官方模态。 */
+			var embedState = { overlay: null, panel: null, mask: null, anchor: null, ro: null, roAnchor: null }
+			var EMBED_OVERLAY_PROPS = ['position', 'top', 'left', 'right', 'bottom', 'width', 'height']
+			var EMBED_PANEL_PROPS = ['width', 'height', 'maxWidth', 'borderRadius', 'boxShadow']
+
+			function clearInline(el, props) {
+				for (var i = 0; i < props.length; i++) el.style.removeProperty(camelToKebab(props[i]))
+			}
+			function restoreEmbed() {
+				if (embedState.ro) {
+					embedState.ro.disconnect()
+					embedState.ro = null
+				}
+				embedState.roAnchor = null
+				if (!embedState.overlay) return
+				clearInline(embedState.overlay, EMBED_OVERLAY_PROPS)
+				if (embedState.panel) clearInline(embedState.panel, EMBED_PANEL_PROPS)
+				if (embedState.mask) embedState.mask.style.removeProperty('display')
+				embedState.overlay = null
+				embedState.panel = null
+				embedState.mask = null
+				embedState.anchor = null
+			}
+
+			/* 内容区锚解析：会话根 [data-conversation-content] 向上 closest
+			 * [class$="_centerCol"]（dsh-client-ui-layout AppFrame 主内容列，grid-area
+			 * 1/2）。无 frame（dashboard embed 无 shell frame）退回会话根本身；均缺席
+			 * （会话区未挂载）返回 null → 本次保持官方模态。选择器漂移经 closest 失配
+			 * 自然降级，不抛错 */
+			function contentAnchor() {
+				var content = document.querySelector('[data-conversation-content]')
+				if (!content) return null
+				var col = content.closest ? content.closest('[class$="_centerCol"]') : null
+				return col || content
+			}
+
+			function applyEmbedGeometry(overlay, panel, mask, anchor) {
+				var rect = anchor.getBoundingClientRect()
+				var os = overlay.style
+				os.position = 'fixed'
+				os.top = rect.top + 'px'
+				os.left = rect.left + 'px'
+				os.right = 'auto'
+				os.bottom = 'auto'
+				os.width = rect.width + 'px'
+				os.height = rect.height + 'px'
+				var ps = panel.style
+				ps.width = '100%'
+				ps.height = '100%'
+				ps.maxWidth = 'none'
+				ps.borderRadius = '0'
+				ps.boxShadow = 'none'
+				if (mask && mask !== panel) mask.style.display = 'none'
+			}
+
+			function syncEmbedGeometry() {
+				if (!embedState.overlay || !embedState.anchor || !toggleStore.get('settings-embed')) return
+				if (!embedState.overlay.isConnected) {
+					restoreEmbed()
+					return
+				}
+				applyEmbedGeometry(embedState.overlay, embedState.panel, embedState.mask, embedState.anchor)
+			}
+
+			function observeEmbedAnchor(anchor) {
+				if (embedState.ro && embedState.roAnchor === anchor) return
+				if (embedState.ro) {
+					embedState.ro.disconnect()
+					embedState.ro = null
+				}
+				embedState.roAnchor = null
+				/* ResizeObserver 缺失降级：仅挂载时定位一次，后续尺寸变化不跟随 */
+				if (typeof ResizeObserver !== 'function') return
+				var ro = new ResizeObserver(syncEmbedGeometry)
+				ro.observe(anchor)
+				embedState.ro = ro
+				embedState.roAnchor = anchor
+			}
+
+			/* 全量同步：面板挂载/卸载（MO 回调）与开关切换（store 订阅）共用入口。
+			 * 无面板或开关关闭 → restore；面板在 → 解析锚点并应用/跟随几何 */
+			function syncEmbed() {
+				if (!toggleStore.get('settings-embed')) {
+					restoreEmbed()
+					return
+				}
+				var panel = document.querySelector('[data-shortcut-modal="settings"]')
+				if (!panel) {
+					restoreEmbed()
+					return
+				}
+				var overlay = panel.parentElement
+				if (!overlay) return
+				var anchor = contentAnchor()
+				if (!anchor) {
+					restoreEmbed()
+					return
+				}
+				if (embedState.overlay !== overlay) {
+					/* 新面板（重开设置是全新 overlay 元素）：清旧跟踪后重新认领 */
+					restoreEmbed()
+					embedState.overlay = overlay
+					embedState.panel = panel
+					embedState.mask = overlay.firstElementChild === panel ? null : overlay.firstElementChild
+				}
+				embedState.anchor = anchor
+				applyEmbedGeometry(overlay, panel, embedState.mask, anchor)
+				observeEmbedAnchor(anchor)
+			}
+
+			/* 面板挂载/卸载均为 body 直接子节点增删（React portal 对 body 的
+			 * appendChild/removeChild），MO 只对 target===body 的记录触发全量同步，
+			 * 面板内部高频渲染不进入 querySelector；MO 回调在微任务checkpoint执行、
+			 * 先于绘制，嵌入改写无可见闪帧 */
+			function onBodyMutation(records) {
+				for (var i = 0; i < records.length; i++) {
+					if (records[i].target === document.body) {
+						syncEmbed()
+						return
+					}
+				}
+			}
+
 			/* ═══ 设置分区 UI（0.3.0，design D4）═════════════════════════════════ */
 
-			/* 功能清单（行序 = 分区面板渲染序）：id 与 toggleStore/FEATURE_IDS 逐字对应 */
+			/* 功能清单（行序 = 分区面板渲染序）：id 与 toggleStore/FEATURE_IDS 逐字对应。
+			 * 0.3.x 起滚动条样式（scrollbar）与 hero 工作区行对齐（hero-row）两行
+			 * 从面板移除——CSS 功能与 store 机制保留（默认仍开启，历史 override 仍
+			 * 生效），仅不再暴露独立开关 */
 			var FEATURES = [
 				{ id: 'whitespace', label: '对话列留白 24px', description: '消息列与输入卡两侧留白固定 24px，解除官方 920px 居中上限，隐藏列宽拖拽把手' },
-				{ id: 'scrollbar', label: '滚动条样式', description: '滚动条对齐 dashboard 观感（10px 宽、加深滑块、补全四向箭头按钮）' },
 				{ id: 'composer-width', label: '输入框 80% 宽度居中', description: '输入卡、提示条与队列坞按 80% 宽度居中，与消息列同轴' },
 				{ id: 'markdown', label: '用户消息 Markdown 渲染', description: '用户消息气泡按 Markdown 渲染（标题/列表/代码高亮），关闭后回退官方纯文本投影' },
-				{ id: 'hero-row', label: 'hero 工作区行对齐', description: '新会话页 hero 工作区/模式行左右缘对齐输入卡' },
 				{ id: 'history-nav', label: '输入框 ↑/↓ 历史导航', description: '输入框首行按 ↑ 召回上一条已发送消息，↓ 切回，Esc 恢复草稿' },
+				{ id: 'settings-embed', label: '嵌入设置页面', description: '设置页嵌入内容区以页面形式展示，关闭后回退官方弹出模态对话框' },
 			]
 
 			/* React 侧订阅（design D1）：React 18 useSyncExternalStore 直连 store；
@@ -979,7 +1139,7 @@
 			}
 			var ToggleControl = HostSwitch || FallbackSwitch
 
-			/* 「对话区打磨」分区组件（settings.section 槽）：渲染 6 个功能行（功能名 +
+			/* 「Fenix 插件设置」分区组件（settings.section 槽）：渲染 5 个功能行（功能名 +
 			 * 一句话说明 + 开关控件）。点击开关写 store 即时生效（store.set 内先重建
 			 * 样式后通知，本组件经订阅重渲同步行内开关态——行内开关态与实际生效状态
 			 * 单一数据源一致）；data-fdx-polish-feature/-switch 属性供真机验证定位 */
@@ -1011,7 +1171,7 @@
 				return react.createElement(
 					'div',
 					{ style: sectionRootStyle, 'data-fdx-polish-section': '' },
-					react.createElement('p', { style: sectionIntroStyle }, '对话区各打磨功能可独立开关；默认全部开启（与安装即用形态一致），关闭某项即时回退官方原生形态。开关仅对当前浏览器生效。'),
+					react.createElement('p', { style: sectionIntroStyle }, '各打磨功能可独立开关；默认全部开启（与安装即用形态一致），关闭某项即时回退官方原生形态。开关仅对当前浏览器生效。'),
 					rows,
 				)
 			}
@@ -1089,6 +1249,18 @@
 					document.addEventListener('keydown', onHistoryKeydown, true)
 					document.addEventListener('input', onHistoryInput, true)
 
+					/* feature 5：嵌入设置页面。MO 常驻监 body 直挂增删（面板挂载/卸载），
+					 * store 订阅负责开关切换时即时应用/还原；二者共用 syncEmbed 入口，
+					 * syncEmbed 自身按开关状态与面板存在性幂等收敛 */
+					var embedMO = null
+					try {
+						embedMO = new MutationObserver(onBodyMutation)
+						embedMO.observe(document.body, { childList: true, subtree: true })
+					} catch (err) {
+						stage('settings-embed observer', err)
+					}
+					var unembedSub = toggleStore.subscribe(function () { syncEmbed() })
+
 					/* 设置分区注册（fenix-dsh-auth 先例同构写法）：注册回调由宿主在渲染时
 					 * 声明，此刻官方分区已注册可探测排序尾；枚举失败回退 FALLBACK_MAX_ORDER。
 					 * 逐槽 try/catch 降级——宿主升级致槽契约漂移时仅菜单缺席（console.warn），
@@ -1108,7 +1280,7 @@
 								id: 'fenix-chat-polish',
 								order: maxOrder + 1,
 								label: function () {
-									return '对话区打磨'
+									return 'Fenix 插件设置'
 								},
 							}, PolishSection)
 						})
@@ -1129,6 +1301,12 @@
 					return function dispose() {
 						document.removeEventListener('keydown', onHistoryKeydown, true)
 						document.removeEventListener('input', onHistoryInput, true)
+						if (embedMO) {
+							embedMO.disconnect()
+							embedMO = null
+						}
+						if (unembedSub) unembedSub()
+						restoreEmbed()
 						toggleStore.detachStyleTag()
 						var removed = styleTag.parentNode !== null
 						if (removed) styleTag.remove()

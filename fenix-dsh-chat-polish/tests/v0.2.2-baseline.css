@@ -1,11 +1,14 @@
+/* 0.3.0 全开态预期注入基线（规则集合与 0.2.2 等效；2026-11-24 宽度锚定修复起
+ * 4 条 composer 规则改锚稳定结构属性 data-composer-input / data-composer-card，
+ * 行为不变、发送态恒匹配）。测试：node --test fenix-dsh-chat-polish/tests/ */
 body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_scroll"]{padding-left:24px;padding-right:24px}
 body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_column"]{max-width:none;--dsh-chat-content-width:calc(100cqw - 48px)}
 [data-conversation-scroll] [class$="_userStack"]{--dsh-chat-content-width:748px}
 [class$="_body"] .md-table-wide.md-table-wide{margin-left:min(0px, calc(-1 * var(--dsh-table-lead)))}
-body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea),body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"]){padding-left:24px;padding-right:24px}
-body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea)>[class$="_card"],body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"])>[class$="_card"]{width:80%;max-width:none}
-body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea) [class$="_notice"],body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"]) [class$="_notice"]{width:80%;max-width:none}
-body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea) [class$="_dock"],body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([contenteditable="true"]) [class$="_dock"]{width:80%}
+body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has(textarea),body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([data-composer-input]){padding-left:24px;padding-right:24px}
+body:not(:has([class$="_embeddedBody"])) [data-composer-card]{width:80%;max-width:none}
+body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([data-composer-input]) [class$="_notice"]{width:80%;max-width:none}
+body:not(:has([class$="_embeddedBody"])) [class*="_root"]:has([data-composer-input]) [class$="_dock"]{width:80%}
 body:not(:has([class$="_embeddedBody"])) [class$="_composerHero"]{width:100%}
 body:not(:has([class$="_embeddedBody"])) [class$="_heroWorkspaceRow"]{margin-left:calc(24px + (100% - 48px)*0.1);margin-right:calc(24px + (100% - 48px)*0.1);padding:0}
 body:not(:has([class$="_embeddedBody"])) [data-width-handle][data-width-handle]{display:none}
