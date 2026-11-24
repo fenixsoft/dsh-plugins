@@ -1,6 +1,14 @@
 {
   "status": "success",
-  "spec": "optimize-session-advanced-search",
-  "summary": "实现完成：13 条任务全勾（1.1、1.2、2.1-2.5、3.1-3.4、4.1、4.2），插件 vitest 169 用例全绿（10 文件）、tsc --noEmit 零错、tsdown 构建三产物（lib/index.js host ESM + lib/client.js client CJS 首行 window.__ModuleLoader__.load 确认 + lib/host.js）。shared 半：SearchJobStatus 新增 degradedReason（5 值白名单枚举）与 progress 步骤流（有界 50）契约 + parseJobStatus 形状守卫 + UI_TEXT 降级映射/中断文案；配置新增可选 analyzeRoute（provider/model 非空白 trim 校验，手写守卫——仓库无 zod，findings 登记 deliverable-dispute）+ dsh.config 五键。host 半：rankCandidates Promise.race 超时硬解耦（流消费/超时 marker/取消哨兵三路竞速，败者流 .catch 吸收防 unhandled rejection，外部取消优先且同步 abort deadline）；credentialProbe（env 非空或凭据库快照已配置才放行，runJob 前异步预热快照，缝漂移 warn 一次跳过不误杀）+ routeOverride > agentDefaultModel 路由解析（resolveRoute 导出）；JobTable appendProgress 四推进点（collecting 关键词/filtering 候选 N→M+工作区分布/analyzing provider·model·候选数/done 置信度摘要或降级原因）+ complete 第四参 degradedReason 贯通 GET 载荷。client 半：searchView.tsx 内容区视图（非模态，结构化锚点 sidebar.closest.nextElementSibling 挂内容区、失配降级右侧抽屉避让侧栏宽度 warn 限流一次）替代并删除 searchDialog.tsx；canonical 四步骤流三态（完成✓/进行中 spinner/等待○，host 实报 detail 原样渲染不伪造）+ status-pill 本地计时逐 0.1s；中断按钮 DELETE 回初始态；降级横幅按 degradedReason 精确映射，credential-missing 两动作（onOpenModelSettings 缝缺位点击展示 credentialHint / 仅重试 AI 分析同 query 重 POST）；composer 卡对齐原型（max 952px/radius 28px/32px 圆形发送按钮/官方图标几何）；入口按钮换官方 IconSearchOutlineMedium（viewBox 16/stroke 1.3/无星标）去降透明。测试：view.test.ts 新建替代 dialog.test.ts（28 例：骨架/门控/步骤流/计时/中断/横幅双路径/跳转/重置/404），clientApp 装配链换视图断言（内容区锚点命中+抽屉降级 warn 限流），searchButton 图标几何断言，analyzer/jobs/host 新增超时硬上限（忽略 signal 永不 resolve stub+迟到 reject 吸收）/凭证缺失快速失败/路由覆盖/progress 推进/装配凭证降级端到端用例。README.zh.md 更新（内容区视图机制/analyzeRoute 配置/降级原因映射表/重启 dsh-web 说明/已知限制含图标几何与内容区锚点缝/原型引用）。quality-gates.json 落盘（frontend-build passed：构建+tsc；interaction-contract passed：client 交互契约测试全绿；full-suite 未跑不写键——worktree 无 bin/run_full_suite.py）；contract_findings.json 登记 3 项（host.ts→index.ts 路径笔误、zod→手写校验、原型演示性装饰不实装）。10 commit 按 task 分组入库。",
-  "completed_tasks": ["1.1", "1.2", "2.1", "2.2", "2.3", "2.4", "2.5", "3.1", "3.2", "3.3", "3.4", "4.1", "4.2"]
+  "spec": "add-bridge-theme-channel",
+  "summary": "桥接插件宿主侧主题跟随全量落地：buildPanelSrc 第三可选参数（dark|light 白名单，&theme= 段于 apiBase 后 hash 前，缺省/非法逐字符一致，既有合同测试零改动通过）；新增 themeFollow.ts（模块级快照缓存、事件先刷新缓存再广播、面板窗口注册表、白名单广播 try/catch 摘除销毁窗口、installThemeFollow 四路 D4 降级含 cordis proxy 缺服务抛错吞掉）；DashboardPanel callback ref 无 hook 化挂/卸载对称接注册表；三挂载点（固定条目/项目面板/右缘页签）注入初始档，installThemeFollow 接入点先于项目同步注册；inject 增 theme 服务键 + package.json 注入主题包；dsh-runtime.d.ts 增 Context.on/theme 类型缝。验证：vitest 197/197 全绿（含 rightTab/hostSession/proxy 既有回归）、tsdown 构建成功、tsc --noEmit 零错误，提交 52cc12c。",
+  "completed_tasks": [
+    "1.1",
+    "1.2",
+    "1.3",
+    "2.1",
+    "2.2",
+    "2.3",
+    "3.1"
+  ]
 }
