@@ -53,8 +53,8 @@ MutationObserver 双通道维护（对齐 fenix-dsh-session-advanced-search 持�
 
 ### 失配回退与停用
 
-- 任一必需锚点未命中：不注入 tab 栏、不注入任何 `<style>`、不改动任何官方元素、零异常；`console.warn` 一次（含失配锚点名，限流防热循环刷日志），侧栏保持官方原生形态。
-- 插件配置 `enabled=false`：loader 不装载本插件（client 半不出现在 `/plugins/` 组合 bundle），零动作——不加载、不注入、不写 localStorage，侧栏与未安装一致。
+- 任一必需锚点未命中：不注入 tab 栏、不注入任何 `<style>`、不改动任何官方元素、零异常；`console.warn` 含失配锚点名，**按锚点名限流**（同锚只 warn 一次，命中恢复即复位，不同锚各自报）。侧栏列元素本身未挂载（应用启动中/无侧栏页面）走 **15s 静默宽限期**，超时仍缺才按失配告警——健康路径启动零告警噪声。
+- 插件配置 `enabled=false`：loader 不装载本插件（client 半不出现在 `/plugins/` 组合 bundle，实测该 URL 404），零动作——不加载、不注入、不写 localStorage，侧栏与未安装一致。
 
 ## 配置项
 
@@ -67,7 +67,21 @@ MutationObserver 双通道维护（对齐 fenix-dsh-session-advanced-search 持�
 - dsh `@deepseek-ai/dsh` **0.2.2-rc.1**（`dsh-client-ui-sidebar` / `dsh-client-ui-layout` / `dsh-client-ui-workspace` 同版本），CSS-modules 哈希前缀形如 `bhn1Oq_`/`Xa_`（升级漂移、键名稳定）。
 - 侧栏结构自 dsh-client-ui-sidebar bundle 的 `SidebarRoot_module_css_default.*` 键名实证：`root/logoRow/controls(HeaderLeadingControls)/panelList/regionArea/footArea/collapsed/newSession`；侧栏列 `sidebarCol` 来自 dsh-client-ui-layout。
 - 主题 token 自 dsh-client-ui-theme bundle 实证（暗主题标记 = `body[data-ds-dark-theme]`）：轨道 浅 `--dsw-static-neutral-bluish-150` / 暗 `bluish-850`；活动块 `--dsw-specific-sidebar-nav-item-active`（浅 bluish-100 / 暗 bluish-750，官方导航项活动态同源）；文字 `--dsw-alias-label-primary/secondary`；指示条 浅 `--dsw-static-deepseek-500` / 暗 `deepseek-400`。
-- （真机实测命中记录待回填：版本 + 锚点签名 + 验证日期，见下方「验收」。）
+
+**真机实锚命中记录**（隔离 profile 实测，2026-11-24，dsh 0.2.2-rc.1）：
+
+| 锚点 | 运行时类值（哈希前缀实例） | 命中形态 |
+| --- | --- | --- |
+| 侧栏列 `sidebarCol` | `bhn1Oq_sidebarCol`（布局列，56px 窄轨/展开全形态在位） | 命中 |
+| 全局导航 `panelList` | `nav.hHd-Xa_panelList`（SidebarRoot 直下唯一 `<nav>`，8 个 button 子元素：概览/配置/Plugins/运维/指挥中心/Automation tasks/帮助/More） | 命中 |
+| Workspaces 区 `regionArea` | `div.hHd-Xa_regionArea`（搜索框/高级搜索入口/View options/Add workspace/会话树挂载壳） | 命中 |
+| 注入位置 | `.fdx-sbt-bar` 前邻 `button.hHd-Xa_newSession`、后邻 `nav.hHd-Xa_panelList`（新会话按钮容器之后、全局导航之前） | 命中 |
+| 窄轨标记 | root 附加 `hHd-Xa_collapsed`（56px 列宽实测），tab 栏 `data-rail=true` display:none | 命中 |
+
+**失配模拟演练结果**（2026-11-24，隔离 profile）：
+
+- 把 Workspaces 区锚点键改写为不存在键（`fdxMissingWorkspaceKey`）链入重启：tab 栏零注入、零样式注入、localStorage 零写入、零未捕获异常，侧栏官方原生形态完整（导航 8 项/新会话/搜索框均在位）；console warn 精确含失配锚点名（`fdxMissingWorkspaceKey([class*="fdxMissingWorkspaceKey"]) 未命中`）。
+- 演练曾抓到一个实现缺陷并已修复：失配告警原为「全局 warn-once」，client 早于侧栏布局挂载的启动瞬态（列未命中）会把限流消耗掉，真失配的锚点名反而进不了日志。现行为：侧栏列未挂载走 **15s 静默宽限期**（首见缺失起表、超时才按失配告警；含首见分支漏 `return` 落穿告警的返工），列存在后的失配**按锚点名限流**（同锚只 warn 一次，命中恢复复位，不同锚各自报）。修复后健康路径启动零告警、失配路径 warn 精确含改写键名。
 
 **升级失配重钉步骤**（表现 = 侧栏无 tab 控件 + console warn 含失配锚点名）：
 
@@ -86,20 +100,23 @@ MutationObserver 双通道维护（对齐 fenix-dsh-session-advanced-search 持�
 
 真机安装与验收沿用 `spec/knowledge/domains/plugin-rollout/` 能力口径：隔离验证 profile（临时 `DSH_HOME` + 独立端口、`pnpm add link:` 链接本分支、`cordis.patch.yml` 以 `- insert:` 注册、复刻 live 关键面含 `dsh-plugin-loopback-trust` 与 `--trusted-host` 参数）+ playwright-cli 全 Scenario 走查；断言一律真实运行时实测值 + 条件轮询。
 
-验收清单（对应 specs/sidebar-tabs）：
+验收清单（对应 specs/sidebar-tabs，**2026-11-24 隔离 profile 全部实测通过**，13 场景）：
 
-1. 注入成功：展开态侧栏顶部出现「功能 / 工作区」控件；品牌区、新会话按钮、全局导航、Account 菜单行为不变。
-2. 切到工作区/切到功能：全局导航与 Workspaces 区互斥可见；Workspaces 区（搜索框、高级搜索入口、View options、Add workspace、会话树）完整可交互；全局导航 8 项完整可点；滚动位置不因切换重置。
-3. 官方重渲染后状态维持（经新建/删除会话触发）。
-4. 收起态隐藏：窄轨无 tab 控件、内容与现状一致；展开后恢复记忆 tab。
-5. 重启恢复与缺省：选「功能」后刷新恢复「功能」；无记忆/非法值缺省「工作区」。
-6. localStorage 禁用降级：不抛错，会话内记忆仍生效。
-7. 常显保障：两态下新会话按钮与 Account 菜单可点、高级搜索入口可用。
-8. 部分失配回退：改写 Workspaces 区锚点签名为不存在键 → 零注入零异常、日志含失配锚点名。
-9. `enabled=false` 零动作：侧栏无控件、无样式改动、不写 localStorage。
-10. 共装回归：与 settings-dock、session-advanced-search 同时启用，两 tab 态下 dock 停靠与高级搜索入口互不破坏。
+1. 注入成功+无记忆缺省：展开态侧栏顶部出现「功能 / 工作区」控件（前邻新会话按钮、后邻全局导航）；缺省「工作区」活动态；品牌区、新会话按钮、全局导航 8 项、Account 菜单行为不变；零控制台错误。
+2. 切到功能：导航 8 项完整可见可点（点击「配置」实测主面板切换）、Workspaces 区互斥隐藏、aria-selected 翻转、localStorage 记忆写入。
+3. 切到工作区：搜索框/高级搜索入口/View options/Add workspace/会话树完整可见可交互、导航隐藏。
+4. 独立滚动保持：工作区列表 scrollTop=80 → 切功能 → 切回，scrollTop 保持 80、DOM 节点同一（内容稳定窗口内实测；对照实验证实官方列表自身有内容churn导致的归零，与切换无关）。
+5. 官方重渲染后状态维持：功能活动态下新建会话（官方重渲染）后 tab 栏在位、状态不被冲掉。
+6. 收起态隐藏+展开恢复：显式「Collapse sidebar」收起（root 带 collapsed 类、列宽 56px 实测）tab 栏 display:none（data-rail=true）、窄轨官方内容正常；展开后恢复记忆 tab。响应式视口收窄触发的窄轨同行为。
+7. 刷新恢复：选「功能」→ reload → 「功能」恢复活动态。
+8. 非法值缺省：localStorage 写入 `bogus-value` → reload → 缺省「工作区」。
+9. 常显保障+高级搜索可用：两态切换中新会话按钮与 Account 菜单始终可见；高级搜索入口点击在内容区打开 iframe 视图（`/session-advanced-search`，1120px 宽实测）。
+10. 共装回归：settings-dock 样式注入两态在位；dock 停靠几何完好（Settings 模态 dockLeftVar=280px=侧栏列右缘实测）；advanced-search 挂载点经两态反复切换不破坏。
+11. localStorage 禁用降级：阻断 `Storage.setItem` 后点击「功能」不抛错（零 pageerror）、会话内切态生效；重载回缺省「工作区」（无持久化）。
+12. 部分失配回退：Workspaces 区锚点键改写为不存在键 → 零注入/零样式/零存储写入/零异常，warn 精确含失配锚点名（见上方演练结果）。
+13. `enabled=false` 零动作：loader 清单移除 insert 条目重启 → `/plugins/??fenix-dsh-sidebar-tabs/client.js` 404、页面无 tab 栏、无样式注入、localStorage 无键。
 
-<!-- LIVE-VERIFY-RESULTS 占位：真机走查实测记录由任务 3.2 回填（版本+日期+逐场景结果）。 -->
+原始证据（快照/JSON/截图）存档：`.fenix/verify-evidence/add-sidebar-tabs-plugin/`。
 
 ## 已知限制
 

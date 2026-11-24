@@ -27,7 +27,8 @@
  *     重贴 display 状态与 tab 栏在位（对齐 fenix-dsh-session-advanced-search
  *     持续维护模式；失配后恢复命中则自动重注入）；
  *   - 失配零副作用：任一必需锚点未命中 → 不注入 tab 栏、不注入 style、不动任何
- *     官方元素、warn 一次（含失配锚点名，限流防热循环刷日志）、零异常。
+ *     官方元素、零异常；warn 含失配锚点名且按锚点名限流（同锚一次、命中恢复复位），
+ *     侧栏列未挂载（启动中）走 15s 静默宽限期，健康路径启动零告警噪声。
  *
  * 主题：颜色全部引用官方 token —— 轨道/活动块/文字/指示条随暗（body[data-ds-dark-theme]）
  * 浅主题自适应（原型 specs/add-sidebar-tabs-plugin/prototype 仅视觉参照）：
