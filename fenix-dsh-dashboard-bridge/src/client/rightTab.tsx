@@ -26,6 +26,7 @@ import type { ReactElement } from 'react'
 import { buildPanelSrc } from '../shared/config.js'
 import { DashboardPanel } from './panels.js'
 import { homeFileRouteFor } from './locate.js'
+import { currentThemeScheme } from './themeFollow.js'
 
 /** 页签 definition id（body seat 的 slot key 与之一致；files 先例以包名为 id）。 */
 export const FENIX_TAB_ID = 'fenix-dsh-dashboard-bridge'
@@ -126,7 +127,9 @@ export function createFenixProjectsBody(prefix: string): (props: FenixTabBodyPro
     } catch {
       params = undefined // 注入面形状漂移：按无 params 降级（项目总览）
     }
-    return DashboardPanel({ src: buildPanelSrc(prefix, routeForSidebarParams(params)) })
+    // 渲染期同步取主题缓存（页签 keepMounted 保活但 body 渲染惰性求值，注入
+    // 档为宿主最近档）；缓存 undefined（宿主主题 API 缺席）→ 无 theme 段。
+    return DashboardPanel({ src: buildPanelSrc(prefix, routeForSidebarParams(params), currentThemeScheme()) })
   }
 }
 

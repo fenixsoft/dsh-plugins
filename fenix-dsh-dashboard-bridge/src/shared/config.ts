@@ -75,17 +75,36 @@ export function resolveBridgeConfig(input?: BridgeConfigInput | null): ResolvedB
   return { upstream, prefix, routePath, apiBase: routePath }
 }
 
+/** 主题档白名单值域（buildPanelSrc 第三参与主题广播 theme 值共用；spec
+ * bridge-theme-channel「初始主题参数注入」契约）。 */
+export type ThemeScheme = 'dark' | 'light'
+
 /**
- * iframe src 契约拼装：`<prefix>/?embed=1&apiBase=<apiBase>#<hash-route>`。
+ * 主题档白名单运行时映射：`'dark'`/`'light'` 原样返回，其余值（含
+ * undefined/null/形状漂移值）返回 undefined（调用方按「无主题档」处理）。
+ * dsh-client-ui-theme 类型声明本就收窄 `'light'|'dark'`，白名单作运行时
+ * 漂移防御（design D3）；buildPanelSrc 与 themeFollow 广播共用单源。
+ */
+export function normalizeThemeScheme(value: unknown): ThemeScheme | undefined {
+  return value === 'dark' || value === 'light' ? value : undefined
+}
+
+/**
+ * iframe src 契约拼装：`<prefix>/?embed=1&apiBase=<apiBase>[&theme=<档>]#<hash-route>`。
  * - 参数位于 hash 之前，`location.search` 可读；深链在 hash 内不受影响；
  * - hashRoute 接受 `#/overview` / `/overview` 两种写法，统一归一为 `#/...`；
+ * - theme 为附加可选参数（spec add-bridge-theme-channel）：白名单 `dark|light`
+ *   命中时在 apiBase 之后、hash 之前拼 `&theme=<档>`；未提供/undefined/白名单
+ *   外值一律不产生 theme 段——输出与既有契约逐字符一致（缺省路径零变化）；
  * - prefix 为原始 URL 路径语法（需 path-safe），原样拼入不转义，
  *   默认前缀下产出与 specs Scenario 逐字符一致的
  *   `/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/projects`。
  */
-export function buildPanelSrc(prefix: string, hashRoute: string): string {
+export function buildPanelSrc(prefix: string, hashRoute: string, theme?: unknown): string {
   const base = normalizePrefix(prefix)
   const route = hashRoute.startsWith('#') ? hashRoute.slice(1) : hashRoute
   const hash = `#${route.startsWith('/') ? route : `/${route}`}`
-  return `${base}?embed=1&apiBase=${base.slice(0, -1)}${hash}`
+  const scheme = normalizeThemeScheme(theme)
+  const themeSegment = scheme === undefined ? '' : `&theme=${scheme}`
+  return `${base}?embed=1&apiBase=${base.slice(0, -1)}${themeSegment}${hash}`
 }

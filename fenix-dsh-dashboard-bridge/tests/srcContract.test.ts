@@ -36,6 +36,7 @@ import {
 import type { ClientPluginOptions } from '../src/client/index.js'
 import type { ProjectRowInfo, WorkspaceItemLike } from '../src/client/projectSync.js'
 import { buildPanelSrc, resolveBridgeConfig } from '../src/shared/config.js'
+import { createFenixProjectsBody } from '../src/client/rightTab.js'
 import {
   PROJECT_ROW_CSS,
   WORKSPACE_NAV_OVERLAY_ATTR,
@@ -771,7 +772,7 @@ describe('projectSessionStarter 与配套解析（保留不动）', () => {
     expect(resolveWorkspaceIdForProject(items, 'missing')).toBeNull()
   })
 
-  it('inject 声明：slots/layout/uiWorkspace/workspaces/sessions/contextMenus/sidebarRight/sidebarRightTabs 八键', () => {
+  it('inject 声明：slots/layout/uiWorkspace/workspaces/sessions/contextMenus/sidebarRight/sidebarRightTabs/theme 九键', () => {
     expect(inject).toContain('slots')
     expect(inject).toContain('layout')
     expect(inject).toContain('uiWorkspace')
@@ -782,6 +783,9 @@ describe('projectSessionStarter 与配套解析（保留不动）', () => {
     // 右侧边栏「Fenix 项目」页签（2026-11-11 m02220 语义纠正）新增消费面。
     expect(inject).toContain('sidebarRight')
     expect(inject).toContain('sidebarRightTabs')
+    // 宿主主题跟随（add-bridge-theme-channel）新增消费面：ctx.theme 快照 +
+    // theme/change 事件；旧版宿主缺席 → installThemeFollow 内部 D4 降级。
+    expect(inject).toContain('theme')
   })
 
   it('右侧边栏页签源码钉（rightTab.tsx）：两段注册契约与深链路由', () => {
@@ -811,12 +815,14 @@ describe('projectSessionStarter 与配套解析（保留不动）', () => {
     expect(src).toContain('deps.selectProject(hit.name)')
   })
 
-  it('package.json dsh.client.inject：含 sidebar-right 依赖包', () => {
+  it('package.json dsh.client.inject：含 sidebar-right 与 theme 依赖包', () => {
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       dsh?: { client?: { inject?: string[] } }
     }
     const packages = pkg.dsh?.client?.inject ?? []
     expect(packages).toContain('@deepseek-ai/dsh-client-ui-sidebar-right')
+    // 主题跟随（add-bridge-theme-channel）：注入主题包使 ctx.theme 服务可用。
+    expect(packages).toContain('@deepseek-ai/dsh-client-ui-theme')
   })
 
   it('apply 桩上下文缺 contextMenus/sessions 服务：右键菜单注册 no-op 降级，stop 幂等', async () => {
@@ -923,5 +929,133 @@ describe('projectSessionStarter 与配套解析（保留不动）', () => {
     expect(parseProjectPath(payload, 'nopath')).toBeNull()
     expect(parseProjectPath(payload, 'missing')).toBeNull()
     expect(parseProjectPath({ projects: 'bad' }, 'fenixd')).toBeNull()
+  })
+})
+
+/* ============ 宿主主题跟随（add-bridge-theme-channel 契约面） ============ */
+
+/** 宿主主题快照桩（dsh-client-ui-theme ThemeSnapshot 最小形状）。 */
+const themeSnapshotOf = (colorScheme: unknown): { active: { colorScheme: unknown } } => ({
+  active: { colorScheme },
+})
+
+/** 宿主主题桩 ctx 组件：真实宿主 ctx 携 theme 服务 + cordis 事件总线的镜像
+ * 形状（apply 内 installThemeFollow(ctx) 消费，接入点先于项目同步注册）。 */
+function stubThemeHost(initial: string | undefined) {
+  const listeners: Array<(snapshot: unknown) => void> = []
+  return {
+    theme: initial === undefined ? undefined : { getTheme: () => themeSnapshotOf(initial) },
+    on: (event: string, listener: (snapshot: unknown) => void) => {
+      expect(event).toBe('theme/change')
+      listeners.push(listener)
+      return () => {
+        listeners.length = 0
+      }
+    },
+    /** 手动派发宿主 theme/change（快照档触发缓存刷新 + 广播）。 */
+    fire: (scheme: string): void => {
+      for (const listener of [...listeners]) listener(themeSnapshotOf(scheme))
+    },
+  }
+}
+
+/** applied 变体：桩 ctx 携宿主主题服务（快照深/浅/缺席三档驱动）。 */
+async function appliedWithTheme(
+  initial: string | undefined,
+  options: Omit<ClientPluginOptions, 'upstream'>,
+) {
+  const stub = stubSlotsCtx()
+  const theme = stubThemeHost(initial)
+  Object.assign(stub.ctx as Record<string, unknown>, { theme: theme.theme, on: theme.on })
+  const stop = apply(stub.ctx as never, { ...options, fetchAlertCount: noopAlertCount, timer: fakeTimer() })
+  await flush()
+  return { ...stub, stop, fireTheme: theme.fire }
+}
+
+describe('宿主主题跟随（add-bridge-theme-channel）', () => {
+  it('buildPanelSrc 新契约：白名单档拼 &theme= 段（apiBase 后 hash 前）；非法/缺省逐字符一致', () => {
+    expect(buildPanelSrc('/fenix-dashboard/', '#/overview', 'dark')).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard&theme=dark#/overview',
+    )
+    expect(buildPanelSrc('/fenix-dashboard/', '#/overview', 'light')).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard&theme=light#/overview',
+    )
+    expect(buildPanelSrc('/dash/', '#/projects', 'dark')).toBe(
+      '/dash/?embed=1&apiBase=/dash&theme=dark#/projects',
+    )
+    // 缺省/undefined/白名单外值：输出与既有契约逐字符一致（既有断言零改动的根据）。
+    expect(buildPanelSrc('/fenix-dashboard/', '#/overview')).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/overview',
+    )
+    expect(buildPanelSrc('/fenix-dashboard/', '#/overview', undefined)).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/overview',
+    )
+    expect(buildPanelSrc('/fenix-dashboard/', '#/overview', 'sepia')).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/overview',
+    )
+  })
+
+  it('固定条目深链产出含 &theme= 段：快照深/浅两档（渲染期取缓存）', async () => {
+    const dark = await appliedWithTheme('dark', { fetchProjects: noopFetch })
+    const overview = mainEntries(dark).find((entry) => entry.options.key === 'fenix-overview')
+    expect(iframeOf(overview?.component).props?.src).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard&theme=dark#/overview',
+    )
+    dark.stop()
+
+    const light = await appliedWithTheme('light', { fetchProjects: noopFetch })
+    const help = mainEntries(light).find((entry) => entry.options.key === 'fenix-help')
+    expect(iframeOf(help?.component).props?.src).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard&theme=light#/help',
+    )
+    light.stop()
+  })
+
+  it('宿主主题 API 缺席：深链产出与既有契约逐字符一致（D4 降级零注入）', async () => {
+    const stub = await appliedWithTheme(undefined, { fetchProjects: noopFetch })
+    const overview = mainEntries(stub).find((entry) => entry.options.key === 'fenix-overview')
+    expect(iframeOf(overview?.component).props?.src).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/overview',
+    )
+    stub.stop()
+  })
+
+  it('事件刷新缓存后：晚渲染固定面板与右缘页签注入最新档（先刷新缓存再广播）', async () => {
+    const stub = await appliedWithTheme('light', { fetchProjects: noopFetch })
+    stub.fireTheme('dark')
+    const overview = mainEntries(stub).find((entry) => entry.options.key === 'fenix-overview')
+    expect(iframeOf(overview?.component).props?.src).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard&theme=dark#/overview',
+    )
+    // 右缘页签 body 渲染惰性求值：同样注入最新档（spec「初始主题参数注入」
+    // 三挂载点覆盖之一）。
+    const body = createFenixProjectsBody('/fenix-dashboard')
+    const iframe = collectByType(body({}), 'iframe')[0] as ElementLike | undefined
+    expect(iframe?.props?.src).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard&theme=dark#/projects',
+    )
+    stub.stop()
+  })
+
+  it('项目面板注册期拼串取缓存：installThemeFollow 接入点先于项目同步注册（design D3）', async () => {
+    const stub = await appliedWithTheme('dark', { fetchProjects: () => Promise.resolve(['fenixd']) })
+    const projectPanel = mainEntries(stub).find((entry) => entry.options.key === 'fenix-project-fenixd')
+    expect(iframeOf(projectPanel?.component).props?.src).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard&theme=dark#/projects/fenixd',
+    )
+    stub.stop()
+  })
+
+  it('三挂载点接线源码钉：固定条目/项目面板/右缘页签全量注入快照档 + 装配点先于注册', () => {
+    const clientSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
+    // 装配点在 apply 内、先于固定条目注入与项目同步（grep 对账：三处调用点
+    // 全部注入，design Risks「三挂载点漏改」条款）。
+    expect(clientSrc).toContain('const stopThemeFollow = installThemeFollow(ctx)')
+    expect(clientSrc).toContain('buildPanelSrc(prefix, entry.route, currentThemeScheme())')
+    expect(clientSrc).toContain('buildPanelSrc(prefix, route, currentThemeScheme())')
+    const rightTabSrc = readFileSync(new URL('../src/client/rightTab.tsx', import.meta.url), 'utf8')
+    expect(rightTabSrc).toContain(
+      'buildPanelSrc(prefix, routeForSidebarParams(params), currentThemeScheme())',
+    )
   })
 })

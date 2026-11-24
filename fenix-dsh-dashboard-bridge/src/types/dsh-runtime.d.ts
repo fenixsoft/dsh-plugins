@@ -202,6 +202,24 @@ declare module '@deepseek-ai/cordis' {
     readonly sidebarRight?: {
       openTab(kind: string, options?: { readonly params?: unknown }): void
     }
+    /**
+     * cordis 事件订阅（cordis@4.0.4 Events mixin 核心面：`ctx.on(event,
+     * listener)` 返回退订 disposer——dsh-client-ui-sidebar-terminal 0.2.2-rc.1
+     * lib/client.js `subscribe: (listener) => ctx.on("theme/change", listener)`
+     * 同消费形）。最小消费面：theme/change 主题跟随订阅（themeFollow.ts）。
+     */
+    on(event: string, listener: (snapshot: unknown) => void): unknown
+    /**
+     * 主题服务（@deepseek-ai/dsh-client-ui-theme 提供，服务键 "theme"，
+     * ThemeRuntime 子集，0.2.0-rc.2 lib/types/client/index.d.ts 钉死）。最小
+     * 消费面：getTheme() 快照的 active.colorScheme（'light'|'dark'，system
+     * 偏好已解析）供初始注入档；实时跟随走 ctx.on('theme/change')。声明可选
+     * 理由同上：旧版宿主缺席 → themeFollow D4 降级（cordis proxy 对缺失
+     * 服务属性访问抛错，调用侧 try/catch 吞掉）。
+     */
+    readonly theme?: {
+      getTheme?(): { readonly active?: { readonly colorScheme?: 'light' | 'dark' } } | undefined
+    }
   }
 
   /** slots.register 的注册选项（SlotRegistrationOptions / KindOptions 子集）。 */
