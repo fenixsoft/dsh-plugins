@@ -36,6 +36,7 @@ import type { AlertCountFetcher } from './alertCount.js'
 import { DashboardPanel, fixedIconComponent, installWorkspaceNav, opsAlertLabelThunk, projectGroupStore } from './panels.js'
 import type { FixedEntryId } from './panels.js'
 import { registerFileContextMenu } from './locate.js'
+import { currentThemeScheme, installThemeFollow } from './themeFollow.js'
 import {
   createSidebarProjectOpener,
   LOCATE_ICON_KEY,
@@ -60,7 +61,10 @@ import type {
  * （文件右键解析会话 workspace 根，dsh-client-ui-session）、contextMenus
  * （文件右键菜单贡献，dsh-client-ui-context-menu）2026-11-11 追加；
  * sidebarRight/sidebarRightTabs（右侧边栏页签，dsh-client-ui-sidebar-right）
- * 同日 m02220 语义纠正后追加——「Fenix 项目」落对话界面右缘 dock。 */
+ * 同日 m02220 语义纠正后追加——「Fenix 项目」落对话界面右缘 dock；theme
+ * （dsh-client-ui-theme，2026-11-24 主题跟随 SPEC add-bridge-theme-channel）
+ * 供 ctx.theme 快照与 theme/change 事件——旧版宿主缺席时 installThemeFollow
+ * 内部降级（D4，缺失服务的属性访问抛错在 try/catch 内吞掉）。 */
 export const inject = [
   'slots',
   'layout',
@@ -70,6 +74,7 @@ export const inject = [
   'contextMenus',
   'sidebarRight',
   'sidebarRightTabs',
+  'theme',
 ]
 
 /** 5 个固定条目：id 与深链一一对应，order 10–18（「Fenix 项目」已移入右侧
@@ -519,7 +524,9 @@ export function projectEntrySink(ctx: Context, prefix: string): ProjectEntrySink
   const registerProjectPanel = (name: string, route: string): void => {
     // 防御自守：重名重复 add 先注销旧注册，避免旧 disposer 被覆盖后无法注销（泄漏）。
     disposers.get(name)?.()
-    const src = buildPanelSrc(prefix, route)
+    // 注册期拼串（非渲染惰性）取主题缓存——installThemeFollow 接入点先于
+    // 本注册（apply 顶部），首轮项目面板即注入宿主当前档（design D3）。
+    const src = buildPanelSrc(prefix, route, currentThemeScheme())
     const disposePanel = ctx.slots.register({ name: 'main', key: projectIdFor(name) }, () =>
       DashboardPanel({ src }),
     )
@@ -749,6 +756,13 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   const resolved = resolveBridgeConfig(options)
   const prefix = resolved.prefix
 
+  // 宿主主题跟随（SPEC add-bridge-theme-channel）：接入点 MUST 先于固定条目
+  // 注入与项目同步——projectEntrySink 的 src 在 registerProjectPanel 时即拼串
+  // （非渲染惰性求值），晚装入会让首轮项目面板取到未初始化缓存（design D3）。
+  // 宿主主题 API 缺席（旧版 dsh web）→ installThemeFollow 内部 D4 降级：
+  // 缓存 undefined（三挂载点注入档为空，输出与现状逐字符一致）、不订阅。
+  const stopThemeFollow = installThemeFollow(ctx)
+
   // 固定侧栏条目（order 10–18，线性图标）；「Fenix 项目」总览入口在右侧
   // 边栏页签（m02220 语义纠正，见 rightTab.tsx），不在左侧 rail。
   ctx.slots.inject('sidebar.panellist', () => {
@@ -777,7 +791,9 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   ctx.slots.inject('main', () => {
     const disposers = FIXED_ENTRIES.map((entry) =>
       ctx.slots.register({ name: 'main', key: entry.id }, () =>
-        DashboardPanel({ src: buildPanelSrc(prefix, entry.route) }),
+        // 渲染期同步取主题缓存（固定条目面板为渲染惰性求值，注入档恒为
+        // 宿主最近档）；缓存 undefined（宿主主题 API 缺席）→ 无 theme 段。
+        DashboardPanel({ src: buildPanelSrc(prefix, entry.route, currentThemeScheme()) }),
       ),
     )
     return () => {
@@ -851,5 +867,6 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     stopAlertBadge()
     stopSync()
     sink.disposeAll()
+    stopThemeFollow() // 面板注销后再退订 theme/change + 清缓存（收口序，防悬空广播）
   }
 }

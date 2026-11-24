@@ -33,6 +33,7 @@ import { buildProjectRowMap, compareNames } from './projectSync.js'
 import type { ProjectRowInfo, ProjectSummaryProjection, WorkspaceItemLike } from './projectSync.js'
 import { createNativeTipSuppressor, createWorkspaceTipController } from './wsTooltip.js'
 import type { WorkspaceTipController } from './wsTooltip.js'
+import { registerPanelWindow, unregisterPanelWindow } from './themeFollow.js'
 
 /** ui-sidebar 传给图标组件的 owner props（SidebarPanelIconOwnerProps 子集）。 */
 export interface PanelIconProps {
@@ -223,6 +224,27 @@ export function fixedIconComponent(id: FixedEntryId): (props: PanelIconProps) =>
  * 力并把跨帧通信全量改走 postMessage）。
  */
 export function DashboardPanel({ src }: { readonly src: string }): ReactElement {
+  // 主题广播注册表接线（SPEC add-bridge-theme-channel D2）：callback ref 无
+  // hook 化（本组件维持「无 hook 纯函数」纪律，服务端/测试可直接求值元素树）
+  // ——attach 登记当前 contentWindow、detach 注销闭包记下的窗口（React 卸载
+  // 序先于窗口销毁，注销先于销毁）；每渲染新 ref 闭包产生 detach→attach 对称
+  // 翻转，注册表 Set 去重后净效果恒为「挂载期间在册」。iframe 暂无
+  // contentWindow 的瞬态两侧均静默跳过。
+  let attachedWindow: Window | null = null
+  const attachPanelWindow = (iframe: HTMLIFrameElement | null): void => {
+    if (iframe !== null) {
+      const win = iframe.contentWindow
+      if (win !== null && win !== undefined) {
+        attachedWindow = win
+        registerPanelWindow(win)
+      }
+      return
+    }
+    if (attachedWindow !== null) {
+      unregisterPanelWindow(attachedWindow)
+      attachedWindow = null
+    }
+  }
   return (
     <div
       style={{
@@ -237,6 +259,7 @@ export function DashboardPanel({ src }: { readonly src: string }): ReactElement 
       }}
     >
       <iframe
+        ref={attachPanelWindow}
         src={src}
         title="Fenix Dashboard"
         style={{
