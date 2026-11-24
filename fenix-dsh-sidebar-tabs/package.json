@@ -1,0 +1,29 @@
+{
+  "name": "fenix-dsh-sidebar-tabs",
+  "version": "0.1.0",
+  "description": "dsh web 侧栏顶部功能/工作区双 Tab 切换：品牌区与新会话按钮下方注入「功能 / 工作区」分段控件，display 级切换全局导航与 Workspaces 区可见性（不搬移官方 DOM），选择记忆、收起态不渲染、锚失配零注入退出",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.0 <0.3"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  }
+}
