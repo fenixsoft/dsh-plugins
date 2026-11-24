@@ -459,6 +459,27 @@
 			}
 
 			/* ── 用户消息 Markdown 渲染器（遮蔽官方 UserMessageNodeView）── */
+
+			/* markdown 开关订阅（真机实证修复）：本组件是 memo 组件、props（node）
+			 * 在既有消息上不变——仅「渲染期读一次 store」时，开关切换后既有消息节点
+			 * 不重渲，气泡停留在 className 形态而样式表规则已被移除（裸奔）。订阅
+			 * store 让已挂载实例随开关即时切换投影形态（「既有与后续消息即时回退」
+			 * 的 SPEC 语义）。布尔原始值作 getSnapshot 天然引用稳定 */
+			var useMarkdownEnabled = typeof react.useSyncExternalStore === 'function'
+				? function () {
+					return react.useSyncExternalStore(toggleStore.subscribe, function () {
+						return toggleStore.get('markdown') !== false
+					})
+				}
+				: function () {
+					var state = react.useState(toggleStore.get('markdown') !== false)
+					var setState = state[1]
+					react.useEffect(function () {
+						return toggleStore.subscribe(function () { setState(toggleStore.get('markdown') !== false) })
+					}, [])
+					return state[0]
+				}
+
 			var MarkdownUserView = react.memo(function MarkdownUserView(props) {
 				var node = props.node
 				var data = (node && node.data) || {}
@@ -471,9 +492,9 @@
 				var referenceLabels = Array.isArray(data.referenceLabels) ? data.referenceLabels : []
 				/* 开关分流（design D3）：markdown 关闭 → 官方等效纯文本投影分支（同一
 				 * 气泡结构、text 纯文本、附件/图片卡行为不变，仅不挂 MarkdownText 与
-				 * 复制按钮）；开启 → 现行 Markdown 渲染。读 store 每渲染一次，切换经
-				 * 订阅驱动重渲 */
-				var markdownOn = toggleStore.get('markdown') !== false
+				 * 复制按钮）；开启 → 现行 Markdown 渲染。经 useMarkdownEnabled 订阅，
+				 * 既有与后续消息节点随开关即时切换（不依赖 props 变化） */
+				var markdownOn = useMarkdownEnabled()
 				/* 视觉承载：开启态走样式表类（MARKDOWN_CSS 规则），关闭态样式表随块
 				 * 移除、改内联 style 复刻同一份值（BUBBLE_VISUALS 单源，两态不漂移） */
 				function visProps(key, extra) {
