@@ -48,7 +48,11 @@ serve:
 ready:
   url: /fenix-dashboard/api/projects
   expect: 200
-  timeout: 120
+  # 2026-11-24 admin（spec=add-bridge-theme-channel）：120→240。serve 增设账户区
+  # 预热门（verify-web-bridge-warmup.py，握手交接前等 Account menu 按钮在场，
+  # 上限 FENIX_VERIFY_WARMUP_TIMEOUT_MS=120s）——ready 探针须经「boot(~5s)+
+  # 预热(≤120s)」才见代理 200，timeout 须覆盖两者总和留余量。
+  timeout: 240
 
 regression:
   cmd: |

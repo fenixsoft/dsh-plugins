@@ -287,6 +287,27 @@ PNG
       kill "$WEB_PID" 2>/dev/null || true
       exit 1
     fi
+    # ---------------------------------------------------------------------------
+    # 账户区预热门（admin 2026-11-24，spec=add-bridge-theme-channel
+    # inconclusive_loop 根治）：web 场景批内同实例「概览」按钮秒级在场而
+    # Account menu 按钮 10s 超时（judge 裁 env：冷启动 35-65s 窗口滞后、窗口外
+    # <1s 对照）；admin 干净盘面复测（2026-11-24 冷启动探针）证明滞后非实例
+    # 固有属性（boot+11s 首载 59ms 即在场），属条件性劣化（验证实例泄漏堆积/
+    # CPU 争抢类瞬态）。引擎 wait 硬上限 10000ms（core/verify_engine/
+    # browser.py wait 分支）场景侧不可配，上轮 scenario-repaired（插 wait 步）
+    # 已被证不足。故在 serve 层吸收：token 捕获后、握手交接前，无头 Chromium
+    # （与引擎同款 launch 参数）加载实例页等账户区按钮在场——健康时预热即
+    # 秒级空过（实测 +1.5s boot 预算），劣化时吸收全部瞬态路径，场景永远看
+    # 到暖实例。超时 fail-fast 终止 serve（boot 级 env 错误优于逐场景 flaky
+    # 超时）；playwright import 失败 fail-open 放行（脚本内告警留痕）。
+    # 上限 FENIX_VERIFY_WARMUP_TIMEOUT_MS（缺省 120s）；verify.yaml ready
+    # timeout 已同步放宽（240s）覆盖「boot+预热」总和。
+    if ! python3 "$ROOT/.fenix/verify-web-bridge-warmup.py" "http://127.0.0.1:$UP_PORT/?token=$TOKEN"; then
+      echo "[verify-web-bridge] 账户区预热失败（壳层/账户区未就绪），终止 serve" >&2
+      kill "$PROXY_PID" 2>/dev/null || true
+      kill "$WEB_PID" 2>/dev/null || true
+      exit 1
+    fi
     echo "[verify-web-bridge] upstream dsh web: http://127.0.0.1:$UP_PORT/?token=$TOKEN"
     # 原子握手交接（temp+mv：代理读侧无半写窗口），随后脚本 wait 代理常伴
     # ——本进程存活句柄与旧 exec 形态等价，终局 killpg 全组回收
