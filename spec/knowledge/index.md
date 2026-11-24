@@ -1,5 +1,5 @@
 # 知识真相源
-> 最后更新：2026-11-24 15:54 UTC+8
+> 最后更新：2026-11-24 15:59 UTC+8
 
 本目录蒸馏各归档 SPEC 中仍然成立的当前业务规则，按能力域组织；架构级裁定见 [adr/index.md](adr/index.md)。
 
@@ -12,3 +12,4 @@
 | 3 | [session-search](domains/session-search/_domain.md) | 在全部工作区的历史会话中按自然语言描述定位目标会话 | 1 | 2026-11-13 18:46 |
 | 4 | [plugin-rollout](domains/plugin-rollout/_domain.md) | 把本仓 dsh 插件装入真实 dsh web 实例并在真机上完成验收的能力 | 1 | 2026-11-16 14:16 |
 | 5 | [sidebar-navigation](domains/sidebar-navigation/_domain.md) | dsh web 侧栏内容组织与导航形态定制的能力 | 1 | 2026-11-24 15:54 |
+| 6 | [chat-surface](domains/chat-surface/_domain.md) | dsh web 对话主区（消息列、输入框、hero 工作区）形态定制与用户级开关治理的能力 | 1 | 2026-11-24 15:59 |

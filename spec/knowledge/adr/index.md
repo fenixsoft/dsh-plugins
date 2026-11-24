@@ -10,3 +10,4 @@
 | [ADR-006](ADR-006-plugin-verify-isolated-profile.md) | accepted | 插件真机验证走隔离 profile，live 实例只读、刷新为文档化人工步骤 |
 | [ADR-007](ADR-007-plugin-build-form-typed-by-client-half.md) | accepted | 插件构建形态按 client 半性质分型：展示层注入零构建、含 Host 业务逻辑插件 tsdown 构建 |
 | [ADR-008](ADR-008-web-ui-injection-dom-discipline.md) | accepted | dsh web 展示层注入纪律：CSS-modules 键名锚定、display 级重组禁 reparent、失配零注入退出 |
+| [ADR-009](ADR-009-plugin-toggles-client-self-contained.md) | accepted | 插件功能开关 client 半自持（localStorage 单键 pub/sub store），插槽注册常驻、组件内部分流 |
