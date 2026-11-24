@@ -1,7 +1,8 @@
 # ADR-004：client 半统一 tsdown 双入口构建，产物预构建交付
 
 date: 2026-10-30
-status: accepted
+status: superseded
+Superseded by: ADR-007(插件构建形态按 client 半性质分型)
 
 ## Context
 
