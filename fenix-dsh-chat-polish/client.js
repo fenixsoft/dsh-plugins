@@ -568,6 +568,9 @@
 					}
 					if (state === false) return /* 坏值终局降级：不订阅不重试 */
 					timer = setTimeout(poll, 1000)
+					/* 测试/非浏览器宿主：轮询计时器不持有事件循环（浏览器 setTimeout
+					 * 返回 number 无 unref，守卫跳过；dispose 仍 clearTimeout 收口） */
+					if (timer !== null && typeof timer.unref === 'function') timer.unref()
 				}
 				poll()
 				return function stop() {
