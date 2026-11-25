@@ -25,6 +25,14 @@
  *
  * 降级：宿主半契约失配时 /auth/credentials 不可达，分区操作得到网络错误
  * 提示，不影响官方设置弹窗其余分区。
+ *
+ * i18n（宿主语言跟随轮）：全部分区 UI 文案（分区 label / 输入标签 / 状态行
+ * / 错误与成功消息）走本文件内嵌小词典（bridge pluginLocale 小词典模式移植
+ * ，键值双列，zh 列=历史硬编码串逐字），宿主档经 installLocaleFollow 读
+ * `ctx.locale` 快照 + locale/change 事件跟随（bridge 轮询口径：late provide
+ * 1s 重试）；宿主语言能力缺席时降级 zh 档 = 现状行为。边界：分区内部文案
+ * 在组件渲染期求值，宿主切语言后弹窗已打开的分区要等下次渲染（重开弹窗/
+ * 状态变更）才换档，不做 bridge 式遮蔽重注册触发。
  */
 (function () {
 	'use strict'
@@ -92,6 +100,147 @@
 				return Boolean(err) && err.name === 'AbortError'
 			}
 
+			/* ==================== i18n 宿主语言跟随（bridge pluginLocale
+			 * 小词典模式移植，零构建单文件形态） ==================== */
+
+			/* 宿主档缓存（undefined = 语言能力缺席，降级 zh 档 = 现状行为）。
+			 * installLocaleFollow 装入快照与 locale/change 事件各刷新一次。 */
+			var cachedLocale
+
+			/** 宿主档归一（bridge normalizeLocaleScheme 白名单口径逐字对齐）：
+			 * 'zh'→'zh-CN'、'en'→'en-US'、fenix 档值原样通过，其余（含
+			 * undefined/形状漂移值）返回 undefined。 */
+			function normalizeLocale(value) {
+				if (value === 'zh') return 'zh-CN'
+				if (value === 'en') return 'en-US'
+				return value === 'zh-CN' || value === 'en-US' ? value : undefined
+			}
+
+			/** 快照 → 白名单档（locale/change listener 的宽面入参在此收窄；
+			 * 非对象快照/形状漂移一律 undefined）。 */
+			function localeOf(snapshot) {
+				if (!snapshot || typeof snapshot !== 'object') return undefined
+				return normalizeLocale(snapshot.active)
+			}
+
+			/** 文案键值对（zh 为历史硬编码串逐字，en 对应译）。 */
+			var AUTH_DICT = {
+				/* 分区与控件 */
+				'auth.section.label': ['登录', 'Sign in'],
+				'auth.label.username': ['用户名', 'Username'],
+				'auth.label.password': ['密码（至少 8 个字符）', 'Password (at least 8 characters)'],
+				'auth.label.confirm': ['确认密码', 'Confirm password'],
+				'auth.action.save': ['保存', 'Save'],
+				'auth.action.remove': ['移除账号密码', 'Remove account password'],
+				'auth.confirm.remove': ['确定移除账号密码？移除后 dsh web 将回退为仅 token 登录。', 'Remove the account password? dsh web will then fall back to token-only sign-in.'],
+				/* 状态行 */
+				'auth.status.loading': ['读取中…', 'Loading…'],
+				'auth.status.unknown': ['状态未知', 'Status unknown'],
+				'auth.status.configured': ['已配置账号密码：', 'Account password configured: '],
+				'auth.status.notConfigured': ['未配置账号密码（仅 token 登录）', 'No account password configured (token-only sign-in)'],
+				/* 成功消息 */
+				'auth.msg.saved': ['已保存账号密码', 'Account password saved'],
+				'auth.msg.removed': ['已移除账号密码，回退为仅 token 登录', 'Account password removed; token-only sign-in restored'],
+				/* 错误消息（带插值的 HTTP/校验码串按 bridge stats 同款前后缀分段） */
+				'auth.err.loginRequired': ['请先登录后再配置账号密码', 'Sign in before configuring the account password'],
+				'auth.err.loginRequiredRemove': ['请先登录后再操作', 'Please sign in first'],
+				'auth.err.invalidUsername': ['用户名需要 1-64 个字符', 'Username must be 1-64 characters'],
+				'auth.err.passwordTooShort': ['密码至少 8 个字符', 'Password must be at least 8 characters'],
+				'auth.err.confirmMismatch': ['两次输入的密码不一致', 'Passwords do not match'],
+				'auth.err.bodyTooLarge': ['请求体过大', 'Request body too large'],
+				'auth.err.unsupportedBody': ['请求格式不受支持', 'Unsupported request body format'],
+				'auth.err.crossOrigin': ['跨源请求被拒绝', 'Cross-origin request rejected'],
+				'auth.err.malformed': ['凭据状态响应格式异常（HTTP ', 'Malformed credential status response (HTTP '],
+				'auth.err.readFailed': ['读取登录凭据失败（HTTP ', 'Failed to read credential status (HTTP '],
+				'auth.err.readTimeout': ['读取登录凭据请求超时', 'Credential status request timed out'],
+				'auth.err.unreachable': ['登录插件服务不可达（宿主半可能已降级）', 'Auth plugin service unreachable (the host half may be degraded)'],
+				'auth.err.validation': ['校验失败（', 'Validation failed ('],
+				'auth.err.validationHttp': ['校验失败（HTTP 400）', 'Validation failed (HTTP 400)'],
+				'auth.err.saveFailed': ['保存失败（HTTP ', 'Save failed (HTTP '],
+				'auth.err.saveTimeout': ['保存失败：请求超时', 'Save failed: request timed out'],
+				'auth.err.saveUnreachable': ['保存失败：服务不可达', 'Save failed: service unreachable'],
+				'auth.err.removeFailed': ['移除失败（HTTP ', 'Remove failed (HTTP '],
+				'auth.err.removeTimeout': ['移除失败：请求超时', 'Remove failed: request timed out'],
+				'auth.err.removeUnreachable': ['移除失败：服务不可达', 'Remove failed: service unreachable'],
+				/* 拼接收尾括号（`（HTTP 404）` / `（<error>）` 尾段，zh/en 各自配对） */
+				'auth.common.parenClose': ['）', ')'],
+			}
+
+			/** 取文案（渲染/求值期调用，返回当前档串）：en 档取 en 列，zh 档与
+			 * 降级路径取 zh 列；键不存在回退键名本身（开发期可见）。 */
+			function t(key) {
+				var entry = AUTH_DICT[key]
+				if (!entry) return key
+				return cachedLocale === 'en-US' ? entry[1] : entry[0]
+			}
+
+			/** 宿主语言跟随装配（bridge installLocaleFollow 轮询口径移植）：
+			 * locale 服务 late provide（async apply 晚于本插件同步 apply）→
+			 * 未就绪 1s 重试直至终局；成功即订阅 locale/change 刷新缓存。降级
+			 * （bridge 同款「宁缺毋错」）：ctx.locale 缺席/属性访问抛错（cordis
+			 * proxy 对未 inject 服务）→ 继续等；订阅面缺席/快照非白名单坏值 →
+			 * 终局降级（缓存恒 undefined，t() 走 zh 档 = 现状行为），零报错。
+			 * 返回收口函数（停轮询 + 退订 + 清缓存）。 */
+			function installLocaleFollow(ctx) {
+				cachedLocale = undefined /* 装入即重置：降级路径缓存恒 undefined，重装不残留旧档 */
+				var stopped = false
+				var timer = 0
+				var unsubscribe
+				var subscribe = function () {
+					try {
+						var dispose = ctx.on('locale/change', function (snapshot) {
+							var loc = localeOf(snapshot)
+							if (loc === undefined) return /* 白名单外值：缓存保持 last-known-good */
+							cachedLocale = loc
+						})
+						if (typeof dispose === 'function') unsubscribe = dispose
+					} catch (err) {
+						/* 订阅抛错：不订阅，只失实时跟随，快照档已落缓存 */
+					}
+				}
+				/* 单轮接入尝试：true = 已终局（成功或降级），false = 未就绪需再等。 */
+				var attempt = function () {
+					try {
+						var localeService = ctx ? ctx.locale : null
+						if (!localeService || typeof localeService.getSnapshot !== 'function') return false
+						if (typeof ctx.on !== 'function') return true /* 订阅面缺席：无法跟随，终局降级 */
+						var initial
+						try {
+							var snap = localeService.getSnapshot()
+							var raw = snap ? snap.active : undefined
+							if (raw === undefined || raw === null || raw === '') return false /* 早期空快照：等 settings 回同步 */
+							initial = normalizeLocale(raw)
+						} catch (err) {
+							return false /* getSnapshot 抛错（形状漂移/未就绪）：继续等 */
+						}
+						if (initial === undefined) return true /* 非空且非白名单：坏值，宁缺毋错 */
+						cachedLocale = initial
+						subscribe()
+						return true
+					} catch (err) {
+						return false /* ctx.locale 属性访问抛错（cordis proxy）→ 继续等 */
+					}
+				}
+				var poll = function () {
+					if (stopped) return
+					if (attempt()) return /* 终局（成功或降级），不再排程 */
+					timer = setTimeout(poll, 1000) /* 未就绪：1s 后再试（locale 服务 late provide） */
+				}
+				poll()
+				return function () {
+					stopped = true
+					if (timer) clearTimeout(timer)
+					if (typeof unsubscribe === 'function') {
+						try {
+							unsubscribe()
+						} catch (err) {
+							/* 收口自守 */
+						}
+					}
+					cachedLocale = undefined
+				}
+			}
+
 			/** 读取凭据状态；非 2xx 返回 null（由调用方按错误提示）。2xx 响应体
 			 * 非 JSON（网关错误页、半截响应等）时以 malformedBody 标记，与网络
 			 * 不可达区分；abort 异常原样上抛（超时文案口径不变）。 */
@@ -148,18 +297,18 @@
 							if (result.data.configured) setUsername(String(result.data.username ?? ''))
 							setLoading('ready')
 						} else if (result.response.status === 401) {
-							setMessage({ kind: 'error', text: '请先登录后再配置账号密码' })
+							setMessage({ kind: 'error', text: t('auth.err.loginRequired') })
 							setLoading('ready')
 						} else if (result.malformedBody) {
-							setMessage({ kind: 'error', text: '凭据状态响应格式异常（HTTP ' + result.response.status + '）' })
+							setMessage({ kind: 'error', text: t('auth.err.malformed') + result.response.status + t('auth.common.parenClose') })
 							setLoading('ready')
 						} else {
-							setMessage({ kind: 'error', text: '读取登录凭据失败（HTTP ' + result.response.status + '）' })
+							setMessage({ kind: 'error', text: t('auth.err.readFailed') + result.response.status + t('auth.common.parenClose') })
 							setLoading('ready')
 						}
 					}).catch(function (err) {
 						if (cancelled) return
-						setMessage({ kind: 'error', text: isAbortError(err) ? '读取登录凭据请求超时' : '登录插件服务不可达（宿主半可能已降级）' })
+						setMessage({ kind: 'error', text: isAbortError(err) ? t('auth.err.readTimeout') : t('auth.err.unreachable') })
 						setLoading('ready')
 					})
 					return function () {
@@ -171,15 +320,15 @@
 				function onSave() {
 					if (busy) return
 					if (username.length < 1 || username.length > 64) {
-						setMessage({ kind: 'error', text: '用户名需要 1-64 个字符' })
+						setMessage({ kind: 'error', text: t('auth.err.invalidUsername') })
 						return
 					}
 					if (password.length < 8) {
-						setMessage({ kind: 'error', text: '密码至少 8 个字符' })
+						setMessage({ kind: 'error', text: t('auth.err.passwordTooShort') })
 						return
 					}
 					if (confirm !== password) {
-						setMessage({ kind: 'error', text: '两次输入的密码不一致' })
+						setMessage({ kind: 'error', text: t('auth.err.confirmMismatch') })
 						return
 					}
 					setBusy(true)
@@ -196,37 +345,37 @@
 							setStatus({ configured: true, username: username })
 							setPassword('')
 							setConfirm('')
-							setMessage({ kind: 'ok', text: '已保存账号密码' })
+							setMessage({ kind: 'ok', text: t('auth.msg.saved') })
 						} else if (response.status === 401) {
-							setMessage({ kind: 'error', text: '请先登录后再配置账号密码' })
+							setMessage({ kind: 'error', text: t('auth.err.loginRequired') })
 						} else if (response.status === 400) {
 							response.json().then(function (data) {
 								if (unmountedRef.current) return
 								var texts = {
-									'invalid-username': '用户名需要 1-64 个字符',
-									'password-too-short': '密码至少 8 个字符',
-									'confirm-mismatch': '两次输入的密码不一致',
-									'body-too-large': '请求体过大',
-									'unsupported-body': '请求格式不受支持',
+									'invalid-username': t('auth.err.invalidUsername'),
+									'password-too-short': t('auth.err.passwordTooShort'),
+									'confirm-mismatch': t('auth.err.confirmMismatch'),
+									'body-too-large': t('auth.err.bodyTooLarge'),
+									'unsupported-body': t('auth.err.unsupportedBody'),
 								}
 								/* 白名单取值（对齐 host 半 normalizeLoginError 的
 								 * Object.hasOwn 口径）：裸下标会命中 Object.prototype
 								 * 键（如 'constructor'），取到函数等非字符串渲染。 */
 								var rawError = data && data.error
-								var text = typeof rawError === 'string' && Object.hasOwn(texts, rawError) ? texts[rawError] : '校验失败（' + String(rawError) + '）'
+								var text = typeof rawError === 'string' && Object.hasOwn(texts, rawError) ? texts[rawError] : t('auth.err.validation') + String(rawError) + t('auth.common.parenClose')
 								setMessage({ kind: 'error', text: text })
 							}).catch(function () {
 								if (unmountedRef.current) return
-								setMessage({ kind: 'error', text: '校验失败（HTTP 400）' })
+								setMessage({ kind: 'error', text: t('auth.err.validationHttp') })
 							})
 						} else if (response.status === 403) {
-							setMessage({ kind: 'error', text: '跨源请求被拒绝' })
+							setMessage({ kind: 'error', text: t('auth.err.crossOrigin') })
 						} else {
-							setMessage({ kind: 'error', text: '保存失败（HTTP ' + response.status + '）' })
+							setMessage({ kind: 'error', text: t('auth.err.saveFailed') + response.status + t('auth.common.parenClose') })
 						}
 					}).catch(function (err) {
 						if (unmountedRef.current) return
-						setMessage({ kind: 'error', text: isAbortError(err) ? '保存失败：请求超时' : '保存失败：服务不可达' })
+						setMessage({ kind: 'error', text: isAbortError(err) ? t('auth.err.saveTimeout') : t('auth.err.saveUnreachable') })
 					}).finally(function () {
 						if (unmountedRef.current) return
 						setBusy(false)
@@ -235,7 +384,7 @@
 
 				function onRemove() {
 					if (busy) return
-					if (!window.confirm('确定移除账号密码？移除后 dsh web 将回退为仅 token 登录。')) return
+					if (!window.confirm(t('auth.confirm.remove'))) return
 					setBusy(true)
 					setMessage(null)
 					fetchWithTimeout('/auth/credentials', { method: 'DELETE' }).then(function (response) {
@@ -244,15 +393,15 @@
 							setStatus({ configured: false, username: null })
 							setPassword('')
 							setConfirm('')
-							setMessage({ kind: 'ok', text: '已移除账号密码，回退为仅 token 登录' })
+							setMessage({ kind: 'ok', text: t('auth.msg.removed') })
 						} else if (response.status === 401) {
-							setMessage({ kind: 'error', text: '请先登录后再操作' })
+							setMessage({ kind: 'error', text: t('auth.err.loginRequiredRemove') })
 						} else {
-							setMessage({ kind: 'error', text: '移除失败（HTTP ' + response.status + '）' })
+							setMessage({ kind: 'error', text: t('auth.err.removeFailed') + response.status + t('auth.common.parenClose') })
 						}
 					}).catch(function (err) {
 						if (unmountedRef.current) return
-						setMessage({ kind: 'error', text: isAbortError(err) ? '移除失败：请求超时' : '移除失败：服务不可达' })
+						setMessage({ kind: 'error', text: isAbortError(err) ? t('auth.err.removeTimeout') : t('auth.err.removeUnreachable') })
 					}).finally(function () {
 						if (unmountedRef.current) return
 						setBusy(false)
@@ -260,18 +409,18 @@
 				}
 
 				var statusText = loading === 'loading'
-					? '读取中…'
+					? t('auth.status.loading')
 					: status === null
-						? '状态未知'
+						? t('auth.status.unknown')
 						: status.configured
-							? '已配置账号密码：' + String(status.username ?? '')
-							: '未配置账号密码（仅 token 登录）'
+							? t('auth.status.configured') + String(status.username ?? '')
+							: t('auth.status.notConfigured')
 
 				return createElement('div', { style: { paddingBottom: 16 } },
 					/* 「账号密码登录」标题已移除（2026-11-25 用户要求）：分区 nav
 					 * 标签/chat-polish 快捷登录组名已表达语境，行内标题冗余 */
 					createElement('p', { style: { margin: rowStyle.margin, fontSize: 13, color: COLOR_LABEL_SECONDARY } }, statusText),
-					createElement('label', { style: labelStyle, htmlFor: 'fenix-auth-username' }, '用户名'),
+					createElement('label', { style: labelStyle, htmlFor: 'fenix-auth-username' }, t('auth.label.username')),
 					createElement('input', {
 						id: 'fenix-auth-username',
 						style: inputStyle,
@@ -279,7 +428,7 @@
 						autoComplete: 'username',
 						onChange: function (event) { setUsername(event.target.value) },
 					}),
-					createElement('label', { style: labelStyle, htmlFor: 'fenix-auth-password' }, '密码（至少 8 个字符）'),
+					createElement('label', { style: labelStyle, htmlFor: 'fenix-auth-password' }, t('auth.label.password')),
 					createElement('input', {
 						id: 'fenix-auth-password',
 						style: inputStyle,
@@ -288,7 +437,7 @@
 						autoComplete: 'new-password',
 						onChange: function (event) { setPassword(event.target.value) },
 					}),
-					createElement('label', { style: labelStyle, htmlFor: 'fenix-auth-confirm' }, '确认密码'),
+					createElement('label', { style: labelStyle, htmlFor: 'fenix-auth-confirm' }, t('auth.label.confirm')),
 					createElement('input', {
 						id: 'fenix-auth-confirm',
 						style: inputStyle,
@@ -298,8 +447,8 @@
 						onChange: function (event) { setConfirm(event.target.value) },
 					}),
 					createElement('div', { style: { display: 'flex', gap: 8, marginTop: 16 } },
-						createElement(Button, { variant: 'outline', disabled: busy, onClick: onSave }, '保存'),
-						createElement(Button, { variant: 'ghost', disabled: busy, onClick: onRemove }, '移除账号密码'),
+						createElement(Button, { variant: 'outline', disabled: busy, onClick: onSave }, t('auth.action.save')),
+						createElement(Button, { variant: 'ghost', disabled: busy, onClick: onRemove }, t('auth.action.remove')),
 					),
 					message !== null ? createElement('p', { style: messageStyle(message.kind === 'ok' ? COLOR_OK : COLOR_DANGER), role: 'alert' }, message.text) : null,
 				)
@@ -315,6 +464,11 @@
 				 * 未声明 inject 时 ctx.slots 属性访问 throw，模块 boot 即 failed。 */
 				inject: ['slots'],
 				apply(ctx) {
+					/* 宿主语言跟随装配（i18n 宿主跟随轮）：接入点 MUST 先于槽位
+					 * 注册——settings.section 的 label thunk 为渲染期实时求值，晚
+					 * 装入会让首轮分区标签取到未初始化缓存（bridge apply 同款纪律）。
+					 * 内部自带降级与轮询，返回收口函数在 dispose 统一调用。 */
+					var stopLocaleFollow = installLocaleFollow(ctx)
 					/* 注册回调由宿主框架在渲染时声明（brand-fenix 先例：模块装载器
 					 * 保证插件晚于 inject 宿主到达），此刻官方分区已注册，可探测
 					 * 排序尾；枚举失败回退 FALLBACK_MAX_ORDER。逐槽 try/catch 降级，
@@ -338,8 +492,10 @@
 								name: 'settings.section',
 								id: 'fenix-auth',
 								order: maxOrder + 1,
+								/* label thunk（宿主 syncPanels 渲染期求值，i18n 宿主跟随轮
+								 * 词典化：求值期经 t() 取当前档，zh 列=原「登录」逐字）。 */
 								label: function () {
-									return '登录'
+									return t('auth.section.label')
 								},
 							}, AuthSection)
 						})
@@ -357,6 +513,8 @@
 						stage('settings.section.icon', err)
 					}
 					return function dispose() {
+						/* [fenix-ignore:44ca15f49734] 槽位回收已由宿主框架接管：两个 inject 工厂均返回 ctx.slots.register 的注销 disposer（dsh-runtime.d.ts 契约「工厂返回值由框架在插件卸载时收集执行」，chat-polish 同款形态、bridge apply 注释同口径），dispose 无需再逐槽保存 disposer。 */
+						stopLocaleFollow()
 						return failures.length === 0
 					}
 				},

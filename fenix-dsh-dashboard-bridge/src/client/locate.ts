@@ -148,61 +148,72 @@ export function registerFileContextMenu(ctx: {
 }, deps: LocateMenuDeps): () => void {
   const menus = ctx.contextMenus
   if (menus === undefined || typeof menus.register !== 'function') return () => {}
-  return menus.register({
-    id: LOCATE_MENU_ID,
-    target: 'file',
-    order: 90,
-    resolve: (target, signal) => {
-      try {
-        let cwd: string | undefined
+  try {
+    return menus.register({
+      id: LOCATE_MENU_ID,
+      target: 'file',
+      order: 90,
+      resolve: (target, signal) => {
         try {
-          cwd = ctx.sessions?.list?.getSnapshot()?.byId?.[target.sessionId]?.cwd
-        } catch {
-          cwd = undefined // 快照形状漂移：按解析失败降级
-        }
-        const abs = resolveWorkspacePath(cwd ?? '', target.path)
-        const hit = locateProjectForFile(abs, deps.getProjectRows())
-        if (hit === null) return []
-        const route = homeFileRouteFor(hit.name, hit.rel)
-        const action: FileMenuAction = {
-          id: LOCATE_MENU_ID,
-          // 2026-11-11 用户需求：文案「在 <项目名> 项目定位」（i18n 宿主跟随
-          // 轮：label/failureLabel 经 pluginLocale 词典，求值期取当前档）。
-          label: locateMenuLabel(hit.name),
-          ...(deps.iconKey !== undefined && deps.iconKey !== '' ? { icon: { key: deps.iconKey } } : {}),
-          failureLabel: pluginT('locate.failureLabel'),
-          run: async () => {
-            try {
-              if (typeof deps.openSidebarProjectTab === 'function') {
-                // 首选：右侧边栏「Fenix 项目」页签 openTab（pane 内 reveal 或
-                // 新开，params 送达 body 重算 iframe src 深链）。
-                deps.openSidebarProjectTab(hit.name, hit.rel)
-              } else {
-                // 回退：main keyed 面板（dispose 旧 + 新 src 重注册）+ 激活。
-                deps.openProjectAt(hit.name, route)
-                deps.selectProject(hit.name)
+          let cwd: string | undefined
+          try {
+            cwd = ctx.sessions?.list?.getSnapshot()?.byId?.[target.sessionId]?.cwd
+          } catch {
+            cwd = undefined // 快照形状漂移：按解析失败降级
+          }
+          const abs = resolveWorkspacePath(cwd ?? '', target.path)
+          const hit = locateProjectForFile(abs, deps.getProjectRows())
+          if (hit === null) return []
+          const route = homeFileRouteFor(hit.name, hit.rel)
+          const action: FileMenuAction = {
+            id: LOCATE_MENU_ID,
+            // 2026-11-11 用户需求：文案「在 <项目名> 项目定位」（i18n 宿主跟随
+            // 轮：label/failureLabel 经 pluginLocale 词典，求值期取当前档）。
+            label: locateMenuLabel(hit.name),
+            ...(deps.iconKey !== undefined && deps.iconKey !== '' ? { icon: { key: deps.iconKey } } : {}),
+            failureLabel: pluginT('locate.failureLabel'),
+            run: async () => {
+              try {
+                if (typeof deps.openSidebarProjectTab === 'function') {
+                  // 首选：右侧边栏「Fenix 项目」页签 openTab（pane 内 reveal 或
+                  // 新开，params 送达 body 重算 iframe src 深链）。
+                  deps.openSidebarProjectTab(hit.name, hit.rel)
+                } else {
+                  // 回退：main keyed 面板（dispose 旧 + 新 src 重注册）+ 激活。
+                  deps.openProjectAt(hit.name, route)
+                  deps.selectProject(hit.name)
+                }
+              } catch (error) {
+                console.warn(
+                  `[fenix-dsh-dashboard-bridge] 在 Fenix 项目中定位失败：${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                )
+                throw error // 可见失败（failureLabel 反馈），不留静默失败
               }
-            } catch (error) {
-              console.warn(
-                `[fenix-dsh-dashboard-bridge] 在 Fenix 项目中定位失败：${
-                  error instanceof Error ? error.message : String(error)
-                }`,
-              )
-              throw error // 可见失败（failureLabel 反馈），不留静默失败
-            }
-          },
+            },
+          }
+          void signal
+          return [action]
+        } catch (error) {
+          // resolve 抛错会让 contextMenus 服务整单失败（failed() → 菜单不弹出，
+          // 2026-11-11 线上回归）：任何形状漂移都降级为「不贡献菜单项」。
+          console.warn(
+            '[fenix-dsh-dashboard-bridge] resolve failed，已降级不贡献菜单项：',
+            error instanceof Error ? error.message : String(error),
+          )
+          return []
         }
-        void signal
-        return [action]
-      } catch (error) {
-        // resolve 抛错会让 contextMenus 服务整单失败（failed() → 菜单不弹出，
-        // 2026-11-11 线上回归）：任何形状漂移都降级为「不贡献菜单项」。
-        console.warn(
-          '[fenix-dsh-dashboard-bridge] resolve failed，已降级不贡献菜单项：',
-          error instanceof Error ? error.message : String(error),
-        )
-        return []
-      }
-    },
-  })
+      },
+    })
+  } catch (error) {
+    // register 本身的同步抛错（宿主注册表校验等）同样按 warn 降级返回 no-op
+    // （code-review 2956c09c8815）：与 resolve 的降级口径对齐，装配链无未处理
+    // 异常，文件头「全错误路径 warn 降级」声明成立。
+    console.warn(
+      '[fenix-dsh-dashboard-bridge] contextMenus.register 失败，已降级为 no-op：',
+      error instanceof Error ? error.message : String(error),
+    )
+    return () => {}
+  }
 }

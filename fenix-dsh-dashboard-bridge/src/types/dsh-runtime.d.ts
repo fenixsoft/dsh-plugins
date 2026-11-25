@@ -243,7 +243,9 @@ declare module '@deepseek-ai/cordis' {
      * 结果可为 React 节点）。宿主 dsh-client-ui-slots resolveSlotLabel 对
      * function 逐次调用、结果原样作为 panelTitle span children 渲染
      * （dsh-client-ui-sidebar lib/client.js 契约；窄态折叠不渲染 label）。
-     * 2026-11-13 运维条目告警计数 pill（opsAlertLabelThunk）消费 React 形态。
+     * 2026-11-13 运维条目告警计数 pill 消费 React 形态（生产路径
+     * fixedEntryLabelThunk 的 fenix-activities 分支；opsAlertLabelThunk 为其
+     * 测试专用薄包装）。
      */
     readonly label?: string | import('react').ReactNode | (() => string | import('react').ReactNode)
     /** 本条目文案所属词典命名空间；不声明则 label 按原样使用。 */

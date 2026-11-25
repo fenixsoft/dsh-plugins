@@ -779,7 +779,7 @@ describe('projectSessionStarter 与配套解析（保留不动）', () => {
     expect(resolveWorkspaceIdForProject(items, 'missing')).toBeNull()
   })
 
-  it('inject 声明：slots/layout/uiWorkspace/workspaces/sessions/contextMenus/sidebarRight/sidebarRightTabs/theme 九键', () => {
+  it('inject 声明：slots/layout/uiWorkspace/workspaces/sessions/contextMenus/sidebarRight/sidebarRightTabs 八键', () => {
     expect(inject).toContain('slots')
     expect(inject).toContain('layout')
     expect(inject).toContain('uiWorkspace')
@@ -790,9 +790,11 @@ describe('projectSessionStarter 与配套解析（保留不动）', () => {
     // 右侧边栏「Fenix 项目」页签（2026-11-11 m02220 语义纠正）新增消费面。
     expect(inject).toContain('sidebarRight')
     expect(inject).toContain('sidebarRightTabs')
-    // 宿主主题跟随（add-bridge-theme-channel）新增消费面：ctx.theme 快照 +
-    // theme/change 事件；旧版宿主缺席 → installThemeFollow 内部 D4 降级。
-    expect(inject).toContain('theme')
+    // theme 不入 inject（2026-11-26 review 0920849798c7 核实：inject 为硬依赖声明，
+    // 声明宿主不提供的服务=boot 期 waiting for service 永久 pending、D4 降级永不
+    // 触发）——与 locale 同策略，由 installThemeFollow 运行时探测 + late-provide
+    // 轮询兜底；旧版宿主缺席时静默降级 no-op。
+    expect(inject).not.toContain('theme')
   })
 
   it('右侧边栏页签源码钉（rightTab.tsx）：两段注册契约与深链路由', () => {
@@ -801,7 +803,9 @@ describe('projectSessionStarter 与配套解析（保留不动）', () => {
     expect(src).toContain("export const FENIX_TAB_ID = 'fenix-dsh-dashboard-bridge'")
     expect(src).toContain("export const FENIX_TAB_KIND = 'fenix-dashboard'")
     expect(src).toContain('keepMounted: true')
-    expect(src).toContain("title: () => 'Fenix 项目'")
+    // guide/title 文案词典化（i18n 宿主跟随轮 + review e27cf35aea7b）：thunk 经
+    // pluginT 渲染期求值（zh 档 'Fenix 项目' 由 rightTab.test.ts 行为钉兜底）。
+    expect(src).toContain("title: () => pluginT('rightTab.title')")
     expect(src).toContain("id: 'projects'")
     // body seat：keyed slot 以 definition id 为 key（sidebar-right 契约）。
     expect(src).toContain("name: 'sidebar.right.pane.tab'")

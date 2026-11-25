@@ -184,7 +184,14 @@ export function opsAlertLabelElement(text: string, count: number | null): ReactE
  * 面对运维条目换 thunk。
  */
 export function opsAlertLabelThunk(text: string): () => ReactElement {
-  return () => opsAlertLabelElement(text, alertCountStore.getSnapshot().count)
+  // 薄包装（code-review 1d532e858261）：运维条目 label/pill 求值单源收敛到
+  // fixedEntryLabelThunk('fenix-activities')（词典当前档 + opsAlertLabelElement
+  // pill），本出口不再保留第二条求值路径；生产代码全部经 fixedEntryLabelThunk，
+  // 此处仅供测试消费（tests/opsBadge.test.ts）。text 参数保留旧签名兼容（zh 档
+  // 词典值与测试钉串逐字一致），pill 形态变更只改 opsAlertLabelElement 一处。
+  void text
+  const thunk = fixedEntryLabelThunk('fenix-activities')
+  return () => thunk() as ReactElement
 }
 
 /**
@@ -464,7 +471,16 @@ function createProjectGroupStore() {
   let snapshot: ProjectGroupSnapshot = { projects: [], projectRows: [], summaries: [] }
   const listeners = new Set<Listener>()
   const emit = (): void => {
-    for (const listener of listeners) listener()
+    // 逐监听者异常隔离（对齐 chat-polish toggleStore 口径）：单个订阅者抛错
+    // （如差分清理回调内 removeOverlaysOfName 的选择器构造抛 SyntaxError）不
+    // 中断其余订阅者通知，也不阻断抛错回调自身后续逻辑之外的邻居。
+    for (const listener of listeners) {
+      try {
+        listener()
+      } catch {
+        // 订阅者异常不阻断其余通知
+      }
+    }
   }
   const sameList = (a: readonly string[], b: readonly string[]): boolean =>
     a.length === b.length && a.every((name, index) => name === b[index])
@@ -798,9 +814,17 @@ export function installWorkspaceNav(ctx: Context, deps: WorkspaceNavDeps): () =>
   let knownProjects = projectGroupStore.getSnapshot().projects
   const removeOverlaysOfName = (name: string): void => {
     const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(name) : name
-    for (const overlay of Array.from(
-      document.querySelectorAll(`[${WORKSPACE_NAV_OVERLAY_ATTR}="${escaped}"]`),
-    )) {
+    let overlays: Element[]
+    try {
+      overlays = Array.from(document.querySelectorAll(`[${WORKSPACE_NAV_OVERLAY_ATTR}="${escaped}"]`))
+    } catch {
+      // 选择器构造抛错（CSS.escape 缺席且项目名含引号/方括号等属性选择器元
+      // 字符 → SyntaxError）：降级全量遍历按属性值比对，语义等价、不外溢。
+      overlays = Array.from(document.querySelectorAll(`[${WORKSPACE_NAV_OVERLAY_ATTR}]`)).filter(
+        (overlay) => overlay.getAttribute(WORKSPACE_NAV_OVERLAY_ATTR) === name,
+      )
+    }
+    for (const overlay of overlays) {
       overlay.remove()
     }
     tip.leave()

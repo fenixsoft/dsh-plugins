@@ -45,7 +45,11 @@
  *     持续维护模式；失配后恢复命中则自动重注入）；
  *   - 失配零副作用：任一必需锚点未命中 → 不注入 tab 栏、不注入 style、不动任何
  *     官方元素、零异常；warn 含失配锚点名且按锚点名限流（同锚一次、命中恢复复位），
- *     侧栏列未挂载（启动中）走 15s 静默宽限期，健康路径启动零告警噪声。
+ *     侧栏列未挂载（启动中）走 15s 静默宽限期，健康路径启动零告警噪声；
+ *   - 文案语言：tab 文案与 tablist aria-label 内嵌 zh/en 双键小词典，按 DSH 语言
+ *     设置取档（读 ctx.locale 快照，口径移植 fenix-dsh-dashboard-bridge
+ *     localeFollow：late provide 轮询 + locale/change 订阅实时刷新）；宿主语言
+ *     能力缺席/不可读 → 回退 zh 直出（默认形态，不走官方 i18n 框架）。
  *
  * 主题：颜色全部引用官方 token —— 轨道/活动块/文字随暗（body[data-ds-dark-theme]）
  * 浅主题自适应（原型 specs/add-sidebar-tabs-plugin/prototype 仅视觉参照）：
@@ -64,6 +68,15 @@
 			var STORAGE_KEY = 'fenix-dsh-sidebar-tabs.tab'
 			var TAB_FUNC = 'func'
 			var TAB_WORKSPACE = 'workspace'
+
+			/* —— tab 栏文案词典（zh/en 双列，键 <组件>.<语义>；zh 列与既有中文直出
+			 *    串逐字一致——README 与真机验收证据钉此形态）。按宿主语言档取列：
+			 *    未取得宿主语言（能力缺席/不可读）时 index 0 = zh 直出现状。 —— */
+			var TAB_DICT = {
+				'tab.func': ['功能', 'Features'],
+				'tab.workspace': ['工作区', 'Workspaces'],
+				'tab.ariaLabel': ['侧栏分区', 'Sidebar sections'],
+			}
 
 			/* —— 锚点签名（安装版 dsh 0.2.2-rc.1 bundle 实证；CSS-modules 键名子串匹配，
 			 *    哈希前缀免疫。官方升级失配时第一修缝点，重钉指引见 README「签名字证」。） —— */
@@ -128,13 +141,14 @@
 			}
 
 			return {
-				apply() {
+				apply(ctx) {
 					var disposed = false
 					/* 会话内 tab 状态（storage 只是它的持久化镜像） */
 					var state = readStoredTab()
 					var styleTag = null
 					var tabbar = null
 					var tabButtons = {}
+					var tabTexts = {}
 					var watchedRoot = null
 					var warnedMissing = null
 					var missingColSince = null
@@ -144,6 +158,13 @@
 					 * ~1s 挂载；隔离实例冷启动首访需在线装配组合 bundle，实测可到
 					 * 10s+，15s 覆盖之） */
 					var LOAD_GRACE_MS = 15000
+					/* 宿主语言档（'zh'|'en'；undefined = 未取得 → 词典 zh 列直出现状）。
+					 * locale 服务 late provide（apply 时大概率未注入）→ 轮询兜底 +
+					 * locale/change 订阅实时刷新，清理随 dispose。 */
+					var hostLocale = undefined
+					var localeTimer = null
+					var unsubLocale = null
+					var localeStopped = false
 
 					function setDisplay(el, visible) {
 						if (visible) {
@@ -240,7 +261,107 @@
 							select(value)
 						})
 						tabButtons[value] = b
+						/* 文案 span 登记进 tabTexts：语言档变化时定点刷新 textContent
+						 * （tabbar 只构建一次，重贴靠这里而非重建） */
+						tabTexts[value] = text
 						return b
+					}
+
+					/* —— 宿主语言档（口径移植 fenix-dsh-dashboard-bridge localeFollow：
+					 *    dsh-client-locale 快照原值 'zh'|'en' 经白名单归一，宽面防御
+					 *    收容 -CN/-US 变体；白名单外/形状漂移一律 undefined——
+					 *    缓存维持 last-known-good、词典回退 zh 列 = 既有现状）。 —— */
+
+					/* 宿主语言快照原值 → 'zh'|'en'；白名单外 undefined。 */
+					function normalizeHostLocale(value) {
+						if (value === 'zh' || value === 'zh-CN') return 'zh'
+						if (value === 'en' || value === 'en-US') return 'en'
+						return undefined
+					}
+
+					/* 当前档词典取值（渲染期调用；未取得宿主语言 = zh 直出现状）。 */
+					function tabText(key) {
+						return TAB_DICT[key][hostLocale === 'en' ? 1 : 0]
+					}
+
+					/* tab 栏文案定点刷新（语言档变化时；tabbar 未建/已拆除则 no-op——
+					 * buildTabbar 构建期经 tabText 取当时档，自愈重插复用同节点）。 */
+					function refreshTabTexts() {
+						if (!tabbar) return
+						tabbar.setAttribute('aria-label', tabText('tab.ariaLabel'))
+						var funcText = tabTexts[TAB_FUNC]
+						var wsText = tabTexts[TAB_WORKSPACE]
+						if (funcText) funcText.textContent = tabText('tab.func')
+						if (wsText) wsText.textContent = tabText('tab.workspace')
+					}
+
+					/* 采纳宿主语言档：白名单外忽略（last-known-good），变化才刷新。 */
+					function adoptLocale(raw) {
+						var loc = normalizeHostLocale(raw)
+						if (loc === undefined || loc === hostLocale) return
+						hostLocale = loc
+						refreshTabTexts()
+					}
+
+					/* 宿主语言跟随装配（localeFollow 极简镜像）：locale 服务 late
+					 * provide（dsh-client-locale await __DSH_LOCALE__.read() 之后才
+					 * provide，同步读必空）→ 1s 轮询直至就绪；空快照（settings 未回
+					 * 同步）继续等；非空非白名单 = 坏值，「宁缺毋错」终局降级不订阅。
+					 * 订阅 locale/change 实时刷新（宿主切换语言后 tab 栏即时换档）。
+					 * 返回停止函数（停轮询 + 退订）随 dispose 清理。全读在 try/catch：
+					 * cordis proxy 对缺失服务属性访问会抛错。 */
+					function installLocaleFollow() {
+						/* 单轮接入：undefined = 未就绪继续等；true = 已取得；false = 坏值终局降级 */
+						function attempt() {
+							if (ctx === null || ctx === undefined) return false // 无 ctx（调用形态漂移防御）：终局降级 zh
+							var service
+							try {
+								service = ctx.locale
+							} catch (e) {
+								return undefined // 服务未注入（cordis proxy 抛错）：等下一轮
+							}
+							if (service === null || service === undefined || typeof service.getSnapshot !== 'function') {
+								return undefined
+							}
+							var raw
+							try {
+								var snap = service.getSnapshot()
+								raw = snap === null || snap === undefined ? undefined : snap.active
+							} catch (e) {
+								return undefined // 快照读取抛错（形状漂移/未就绪）：继续等
+							}
+							if (raw === undefined || raw === null || raw === '') return undefined // 早期空快照：等 settings 回同步
+							if (normalizeHostLocale(raw) === undefined) return false // 非空且非白名单：坏值，宁缺毋错
+							adoptLocale(raw)
+							return true
+						}
+
+						function subscribe() {
+							if (ctx === null || ctx === undefined || typeof ctx.on !== 'function') return // 订阅面缺席：不跟随实时切换（初始档已生效）
+							try {
+								var dispose = ctx.on('locale/change', function (snapshot) {
+									adoptLocale(snapshot === null || snapshot === undefined ? undefined : snapshot.active)
+								})
+								if (typeof dispose === 'function') unsubLocale = dispose
+							} catch (e) {
+								/* 订阅不可用：降级（初始档已取，缺实时刷新），无报错 */
+							}
+						}
+
+						function poll() {
+							if (localeStopped || disposed) return
+							var result = attempt()
+							if (result === undefined) {
+								localeTimer = setTimeout(poll, 1000) // 未就绪：1s 后再试
+								return
+							}
+							if (result === true) subscribe() // 仅成功取得初始档才订阅；坏值终局不订阅（宁缺毋错）
+						}
+
+						poll()
+						return function () {
+							localeStopped = true
+						}
 					}
 
 					function buildTabbar() {
@@ -248,10 +369,11 @@
 						bar.className = 'fdx-sbt-bar'
 						bar.dataset.plugin = PLUGIN_ID
 						bar.setAttribute('role', 'tablist')
-						bar.setAttribute('aria-label', '侧栏分区')
+						bar.setAttribute('aria-label', tabText('tab.ariaLabel'))
 						tabButtons = {}
-						bar.appendChild(makeTab(TAB_FUNC, '功能', ICON_FUNC))
-						bar.appendChild(makeTab(TAB_WORKSPACE, '工作区', ICON_WORKSPACE))
+						tabTexts = {}
+						bar.appendChild(makeTab(TAB_FUNC, tabText('tab.func'), ICON_FUNC))
+						bar.appendChild(makeTab(TAB_WORKSPACE, tabText('tab.workspace'), ICON_WORKSPACE))
 						return bar
 					}
 
@@ -384,9 +506,19 @@
 					}
 
 					ensure()
+					installLocaleFollow()
 
 					return function dispose() {
 						disposed = true
+						localeStopped = true
+						if (localeTimer) {
+							clearTimeout(localeTimer)
+							localeTimer = null
+						}
+						if (unsubLocale) {
+							unsubLocale()
+							unsubLocale = null
+						}
 						treeObserver.disconnect()
 						if (rootObserver) rootObserver.disconnect()
 						if (graceTimer) {

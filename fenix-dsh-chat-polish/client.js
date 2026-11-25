@@ -463,14 +463,146 @@
 				}
 			})()
 
-			/* ── MarkdownText 标签（模块级稳定身份；组件表按 identity 记忆化）── */
+			/* ── UI 文案词典与宿主语言档（i18n 宿主语言跟随轮：fenix 系插件注入 dsh web
+			 *    的自绘控件跟随 DSH 语言设置。zh 列 = 历史钉串逐字基线（tests/README 钉此
+			 *    形态），en 列自拟；宿主语言不可得回退 zh = 既有现状。渲染期求值边界：
+			 *    已挂载的宿主 cell / 设置面板不因语言切换即时重渲，下一次渲染取新档，
+			 *    与 fenix-dsh-auth 头部登记同款）── */
+			var UI_DICT = {
+				'section.label': ['Fenix 插件', 'Fenix Plugins'],
+				'section.intro': ['各打磨功能可独立开关；默认全部开启（与安装即用形态一致），关闭某项即时回退官方原生形态。开关仅对当前浏览器生效。', 'Each polish feature can be toggled independently; all are on by default (identical to the installed form). Turning one off instantly falls back to the official native form. Toggles only affect this browser.'],
+				'section.group.ui': ['Deepseek Harness UI调整', 'Deepseek Harness UI Tweaks'],
+				'section.group.auth': ['Deepseek Harness 快捷登录', 'Deepseek Harness Quick Login'],
+				'features.whitespace.label': ['对话列留白 24px', 'Conversation column 24px gutter'],
+				'features.whitespace.desc': ['消息列与输入卡两侧留白固定 24px，解除官方 920px 居中上限，隐藏列宽拖拽把手', 'Fix a 24px gutter on both sides of the message column and composer, lift the official 920px centered cap, and hide the column-width drag handle'],
+				'features.composer-width.label': ['输入框 80% 宽度居中', 'Composer centered at 80% width'],
+				'features.composer-width.desc': ['输入卡、提示条与队列坞按 80% 宽度居中，与消息列同轴', 'Composer, hints bar and queue dock are centered at 80% width, aligned with the message column'],
+				'features.markdown.label': ['用户消息 Markdown 渲染', 'Markdown rendering for user messages'],
+				'features.markdown.desc': ['用户消息气泡按 Markdown 渲染（标题/列表/代码高亮），关闭后回退官方纯文本投影', 'Render user message bubbles as Markdown (headings/lists/code highlight); off falls back to the official plain-text projection'],
+				'features.history-nav.label': ['输入框 ↑/↓ 历史导航', 'Composer ↑/↓ history navigation'],
+				'features.history-nav.desc': ['输入框首行按 ↑ 召回上一条已发送消息，↓ 切回，Esc 恢复草稿', 'Press ↑ on the composer first line to recall the last sent message, ↓ to return, Esc to restore the draft'],
+				'features.settings-embed.label': ['嵌入设置页面', 'Embedded settings page'],
+				'features.settings-embed.desc': ['设置页嵌入内容区以页面形式展示，关闭后回退官方弹出模态对话框', 'Show the settings page embedded in the content area; off falls back to the official modal dialog'],
+				'labels.untitledFile': ['未命名文件', 'Untitled file'],
+				'labels.code.copy': ['复制', 'Copy'],
+				'labels.code.copied': ['已复制', 'Copied'],
+				'labels.code.code': ['代码', 'Code'],
+				'labels.code.wrap': ['自动换行', 'Wrap'],
+				'labels.code.unwrap': ['不换行', 'No wrap'],
+				'labels.footnotes': ['脚注', 'Footnotes'],
+			}
+
+			/* 宿主语言档（null = 未取得 → zh 档直出现状；口径移植 fenix-dsh-dashboard-bridge
+			 * localeFollow，快照原值 'zh'|'en' 白名单归一，宽面防御收容 -CN/-US 变体） */
+			var hostLocale = null
+
+			/* 宿主语言快照原值 → 'zh'|'en'；白名单外 undefined（坏值宁缺毋错）。 */
+			function normalizeHostLocale(value) {
+				if (value === 'zh' || value === 'zh-CN') return 'zh'
+				if (value === 'en' || value === 'en-US') return 'en'
+				return undefined
+			}
+
+			/* 当前档词典取值（渲染期调用；未取得宿主语言 = zh 直出现状）。 */
+			function uiText(key) {
+				return UI_DICT[key][hostLocale === 'en' ? 1 : 0]
+			}
+
+			/* 宿主语言跟随装配（localeFollow 极简镜像，与 fenix-dsh-sidebar-tabs/
+			 * fenix-dsh-auth 同口径）：locale 服务 late provide（同步读必空）→ 1s 轮询
+			 * 直至就绪；空快照继续等；非空非白名单 = 坏值「宁缺毋错」终局降级不订阅；
+			 * 订阅 locale/change 实时换档。返回停止函数（停轮询 + 退订）随 dispose 清理。
+			 * 全读在 try/catch：cordis proxy 对缺失服务属性访问会抛错。 */
+			function installLocaleFollow(ctx) {
+				var timer = null
+				var unsub = null
+				var stopped = false
+				function adopt(raw) {
+					var loc = normalizeHostLocale(raw)
+					if (loc === undefined || loc === hostLocale) return
+					hostLocale = loc
+				}
+				/* 单轮接入：undefined = 未就绪继续等；true = 已取得；false = 坏值终局降级 */
+				function attempt() {
+					var service
+					try {
+						service = ctx.locale
+					} catch (e) {
+						return undefined /* 服务未注入（cordis proxy 抛错）：等下一轮 */
+					}
+					if (service === null || service === undefined || typeof service.getSnapshot !== 'function') return undefined
+					var raw
+					try {
+						var snap = service.getSnapshot()
+						raw = snap === null || snap === undefined ? undefined : snap.active
+					} catch (e) {
+						return undefined /* 快照读取抛错（形状漂移/未就绪）：继续等 */
+					}
+					if (raw === undefined || raw === null || raw === '') return undefined /* 早期空快照：等 settings 回同步 */
+					if (normalizeHostLocale(raw) === undefined) return false /* 非空且非白名单：坏值，宁缺毋错 */
+					adopt(raw)
+					return true
+				}
+				function subscribe() {
+					if (ctx === null || ctx === undefined || typeof ctx.on !== 'function') return /* 订阅面缺席：不跟随实时切换（初始档已生效） */
+					try {
+						var off = ctx.on('locale/change', function (snapshot) {
+							adopt(snapshot === null || snapshot === undefined ? undefined : snapshot.active)
+						})
+						if (typeof off === 'function') unsub = off
+					} catch (e) {
+						/* 订阅不可用：降级（初始档已取，缺实时刷新），无报错 */
+					}
+				}
+				function poll() {
+					if (stopped) return
+					var state
+					try {
+						state = attempt()
+					} catch (e) {
+						state = undefined
+					}
+					if (state === true) {
+						subscribe()
+						return
+					}
+					if (state === false) return /* 坏值终局降级：不订阅不重试 */
+					timer = setTimeout(poll, 1000)
+					/* 测试/非浏览器宿主：轮询计时器不持有事件循环（浏览器 setTimeout
+					 * 返回 number 无 unref，守卫跳过；dispose 仍 clearTimeout 收口） */
+					if (timer !== null && typeof timer.unref === 'function') timer.unref()
+				}
+				poll()
+				return function stop() {
+					stopped = true
+					if (timer !== null) {
+						clearTimeout(timer)
+						timer = null
+					}
+					if (unsub !== null) {
+						try {
+							unsub()
+						} catch (e) {
+							/* 退订失败不阻断 dispose 其余回收 */
+						}
+						unsub = null
+					}
+				}
+			}
+
+			/* ── MarkdownText 标签（模块级稳定身份；组件表按 identity 记忆化——
+			 * LABELS 对象身份恒定，属性经 getter 渲染期按当前语言档求值）── */
 			var LABELS = {
-				code: {
-					copyLabel: '复制',
-					copiedLabel: '已复制',
-					toolbarLabels: { codeLabel: '代码', wrapLabel: '自动换行', unwrapLabel: '不换行' },
+				get code() {
+					return {
+						copyLabel: uiText('labels.code.copy'),
+						copiedLabel: uiText('labels.code.copied'),
+						toolbarLabels: { codeLabel: uiText('labels.code.code'), wrapLabel: uiText('labels.code.wrap'), unwrapLabel: uiText('labels.code.unwrap') },
+					}
 				},
-				footnotes: '脚注',
+				get footnotes() {
+					return uiText('labels.footnotes')
+				},
 			}
 
 			/* ── content 块拆分（镜像官方 MessageItem.contentParts）── */
@@ -626,7 +758,7 @@
 								/* 形状守卫：name/bytes 字段漂移时降级占位渲染，不让单条畸形附件在渲染期
 								 * 抛 TypeError 击穿整个遮蔽渲染器（宿主 abdicate 整体退位回官方纯文本），
 								 * 与 useInput/useChat、chat 快照、renderMessageImages 的显式守卫同口径 */
-								var fileName = typeof file.name === 'string' ? file.name : '未命名文件'
+								var fileName = typeof file.name === 'string' ? file.name : uiText('labels.untitledFile')
 								var fileMeta = [
 									fileExtension(fileName).toUpperCase().slice(0, 8),
 									typeof file.bytes === 'number' ? fileSizeText(file.bytes) : '',
@@ -1139,11 +1271,11 @@
 			 * 从面板移除——CSS 功能与 store 机制保留（默认仍开启），仅不再暴露独立
 			 * 开关；二者历史 override 经 readOverrides 忽略按开启处理（无恢复死角） */
 			var FEATURES = [
-				{ id: 'whitespace', label: '对话列留白 24px', description: '消息列与输入卡两侧留白固定 24px，解除官方 920px 居中上限，隐藏列宽拖拽把手' },
-				{ id: 'composer-width', label: '输入框 80% 宽度居中', description: '输入卡、提示条与队列坞按 80% 宽度居中，与消息列同轴' },
-				{ id: 'markdown', label: '用户消息 Markdown 渲染', description: '用户消息气泡按 Markdown 渲染（标题/列表/代码高亮），关闭后回退官方纯文本投影' },
-				{ id: 'history-nav', label: '输入框 ↑/↓ 历史导航', description: '输入框首行按 ↑ 召回上一条已发送消息，↓ 切回，Esc 恢复草稿' },
-				{ id: 'settings-embed', label: '嵌入设置页面', description: '设置页嵌入内容区以页面形式展示，关闭后回退官方弹出模态对话框' },
+				{ id: 'whitespace', labelKey: 'features.whitespace.label', descKey: 'features.whitespace.desc' },
+				{ id: 'composer-width', labelKey: 'features.composer-width.label', descKey: 'features.composer-width.desc' },
+				{ id: 'markdown', labelKey: 'features.markdown.label', descKey: 'features.markdown.desc' },
+				{ id: 'history-nav', labelKey: 'features.history-nav.label', descKey: 'features.history-nav.desc' },
+				{ id: 'settings-embed', labelKey: 'features.settings-embed.label', descKey: 'features.settings-embed.desc' },
 			]
 
 			/* React 侧订阅（design D1）：React 18 useSyncExternalStore 直连 store；
@@ -1291,8 +1423,8 @@
 						react.createElement(
 							'div',
 							{ style: sectionRowTextStyle },
-							react.createElement('div', { style: sectionRowTitleStyle }, feature.label),
-							react.createElement('div', { style: sectionRowDescStyle }, feature.description),
+							react.createElement('div', { style: sectionRowTitleStyle }, uiText(feature.labelKey)),
+							react.createElement('div', { style: sectionRowDescStyle }, uiText(feature.descKey)),
 						),
 						react.createElement(
 							'span',
@@ -1300,18 +1432,18 @@
 							react.createElement(ToggleControl, {
 								checked: on,
 								onChange: function (next) { toggleStore.set(feature.id, next) },
-								label: feature.label,
-								title: feature.label,
+								label: uiText(feature.labelKey),
+								title: uiText(feature.labelKey),
 							}),
 						),
 					)
 				})
 				var uiCardChildren = [
-					react.createElement('div', { style: sectionGroupStyle }, 'Deepseek Harness UI调整'),
+					react.createElement('div', { style: sectionGroupStyle }, uiText('section.group.ui')),
 				]
 				for (var i = 0; i < rows.length; i++) uiCardChildren.push(rows[i])
 				var children = [
-					react.createElement('p', { key: 'intro', style: sectionIntroStyle }, '各打磨功能可独立开关；默认全部开启（与安装即用形态一致），关闭某项即时回退官方原生形态。开关仅对当前浏览器生效。'),
+					react.createElement('p', { key: 'intro', style: sectionIntroStyle }, uiText('section.intro')),
 					react.createElement(
 						'div',
 						{ key: 'group-ui', style: sectionCardStyle, 'data-fdx-polish-group': 'dsh-ui' },
@@ -1324,7 +1456,7 @@
 						react.createElement(
 							'div',
 							{ key: 'group-auth', style: sectionCardStyle, 'data-fdx-polish-group': 'dsh-auth' },
-							react.createElement('div', { style: sectionGroupStyle }, 'Deepseek Harness 快捷登录'),
+							react.createElement('div', { style: sectionGroupStyle }, uiText('section.group.auth')),
 							react.createElement(
 								'div',
 								{ style: sectionAuthPaneStyle, 'data-fdx-polish-auth-pane': '' },
@@ -1429,7 +1561,9 @@
 					var embedMO = null
 					try {
 						embedMO = new MutationObserver(onBodyMutation)
-						embedMO.observe(document.body, { childList: true, subtree: true })
+						/* body 直挂 portal（面板挂载/卸载均为 body 直接子节点增删），无需
+						 * subtree——深层高频渲染不进回调，与 fenix-dsh-settings-dock 同参 */
+						embedMO.observe(document.body, { childList: true })
 					} catch (err) {
 						stage('settings-embed observer', err)
 					}
@@ -1454,7 +1588,7 @@
 								id: 'fenix-chat-polish',
 								order: maxOrder + 1,
 								label: function () {
-									return 'Fenix 插件'
+									return uiText('section.label')
 								},
 							}, PolishSection)
 						})
@@ -1472,6 +1606,19 @@
 						stage('settings.section.icon', err)
 					}
 
+					/* UI 文案宿主语言跟随装配（失败仅 stage 降级留痕、回退 zh 直出现状，
+					 * 不阻断激活；词典与装配器见 UI_DICT / installLocaleFollow） */
+					var stopLocaleFollow = null
+					try {
+						stopLocaleFollow = installLocaleFollow(ctx)
+					} catch (err) {
+						stage('locale follow', err)
+					}
+
+					/* [fenix-ignore:878d9dc84ebc] 槽位回收由宿主框架接管：五处 ctx.slots.inject 工厂
+					 * 均 return ctx.slots.register(...)，返回 disposer 由框架在插件卸载时收集执行
+					 * （dsh-runtime.d.ts 契约「工厂返回值（disposer）由框架在插件卸载时收集执行」；
+					 * fenix-dsh-auth 同款条目、同款核实口径），dispose 无需逐槽保存 disposer。 */
 					return function dispose() {
 						sectionSlotsRef = null
 						document.removeEventListener('keydown', onHistoryKeydown, true)
@@ -1481,6 +1628,7 @@
 							embedMO = null
 						}
 						if (unembedSub) unembedSub()
+						if (stopLocaleFollow) stopLocaleFollow()
 						restoreEmbed()
 						toggleStore.detachStyleTag()
 						var removed = styleTag !== null && styleTag.parentNode !== null

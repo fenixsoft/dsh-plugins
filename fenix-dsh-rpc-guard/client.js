@@ -79,15 +79,26 @@
 	var RETRY_BACKOFF_MS = [500, 1500]
 
 	/** 幂等端点（超时/断连后允许自动重试）。官方 RPC 全部形如
-	 * `/api/<channel>/<endpoint>`，endpoint 为 camelCase（listProviders、
-	 * listConfigurableProviders、modelCatalog、describe…）。credentials/set|unset
-	 * 是单 ref 整值覆写天然幂等；list/describe/catalog/get/query 词根类为只读。
-	 * 判定：末段按 camelCase 词边界切分为词元（lowercase 归一）后与词根集合
-	 * 做**全词匹配**（任一词元等于词根才命中）——既避免 camelCase 漏判，也
-	 * 避免子串偶然命中（如 forget 含 get、resetConfiguration 含 set）把
-	 * reset/forget 类非幂等端点误判为可重试。 */
+	 * `/api/<channel>/<endpoint>`，endpoint 为 camelCase（describe、list、
+	 * query…）。credentials/set|unset 是单 ref 整值覆写天然幂等（精确名单，
+	 * 优先级最高：在册者无条件幂等）；list/describe/catalog/get/query 词根类
+	 * 为只读。
+	 * 判定：末段按 camelCase 词边界切分为词元（lowercase 归一，切词规则不变），
+	 * **全部词元均为只读词根或纯连接词（and/or）才判幂等**：
+	 *   - 单词元端点（list/get/query/describe/catalog 整词）行为不变；
+	 *   - 复合词只要含任一非只读词元即不幂等——「首词元是只读词根、整词却
+	 *     有副作用」的端点（getOrCreate、queryAndUpdate、listAndPrune 类）
+	 *     超时可能意味着服务端已执行，自动重试会造成副作用重复，故不再重试；
+	 *   - 子串偶然命中排除依旧成立（forget 含 get、resetConfiguration 含 set：
+	 *     切词后各词元均不在词根集，reset/forget 类仍不会误判）；
+	 *   - 旧「任一词元命中词根即幂等」口径已收紧：带非词根名词词元的多词元
+	 *     端点（如 listProviders）不再凭首词元获得自动重试——确认整体只读的
+	 *     应显式加入 IDEMPOTENT_EXACT，而不是放宽此处的词元判定。 */
 	var IDEMPOTENT_EXACT = { '/api/credentials/set': true, '/api/credentials/unset': true }
 	var IDEMPOTENT_ROOTS = { list: true, describe: true, catalog: true, get: true, query: true }
+	/* 纯连接词：不表达动作，复合词中出现不破坏只读判定（and/or 本身无害，
+	 * 整词是否幂等由其余词元决定，如 listAndPrune 的 prune 仍使其不幂等） */
+	var IDEMPOTENT_CONNECTIVES = { and: true, or: true }
 
 	function isIdempotent(pathname) {
 		if (IDEMPOTENT_EXACT[pathname] === true) return true
@@ -96,10 +107,13 @@
 			.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
 			.toLowerCase()
 			.split(/[^a-z0-9]+/)
+		/* 全词元判定：任一词元既非只读词根也非纯连接词 → 不幂等（旧口径
+		 * 「任一词元命中词根即幂等」会把 getOrCreate/queryAndUpdate 类
+		 * 复合词端点误判为可重试）。 */
 		for (var i = 0; i < tokens.length; i++) {
-			if (IDEMPOTENT_ROOTS[tokens[i]] === true) return true
+			if (IDEMPOTENT_ROOTS[tokens[i]] !== true && IDEMPOTENT_CONNECTIVES[tokens[i]] !== true) return false
 		}
-		return false
+		return true
 	}
 
 	function delay(ms) {

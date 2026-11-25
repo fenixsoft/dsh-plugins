@@ -91,13 +91,27 @@ const MENU: Record<string, Entry> = {
 
 /** locate（文件右键「定位」菜单项）。 */
 const LOCATE: Record<string, Entry> = {
-  // 2026-11-11 用户需求原文形态：`在 <项目名> 项目定位`（en 侧经 template 组装）
+  // 2026-11-11 用户需求原文形态：`在 <项目名> 项目定位`（前/后缀两键由
+  // locateMenuLabel 组装插值，en 拼 `Locate in <name> project`——label 模板
+  // 单源在词典，改键即生效，无第二硬编码模板）
   'locate.label.prefix': ['在 ', 'Locate in '],
   'locate.label.suffix': [' 项目定位', ' project'],
   'locate.failureLabel': ['定位失败，请重试', 'Locate failed, please retry'],
 }
 
-const DICTS: Array<Record<string, Entry>> = [WS_TOOLTIP, LOCATE, PANELS, MENU]
+/** rightTab（右侧边栏「Fenix 项目」页签：definition title + guide 条目）。
+ * zh 值逐字=rightTab.tsx 现状硬编码钉串（不改中文观感），en 按 dashboard 术语。 */
+const RIGHT_TAB: Record<string, Entry> = {
+  // 页签标题与 guide 条目标题同串（现状两处均钉 'Fenix 项目'）
+  'rightTab.title': ['Fenix 项目', 'Fenix Projects'],
+  'rightTab.guide.projects': ['Fenix 项目', 'Fenix Projects'],
+  'rightTab.guide.projectsDesc': [
+    'Fenix Dashboard 项目首页（项目列表 / 文件浏览）',
+    'Fenix Dashboard project home (project list / file browsing)',
+  ],
+}
+
+const DICTS: Array<Record<string, Entry>> = [WS_TOOLTIP, LOCATE, PANELS, MENU, RIGHT_TAB]
 
 /**
  * 取文案（渲染/求值期调用，返回当前档串）。键不存在回退 zh 列（防键位
@@ -115,10 +129,11 @@ export function pluginT(key: string): string {
 
 /**
  * 定位菜单项 label（`在 <项目名> 项目定位` / `Locate in <name> project`）：
- * 项目名插值的复合串单独出口（projectT 语义，键名收敛防散拼）。
+ * 项目名插值的复合串单独出口（projectT 语义，键名收敛防散拼）；前/后缀经
+ * 词典键组装（locate.label.prefix/suffix 单源，改词典文案即生效，不再存在
+ * 与硬编码模板的双源漂移——en 拼串与原模板逐字一致）。
  */
 export function locateMenuLabel(projectName: string): string {
-  if (dictLocale() === 'en-US') return `Locate in ${projectName} project`
-  return `在 ${projectName} 项目定位`
+  return `${pluginT('locate.label.prefix')}${projectName}${pluginT('locate.label.suffix')}`
 }
 
