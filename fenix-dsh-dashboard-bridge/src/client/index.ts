@@ -63,10 +63,17 @@ import type {
  * （文件右键解析会话 workspace 根，dsh-client-ui-session）、contextMenus
  * （文件右键菜单贡献，dsh-client-ui-context-menu）2026-11-11 追加；
  * sidebarRight/sidebarRightTabs（右侧边栏页签，dsh-client-ui-sidebar-right）
- * 同日 m02220 语义纠正后追加——「Fenix 项目」落对话界面右缘 dock；theme
+ * 同日 m02220 语义纠正后追加——「Fenix 项目」落对话界面右缘 dock。
+ *
+ * 声明口径（2026-11-26 review 0920849798c7 核实结论）：cordis 静态 inject 键 =
+ * 「激活前等待该服务存在」（真机实测 fence 约束，cc-import contract.ts 同源
+ * 口径：声明宿主不提供的服务即 boot 报 waiting for service、激活永远
+ * pending），故只声明宿主 web 必装的硬依赖；可选增强服务一律不入——theme
  * （dsh-client-ui-theme，2026-11-24 主题跟随 SPEC add-bridge-theme-channel）
- * 供 ctx.theme 快照与 theme/change 事件——旧版宿主缺席时 installThemeFollow
- * 内部降级（D4，缺失服务的属性访问抛错在 try/catch 内吞掉）。 */
+ * 与 locale（i18n 宿主语言跟随轮，从未入列）在旧版宿主可能缺席，声明 'theme'
+ * 会让整个 client 插件激活永远 pending（菜单/面板/导航全不可用），D4 降级
+ * 永不触发。二者同走 installThemeFollow / installLocaleFollow 运行时探测 +
+ * late-provide 轮询（服务缺席的属性访问抛错在各自 try/catch 内吞掉）。 */
 export const inject = [
   'slots',
   'layout',
@@ -76,7 +83,6 @@ export const inject = [
   'contextMenus',
   'sidebarRight',
   'sidebarRightTabs',
-  'theme',
 ]
 
 /** 5 个固定条目：id 与深链一一对应，order 10–18（「Fenix 项目」已移入右侧
@@ -177,12 +183,16 @@ export function reorderOfficialPanels(ctx: Context): () => void {
 }
 
 /**
- * 菜单语言跟随刷新器（i18n 宿主语言跟随轮）：语言切换时对 5 个固定条目做
- * 「先收旧遮蔽、再以 priority -10 重注册」——panellist 变更驱动宿主 syncPanels
- * 重读 label thunk，菜单立即显新档（不等下一次告警计数/交互重渲染）。
+ * 菜单语言跟随刷新器（i18n 宿主语言跟随轮）：语言切换时对固定条目做「先收旧
+ * 遮蔽、再以 priority -10 重注册」——panellist 变更驱动宿主 syncPanels 重读
+ * label thunk，菜单立即显新档（不等下一次告警计数/交互重渲染）。
  *
  * - label thunk 本身已是渲染期实时求值（pluginT 当前档），重注册只为**触发**
  *   宿主重读，不再承担取值职责——两处语义解耦。
+ * - fenix-activities 跳过（2026-11-26 review e8a287ba1bee）：该 id 的 -10 遮蔽
+ *   位归 installOpsAlertBadge 独占（slots 契约同 id 同 priority 注册冲突抛错，
+ *   两处并发遮蔽互相撞车 → 运维条目语言即时刷新与告警重注册互斥失效）；其
+ *   语言切换重注册由 installOpsAlertBadge 订阅 locale/change 承担。
  * - icon 用模块级单例复用（组件身份稳定，重注册零 remount/零闪烁）。
  * - -10 优先于基注册缺省 priority（entriesOfSlot 升序取首，OFFICIAL_PANEL_
  *   REORDER 同款语义）；收口时逐条 dispose 遮蔽注册，基注册（词典 thunk）
@@ -198,6 +208,11 @@ export function installMenuLocaleRefresher(
   const disposers = new Map<string, () => void>()
   const refresh = (): void => {
     for (const entry of FIXED_ENTRIES) {
+      // fenix-activities 的 -10 遮蔽位归 installOpsAlertBadge 独占（同 id 同
+      // priority 注册冲突抛错，e8a287ba1bee）：此处 dispose 会拆掉告警徽标的
+      // 在册遮蔽、register 又与徽标重注册撞车；语言切换重注册由徽标侧订阅
+      // locale/change 承担（label 同为词典 thunk，重注册即取新档文案）。
+      if (entry.id === 'fenix-activities') continue
       let icon = icons.get(entry.id)
       if (icon === undefined) {
         icon = fixedIconComponent(entry.id)
@@ -760,6 +775,13 @@ export function deepLinkPanels(ctx: Context): () => void {
  * 宿主重渲染图标圆点、重读 label pill 的唯一触发面。
  *
  * 重注册纪律：
+ * - fenix-activities 的 -10 遮蔽位归本函数独占（2026-11-26 review e8a287ba1bee，
+ *   installMenuLocaleRefresher 的 refresh 已跳过该 id——slots 契约同 id 同
+ *   priority 注册冲突抛错，两处并发遮蔽互相撞车会让语言即时刷新与告警重注册
+ *   互斥失效）；语言档变化（locale/change）同样走 reregister——label 为词典
+ *   thunk（求值读当前档），重注册即宿主重读、运维菜单立即显新档。计数≤0 时
+ *   reregister 走零告警隐匿路径零注册，文案随基注册（词典 thunk）在其余条目
+ *   重注册驱动的下一次 syncPanels 跟上。
  * - 有告警（count>0）：先 dispose 上一次遮蔽注册再注册（60s 轮询 + focus 下
  *   计数会多次变更，不逐次 dispose 旧注册会致 slots 同 id entries 无界堆积；
  *   尚无在册遮蔽注册则跳过 dispose）。
@@ -767,10 +789,11 @@ export function deepLinkPanels(ctx: Context): () => void {
  *   （若有）同样触发宿主重渲染，原注册图标重读快照同样无徽标；尚无在册则
  *   零操作（boot 早期首轮拉取零告警时 slots 里不堆遮蔽条目）。
  * - 注册抛错仅 console.warn 本轮放弃，不产生未处理异常（与
- *   reorderOfficialPanels「恒定错误不重试」不同：计数是持续变化源，失败非
- *   恒定，后续计数变更自然再试，MUST NOT 因一次失败永久禁用重注册）。
+ *   reorderOfficialPanels「恒定错误不重试」不同：计数与语言档是持续变化源，
+ *   失败非恒定，后续变更自然再试，MUST NOT 因一次失败永久禁用重注册）。
  *
- * @returns 停止函数：停计数同步、退订 store、dispose 在册遮蔽注册（幂等）。
+ * @returns 停止函数：停计数同步、退订 store 与 locale/change、dispose 在册
+ *   遮蔽注册（幂等）。
  */
 export function installOpsAlertBadge(
   ctx: Context,
@@ -817,6 +840,19 @@ export function installOpsAlertBadge(
   }
 
   const unsubscribeStore = alertCountStore.subscribe(reregister)
+  // 语言切换即时刷新（e8a287ba1bee，见上方重注册纪律首条）：本函数独占
+  // fenix-activities 的 -10 遮蔽位，语言档变化由这里重注册取新档文案；
+  // locale 服务缺席/订阅抛错（旧版宿主/测试桩）→ 不订阅零开销（与
+  // installMenuLocaleRefresher 同款降级口径）。
+  let unsubscribeLocale: () => void = () => {}
+  try {
+    if (typeof ctx.on === 'function') {
+      const unsubscribe = ctx.on('locale/change', reregister)
+      if (typeof unsubscribe === 'function') unsubscribeLocale = unsubscribe as () => void
+    }
+  } catch {
+    unsubscribeLocale = () => {}
+  }
   const stopSync = startAlertCountSync({
     fetchCount: options?.fetchAlertCount ?? (() => fetchAlertCount(prefix)),
     intervalMs: options?.intervalMs,
@@ -827,6 +863,7 @@ export function installOpsAlertBadge(
     stopped = true
     stopSync()
     unsubscribeStore()
+    unsubscribeLocale()
     shadowDispose?.()
     shadowDispose = undefined
   }
@@ -847,8 +884,10 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   // 宿主主题跟随（SPEC add-bridge-theme-channel）：接入点 MUST 先于固定条目
   // 注入与项目同步——projectEntrySink 的 src 在 registerProjectPanel 时即拼串
   // （非渲染惰性求值），晚装入会让首轮项目面板取到未初始化缓存（design D3）。
-  // 宿主主题 API 缺席（旧版 dsh web）→ installThemeFollow 内部 D4 降级：
-  // 缓存 undefined（三挂载点注入档为空，输出与现状逐字符一致）、不订阅。
+  // 宿主主题服务缺席/未就绪（旧版 dsh web / late provide）→ installThemeFollow
+  // 运行时探测 + 1s 轮询等待；订阅面缺席/坏值终局降级：缓存 undefined（三
+  // 挂载点注入档为空，输出与现状逐字符一致）、不订阅（'theme' 不入 inject，
+  // 见上方 inject 声明口径注释）。
   const stopThemeFollow = installThemeFollow(ctx)
 
   // 宿主语言跟随（i18n 宿主跟随轮）：接入点与主题跟随同位同序（注册期
