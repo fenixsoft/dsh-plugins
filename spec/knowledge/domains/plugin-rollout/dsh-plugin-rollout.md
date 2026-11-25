@@ -1,5 +1,5 @@
 # dsh 插件真机安装与验收
-<!-- knowledge: capability=dsh-plugin-rollout rev=2
+<!-- knowledge: capability=dsh-plugin-rollout rev=3
      sources=spec/changes/verify-dsh-plugins-live, spec/changes/add-sidebar-tabs-plugin -->
 
 把本仓 dsh 插件（cc-import、fenix-dsh-dashboard-bridge 等）装入真实 dsh web 实例并在真机上完成验收的能力：loader 注册 patch 语法、非 loopback 访问前置、隔离验证载体与验收清单的可自动化执行口径。
@@ -37,9 +37,10 @@
 
 ### dsh web 侧栏布局事实（钉底/分区操作依据）
 
-- 侧栏根为 flex column 全高；官方导航 `<nav>` 原生 `display:flex; flex-direction:column; gap:2px`；「更多」= `nav.children` 末位（位置语义，i18n 与官方增删项免疫）；regionArea（Workspaces 区）`flex: 1 1 0%`；footArea（Account）`flex: 0 0 auto`。
-- 「更多」钉底常显用 **flex order 重排**（内联 order：region 1 / nav 2 / foot 3，controls/tab 栏缺省 0）+ 功能态 nav `flex:1 1 0` 且末子 `margin-top:auto`：零 DOM 搬移、零 absolute；内联样式变更不触发 childList MutationObserver → 自愈重贴无反馈环。
-- 隐藏区内的钉底参照容器（footArea 类）须防上浮：一并纳入 order 序列；锚点缺席只降级该效果、不放弃插件（软锚点模式）。
+- 侧栏根为 flex column 全高；官方导航 `<nav>` 原生 `display:flex; flex-direction:column; gap:2px`；导航末项「更多」（`data-icon="dsw-icon-apps-add-outline-regular"`）是**普通导航项**；regionArea（Workspaces 区）`flex: 1 1 0%`；footArea（= footerActions + settingsArea，内含 Account 菜单触发钮「更多」`data-icon="dsw-icon-ellipsis-outline-medium"`）`flex: 0 0 auto`、列内末位。
+- **官方图标无 class**：`<use href="#dsw-icon-*">` + `data-icon` 属性——DOM 探针/锚点必须用 `[data-icon*=…]` 或 aria-label，类名子串匹配会扑空（rev=2 期实证踩坑）。
+- 侧栏底部钉底常显（rev=3 修正，**推翻 rev=2 的 flex order 方案**）：钉底对象是 footArea 内 ellipsis「更多」（Account 菜单触发钮），实现 = 展开态 footArea 内联 `margin-top:auto`——功能态 regionArea display:none 后列内失去唯一 flex 伸缩元素，auto margin 补位钉底；工作区态 regionArea 吸满空间、auto margin 恒 0，两态统一贴 auto 无害。**不要用 order 重排**：分区容器互斥可见时官方 DOM 序天然即正确视觉序（rev=2 的 order 1/2/3 + nav 拉伸 + 末子手术属多余且钉错对象，已全部撤销）；导航末项 apps-add「更多」按普通导航项逻辑随导航整体显隐，不特殊处理。内联样式变更不触发 childList MutationObserver → 自愈重贴无反馈环；锚点缺席只降级钉底、不放弃插件（软锚点模式）。
+- 同名元素先辨职责再动手：真机改造前用图标/aria-label 探针确认每个视觉相似元素各自的容器与语义（2026-11-24「更多应钉底」反馈被按 nav 末子实现，2026-11-25 用户澄清实际指 footArea 内另一「更多」——返工根因即未先探针区分两个同名元素）。
 
 ### 原型自动化验证前置
 
@@ -65,4 +66,5 @@
 ## 溯源
 
 - 2026-11-16 verify-dsh-plugins-live（spec/changes/verify-dsh-plugins-live/）— 新建本页：loader insert 语法、loopback-trust 前置、隔离 profile 验证载体、两插件真机验收清单与安装文档纪律的初始蒸馏。
-- 2026-11-24 add-sidebar-tabs-plugin 缺陷修批次（spec/changes/add-sidebar-tabs-plugin/）— rev=2：client.js 热更免重启、组合 bundle 装载核实姿势、`body[data-ds-dark-theme]` 主题探针、侧栏 flex order 钉底方案与布局事实、annotator 拦截前置、playwright-cli 会话口径。
+- 2026-11-24 add-sidebar-tabs-plugin 缺陷修批次（spec/changes/add-sidebar-tabs-plugin/）— rev=2：client.js 热更免重启、组合 bundle 装载核实姿势、`body[data-ds-dark-theme]` 主题探针、侧栏 flex order 钉底方案【rev=3 已推翻，改 margin-top:auto 钉 footArea】与布局事实、annotator 拦截前置、playwright-cli 会话口径。
+- 2026-11-25 add-sidebar-tabs-plugin「两更多」修正批（同上 change）— rev=3：钉底对象勘误（footArea ellipsis「更多」= Account 菜单触发钮，nav 末项 apps-add「更多」= 普通导航项）、margin-top:auto 钉底范式、order 重排撤销依据、`data-icon` 属性探针（官方图标无 class）、同名元素先探针辨职责再动手的返工教训。

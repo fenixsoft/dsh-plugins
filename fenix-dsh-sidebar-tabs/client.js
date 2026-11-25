@@ -15,12 +15,17 @@
  *     div.<hash>_footArea                 ← 底部（footerActions + Account/设置区）
  *
  * 行为（对齐 SPEC specs/sidebar-tabs）：
- *   - 切换 = flex order 重排 + display 级可见性切换，MUST NOT reparent（官方 React
+ *   - 切换 = display 级可见性切换，MUST NOT reparent（官方 React
  *     管理子树，搬移与 reconciliation 冲突）；两容器保持各自独立滚动位置与官方更新能力；
- *   - 「更多」钉底常显：全局导航末项（更多）在两 tab 下均钉在侧栏列底、footArea
- *     （Account）上方——root flex column 内联 order（region=1/nav=2/foot=3），
- *     功能 tab nav flex:1 拉伸、末项 margin-top:auto；工作区 tab nav 仅显末项
- *     （前 n-1 项 display:none，nav 不再整体隐藏）；窄轨/teardown 全部 inline 复原；
+ *   - 两个「更多」职责区分（2026-11-25 用户修正，推翻 2026-11-24 首版钉底）：
+ *     nav 末项「更多」（dsw-icon-apps-add-outline-regular）是普通导航项——功能 tab
+ *     按官方顺序正常显示、工作区 tab 随 nav 整体隐藏，不做任何特殊处理；
+ *     footArea 内 Account 菜单触发钮「更多」（dsw-icon-ellipsis-outline-medium）
+ *     才是常驻列底项；
+ *   - footArea 钉底常显：展开态给 footArea margin-top:auto——功能 tab 下 regionArea
+ *     display:none 后列内无 flex:1 元素，不补位则 footArea 随流上浮；工作区 tab 下
+ *     regionArea flex:1 1 0% 吸满自由空间，auto margin 恒 0，统一贴 auto 无害；
+ *     窄轨/teardown 清除复原；
  *   - 选择记忆：localStorage 键 fenix-dsh-sidebar-tabs.tab（'func'|'workspace'），
  *     缺失/非法值缺省 'workspace'；写入失败（存储禁用）不抛错、退化为会话内记忆；
  *   - 收起窄轨（root 带 collapsed 类）：tab 栏 display:none 不渲染、两容器恢复
@@ -62,7 +67,7 @@
 				nav: 'nav[class*="panelList"]',
 				/* Workspaces 区容器：sidebar.workspaces 槽位挂载壳 */
 				workspaces: '[class*="regionArea"]',
-				/* 底部区（footerActions + Account）：仅作「更多」钉底的参照软锚点，
+				/* 底部区（footerActions + Account/⋯ More 菜单）：仅作钉底软锚点，
 				 * 不入 firstMissingAnchor 硬校验——footArea 缺席只降级钉底，不放弃整个插件 */
 				foot: '[class*="footArea"]',
 			}
@@ -141,55 +146,26 @@
 						}
 					}
 
-					/* 「更多」钉底常显（2026-11-24 用户验收反馈：菜单栏最下方的「更多」
-					 * 菜单应一直保持在屏幕最底部）。全部经 flex order 重排实现——root 官方
-					 * 即 flex column，DOM 顺序不动、零 reparent、无 absolute/pointer hack：
-					 *   视觉序 = controls(0), tab栏(0), region(1), nav(2), foot(3)；
-					 *   功能 tab：nav 拉伸填满（flex 1 1 0）+ 末项 margin-top:auto，
-					 *     前 7 项顶部聚簇、「更多」钉在列底 foot 上方（region 隐藏导致
-					 *     foot 上浮的连带缺陷同批修复——nav 拉伸即补位撑住 foot）；
-					 *   工作区 tab：nav 复原 flex 0 0 auto，前 n-1 项 display:none，
-					 *     仅「更多」留在流内贴 foot 上方（nav 不再整体隐藏）；
-					 *   「更多」定位 = nav 最后一个子元素（位置语义：官方增删导航项自动跟随，
-					 *     不做文案匹配，i18n 免疫）。
+					/* footArea 钉底常显（2026-11-25 用户修正：侧栏底部常驻列底的是
+					 * footArea 内 Account 菜单触发钮「更多」（ellipsis 图标）；nav 末项
+					 * 「更多」（apps-add 图标）是普通导航项，随导航整体显隐，不特殊处理）。
+					 * root 官方即 flex column、footArea 为末位 flex 0 0 auto：功能 tab 下
+					 * regionArea display:none 使列内失去唯一 flex 1 1 0% 元素，footArea
+					 * 会随流上浮——margin-top:auto 补位钉回列底；工作区 tab 下 regionArea
+					 * 吸满自由空间，auto margin 恒 0，两 tab 统一贴 auto 无害。零 reparent、
+					 * 零 order 重排（DOM 序 logo,controls,tab栏,nav,region,foot 在两 tab
+					 * 下各自只剩一方可见，天然即正确视觉序）。
 					 * inline style 变更是 attribute 变更，不触发 childList treeObserver，
 					 * 无反馈环；syncState 每轮自愈重贴，幂等。 */
-					function applyPinning(root, nav, ws, func) {
+					function applyFootPin(root) {
 						var foot = root ? root.querySelector(SEL.foot) : null
-						nav.style.setProperty('order', '2')
-						if (ws) ws.style.setProperty('order', '1')
-						if (foot) foot.style.setProperty('order', '3')
-						var kids = nav.children
-						var more = kids.length > 0 ? kids[kids.length - 1] : null
-						for (var i = 0; i < kids.length; i++) {
-							if (func) {
-								kids[i].style.removeProperty('display')
-							} else if (i < kids.length - 1) {
-								kids[i].style.setProperty('display', 'none')
-							}
-						}
-						if (func) {
-							nav.style.setProperty('flex', '1 1 0')
-							if (more) more.style.setProperty('margin-top', 'auto')
-						} else {
-							nav.style.setProperty('flex', '0 0 auto')
-							if (more) more.style.removeProperty('margin-top')
-						}
+						if (foot) foot.style.setProperty('margin-top', 'auto')
 					}
 
-					/* 清除全部钉底 inline（窄轨复原官方原生形态；teardown 同源） */
-					function clearPinning(root, nav, ws) {
-						if (nav) {
-							nav.style.removeProperty('order')
-							nav.style.removeProperty('flex')
-							for (var i = 0; i < nav.children.length; i++) {
-								nav.children[i].style.removeProperty('display')
-								nav.children[i].style.removeProperty('margin-top')
-							}
-						}
-						if (ws) ws.style.removeProperty('order')
+					/* 清除钉底 inline（窄轨复原官方原生形态；teardown 同源） */
+					function clearPinning(root) {
 						var foot = root ? root.querySelector(SEL.foot) : null
-						if (foot) foot.style.removeProperty('order')
+						if (foot) foot.style.removeProperty('margin-top')
 					}
 
 					/* 按 D5 失配语义回退：移除 tab 栏、清掉全部本插件对官方元素的可见性改写 */
@@ -199,7 +175,7 @@
 						if (col) {
 							var nav = col.querySelector(SEL.nav)
 							var ws = col.querySelector(SEL.workspaces)
-							clearPinning(nav ? nav.parentElement : null, nav, ws)
+							clearPinning(nav ? nav.parentElement : null)
 							if (nav) nav.style.removeProperty('display')
 							if (ws) ws.style.removeProperty('display')
 						}
@@ -295,12 +271,15 @@
 							 * （tab 切换与钉底语义只在展开形态生效） */
 							setDisplay(anchors.nav, true)
 							setDisplay(anchors.workspaces, true)
-							clearPinning(anchors.root, anchors.nav, anchors.workspaces)
+							clearPinning(anchors.root)
 						} else {
-							/* nav 双 tab 常显（「更多」钉底要求），分区语义由子元素可见性表达 */
-							setDisplay(anchors.nav, true)
+							/* 分区互斥：功能 tab 显 nav（8 项按官方序，apps-add「更多」即
+							 * 普通末项）、隐 regionArea；工作区 tab 整体隐藏 nav（含
+							 * apps-add「更多」）、显 regionArea；footArea（⋯ More）两 tab
+							 * 恒钉列底 */
+							setDisplay(anchors.nav, state === TAB_FUNC)
 							setDisplay(anchors.workspaces, state !== TAB_FUNC)
-							applyPinning(anchors.root, anchors.nav, anchors.workspaces, state === TAB_FUNC)
+							applyFootPin(anchors.root)
 						}
 					}
 

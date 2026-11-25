@@ -27,21 +27,25 @@ div.<hash>_root          ← 侧栏根（!wide 窄轨时附加 <hash>_collapsed�
   div.<hash>_footArea    ← 底部（footerActions + Account/设置区）
 ```
 
-### 分区切换（display + flex order，不搬移）
+### 分区切换（纯 display 切换，不搬移、无 order 重排）
 
-点击 tab 切换两容器/导航项的内联 `display`（隐藏方 `display:none`、显示方移除内联 display），并以内联 `order` 重排侧栏根 flex 列（region=1 / nav=2 / foot=3，视觉序=新会话→tab栏→工作区→导航→Account），MUST NOT reparent——全局导航与 Workspaces 区均为官方 React 管理子树，搬移与 reconciliation 冲突。display 级切换天然保持两区块各自独立滚动位置与官方更新能力（隐藏时官方仍正常渲染）。
+点击 tab 切换两容器的内联 `display`（隐藏方 `display:none`、显示方移除内联 display），MUST NOT reparent——全局导航与 Workspaces 区均为官方 React 管理子树，搬移与 reconciliation 冲突。两容器互斥可见，侧栏根 flex 列的官方 DOM 序（logo→新会话→tab栏→导航→工作区→Account）在各自 tab 下天然即正确视觉序，**无 order 重排**（2026-11-25 修订：首版 order 1/2/3 重排经真机复核属多余，已撤销）。display 级切换天然保持两区块各自独立滚动位置与官方更新能力（隐藏时官方仍正常渲染）。
 
-- 「工作区」tab：导航容器保持可见，隐藏其前 n-1 个子项（display:none），仅末项「更多」留驻；Workspaces 区完整可见。
-- 「功能」tab：导航全部子项可见，导航容器拉伸填满（内联 `flex:1 1 0`），末项 `margin-top:auto`。
+- 「工作区」tab：导航容器整体隐藏（8 项含末项「更多」，与其他导航项同逻辑、无特殊处理）；Workspaces 区完整可见。
+- 「功能」tab：导航 8 项按官方顺序完整可见，导航容器保持官方原生 flex（不拉伸）。
 
-### 「更多」钉底常显
+### footArea「更多」钉底常显
 
-全局导航末项「更多」在两个 tab 态下 SHALL 常显并钉在侧栏列底、footArea（Account 区）上方、两态同位（2026-11-24 用户验收反馈落地）：
+侧栏存在**两个「更多」**（2026-11-25 用户修正，推翻 2026-11-24 首版对导航末项的钉底处理）：
 
-- 实现 = 根列 flex order 重排 + 功能 tab 导航拉伸 + 末项 `margin-top:auto`，全部内联样式，零 reparent、零 absolute/pointer-events hack；
-- 「更多」定位取导航容器**末位子元素**（位置语义）：官方导航项增删自动跟随，不做文案匹配、i18n 免疫；
-- 功能 tab 下导航拉伸同时补住了 region 隐藏导致的 footArea 上浮（连带缺陷同批修复：Account 菜单在功能 tab 仍钉列底）；
-- 窄轨/teardown 清除全部钉底内联（order×3、nav flex、子项 display/margin-top），恢复官方原生形态。
+- 全局导航末项「更多」（`dsw-icon-apps-add-outline-regular` 图标）= **普通导航项**：功能 tab 按官方顺序正常显示、工作区 tab 随导航整体隐藏，不做任何特殊处理；
+- footArea 内 Account 菜单触发钮「更多」（`dsw-icon-ellipsis-outline-medium` 图标；footArea=footerActions+settingsArea 实证）= **常驻列底项**：两个 tab 态下 SHALL 常显并钉在侧栏列底、两态同位。
+
+实现 = 展开态给 footArea 内联 `margin-top:auto`：
+
+- 功能 tab 下 regionArea `display:none` 使列内失去唯一 `flex:1 1 0%` 伸缩元素，auto margin 补位钉底（否则 footArea 随流上浮，实测修复前 footTop=468 → 修复后钉列底 714/720）；工作区 tab 下 regionArea 吸满自由空间、auto margin 恒 0，两 tab 统一贴 auto 无害；
+- 全部内联样式，零 reparent、零 order 重排、零 absolute/pointer-events hack；
+- 窄轨/teardown 清除钉底内联，恢复官方原生形态。
 
 ### 选择记忆
 
@@ -51,14 +55,14 @@ div.<hash>_root          ← 侧栏根（!wide 窄轨时附加 <hash>_collapsed�
 
 ### 收起态与常显
 
-- 侧栏收起为 56px 窄轨（root 附加 `collapsed` 类）：tab 栏 `display:none` 不渲染，两容器恢复官方现状可见性，钉底内联全清（导航 8 项官方原生排列）；展开后恢复记忆 tab 与钉底。
-- 「新会话」按钮（`controls`）与底部 Account/设置区（`footArea`）不在切换目标内，两种 tab 态下常显、位置与行为不变；footArea 仅作钉底参照软锚点（缺席只降级钉底，不触发失配回退）。
+- 侧栏收起为 56px 窄轨（root 附加 `collapsed` 类）：tab 栏 `display:none` 不渲染，两容器恢复官方现状可见性，钉底内联全清（全部容器官方原生排列）；展开后恢复记忆 tab 与钉底。
+- 「新会话」按钮（`controls`）与底部 Account/设置区（`footArea`，含「更多」触发钮）不在切换目标内，两种 tab 态下常显、位置与行为不变；footArea 仅作钉底软锚点（缺席只降级钉底，不触发失配回退）。
 
 ### 状态自愈
 
 MutationObserver 双通道维护（对齐 fenix-dsh-session-advanced-search 持续维护模式）：
 
-- `documentElement` 子树 `childList`：官方重渲染（会话增删、面板重挂载）重建 nav/regionArea 元素后，重贴 display/order/flex 钉底状态并把 tab 栏重插回 nav 之前；
+- `documentElement` 子树 `childList`：官方重渲染（会话增删、面板重挂载）重建 nav/regionArea 元素后，重贴 display 与钉底状态并把 tab 栏重插回 nav 之前；
 - 侧栏根元素 `attributes[class]`：收起/展开翻转时同步 tab 栏渲染、两容器可见性与钉底态。
 
 一次 mutation burst 经 microtask 去抖合并为一次维护。失配后锚点恢复命中（如官方热修）会自动重新注入。
@@ -116,7 +120,7 @@ MutationObserver 双通道维护（对齐 fenix-dsh-session-advanced-search 持�
 
 1. 注入成功+无记忆缺省：展开态侧栏顶部出现「功能 / 工作区」控件（前邻新会话按钮、后邻全局导航）；缺省「工作区」活动态；品牌区、新会话按钮、全局导航 8 项、Account 菜单行为不变；零控制台错误。
 2. 切到功能：导航 8 项完整可见可点（点击「配置」实测主面板切换）、Workspaces 区互斥隐藏、aria-selected 翻转、localStorage 记忆写入。
-3. 切到工作区：搜索框/高级搜索入口/View options/Add workspace/会话树完整可见可交互、导航除「更多」外的 7 项隐藏（「更多」钉底留驻）。
+3. 切到工作区：搜索框/高级搜索入口/View options/Add workspace/会话树完整可见可交互、导航整体隐藏（8 项含末项「更多」，2026-11-25 修订）。
 4. 独立滚动保持：工作区列表 scrollTop=80 → 切功能 → 切回，scrollTop 保持 80、DOM 节点同一（内容稳定窗口内实测；对照实验证实官方列表自身有内容churn导致的归零，与切换无关）。
 5. 官方重渲染后状态维持：功能活动态下新建会话（官方重渲染）后 tab 栏在位、状态不被冲掉。
 6. 收起态隐藏+展开恢复：显式「Collapse sidebar」收起（root 带 collapsed 类、列宽 56px 实测）tab 栏 display:none（data-rail=true）、窄轨官方内容正常；展开后恢复记忆 tab。响应式视口收窄触发的窄轨同行为。
@@ -128,12 +132,12 @@ MutationObserver 双通道维护（对齐 fenix-dsh-session-advanced-search 持�
 12. 部分失配回退：Workspaces 区锚点键改写为不存在键 → 零注入/零样式/零存储写入/零异常，warn 精确含失配锚点名（见上方演练结果）。
 13. `enabled=false` 零动作：loader 清单移除 insert 条目重启 → `/plugins/??fenix-dsh-sidebar-tabs/client.js` 404、页面无 tab 栏、无样式注入、localStorage 无键。
 
-钉底常显回归（**2026-11-24 live 真机实测通过**，2026-11-24 用户验收缺陷「更多应一直保持在屏幕最底部」修复批）：
+钉底常显回归（**2026-11-25 live 真机实测通过**；2026-11-24 首版误将导航末项钉底，2026-11-25 用户澄清两「更多」职责后重做）：
 
-14. 「更多」钉底同位：功能/工作区两 tab 态下导航末项「更多」bottom 均为 666px、与 footArea 间距 8px（1280×720 实测），功能 tab 前 7 项顶部聚簇（首项 top=158）。
-15. footArea 防上浮：功能 tab 下 Account 菜单 bottom=714（列底 720），不再随 region 隐藏上浮（修复前 footTop=468）。
-16. 「更多」可点性：工作区 tab 下点击「更多」正常弹出行内菜单（menuAnchor popup），Escape 关闭。
-17. 窄轨往返：Collapse→窄轨 8 项全显、order/flex/子项内联全清；Open sidebar→展开后钉底重贴、记忆 tab 恢复。
+14. 两「更多」职责区分：功能 tab 下导航 8 项按官方序聚簇（apps-add「更多」为普通末项，无钉底）；工作区 tab 下导航整体隐藏（apps-add「更多」不可见）；footArea「更多」（ellipsis 图标，Account 菜单触发钮）两态常显。
+15. footArea 钉底同位：功能/工作区两 tab 态下 footArea bottom 均为 714（列底 720，1280×720 实测）；功能 tab 无上浮（首版缺陷 footTop=468 不复现）。
+16. footArea「更多」可点性：点击正常弹出 Account 菜单，Escape 关闭。
+17. 窄轨往返：Collapse→窄轨全容器官方原生排列、钉底内联全清；Open sidebar→展开后钉底重贴、记忆 tab 恢复。
 18. 控制台零新增告警（仅既有插件 advanced-search/dashboard-bridge 的锚点告警，与本插件无关）。
 
 原始证据（快照/JSON/截图）存档：`.fenix/verify-evidence/add-sidebar-tabs-plugin/`。

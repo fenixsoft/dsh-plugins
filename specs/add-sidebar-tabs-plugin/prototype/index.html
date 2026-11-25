@@ -194,11 +194,11 @@ svg { display: block; }
 .tree-more:hover { background: var(--item-hover); color: var(--text-primary); }
 .app.collapsed .pane-workspace { display: none; } /* 收起态工作区 pane 不渲染（窄轨维持现状图标轨） */
 
-/* 「更多」钉底常显（SPEC 常显元素 Requirement：两 tab 态下导航末项钉列底、Account 上方同位） */
-.pane-func, .pane-workspace { display: flex; flex-direction: column; }
-.pane-func .nav-item:last-child { margin-top: auto; }
+/* footArea「更多」钉底常显（2026-11-25 修订：钉底对象=底部 Account/⋯ More 区；
+ * 导航末项 apps-add「更多」是普通导航项，工作区 tab 随导航整体隐藏。
+ * 原型用侧栏列 flex 布局：pane 吸收自由空间、Account 行 margin-top:auto 钉列底） */
+.pane-func, .pane-workspace { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .pane-workspace .tree { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-.pane-workspace .nav-more-pin { margin-top: auto; flex: none; }
 
 /* ===== 底部 Account（现状保留，tab 外常显）===== */
 .account {
@@ -353,15 +353,10 @@ svg { display: block; }
         <button class="tree-item" data-proto-id="sidebar-tabs-ws-ungrouped"><span class="chev"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m6 4 4 4-4 4"/></svg></span><span class="name">Ungrouped</span></button>
       </div>
 
-      <!-- 「更多」钉底留驻：工作区 tab 下导航仅显末项，钉在列底 Account 上方 -->
-      <button class="nav-item nav-more-pin" data-proto-id="sidebar-tabs-ws-more">
-        <span class="ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="3.5" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r=".9" fill="currentColor" stroke="none"/></svg></span>
-        <span class="label">More</span>
-        <span class="chev"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m6 4 4 4-4 4"/></svg></span>
-      </button>
     </div>
 
-    <!-- Account：现状保留，tab 外常显 -->
+    <!-- Account + ⋯ More（footArea）：tab 外常显、钉列底（2026-11-25 修订：
+         常驻列底的「更多」是 footArea 内 Account 菜单触发钮，非导航末项） -->
     <button class="account" data-proto-id="sidebar-tabs-account">
       <span class="avatar">F</span>
       <span class="label">Account menu · More</span>
