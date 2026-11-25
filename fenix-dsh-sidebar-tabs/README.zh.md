@@ -16,15 +16,18 @@ client.js 启动时按「CSS-modules 键名子串匹配」（类值带构建哈�
 | 全局导航容器 | `nav[class*="panelList"]` | SidebarRoot 直下唯一 `<nav>`（`aria-label=panels.label`，8 官方入口） |
 | Workspaces 区容器 | `[class*="regionArea"]` | `renderSlot("sidebar.workspaces")` 挂载壳（搜索框/高级搜索/树） |
 
-注入位置 = tab 栏插在 `nav.panelList` 之前（即新会话按钮容器 `controls` 之后）。官方侧栏结构（dsh-client-ui-sidebar `SidebarRoot`）：
+注入位置 = tab 栏插在侧栏根 flex 列、内容滚动区（`scrollRegion`）之前（dsh ≥0.2.2-rc.5；rc.1 等无滚动机的旧形态回退为 `nav.panelList` 之前）。**MUST NOT 进入 `scrollArea`**——它是官方 `display:grid` 滚动容器，外来子元素会被 auto-flow 分到退化轨道压扁（实测 6px 宽）且扰动官方行轨道。官方侧栏结构（dsh-client-ui-sidebar `SidebarRoot`，rc.5 实证）：
 
 ```
-div.<hash>_root          ← 侧栏根（!wide 窄轨时附加 <hash>_collapsed）
-  div.<hash>_logoRow     ← 品牌区
-  div.<hash>_controls    ← 新会话按钮容器
-  nav.<hash>_panelList   ← 全局导航（8 项）
-  div.<hash>_regionArea  ← Workspaces 区
-  div.<hash>_footArea    ← 底部（footerActions + Account/设置区）
+div.<hash>_root            ← 侧栏根（!wide 窄轨时附加 <hash>_collapsed）
+  div.<hash>_logoRow       ← 品牌区
+  div.<hash>_newSessionRow ← 新会话按钮容器（rc.1 时代键名 controls）
+  .fdx-sbt-bar             ← ★ 本插件 tab 栏（根列直子，scrollRegion 之前）
+  div.<hash>_scrollRegion  ← 官方滚动区壳（margin-top 4px、flex 1 1 0%）
+    div.<hash>_scrollArea  ← 官方 display:grid 滚动容器（禁入）
+      nav.<hash>_panelList ← 全局导航（8 项）
+      div.<hash>_regionArea← Workspaces 区
+  div.<hash>_footArea      ← 底部（footerActions + Account/设置区，根列末位 flex 0 0 auto）
 ```
 
 ### 分区切换（纯 display 切换，不搬移、无 order 重排）
@@ -80,19 +83,21 @@ MutationObserver 双通道维护（对齐 fenix-dsh-session-advanced-search 持�
 
 **实证快照**（签名字证的版本基线，升级 dsh 后首先复核本节）：
 
-- dsh `@deepseek-ai/dsh` **0.2.2-rc.1**（`dsh-client-ui-sidebar` / `dsh-client-ui-layout` / `dsh-client-ui-workspace` 同版本），CSS-modules 哈希前缀形如 `bhn1Oq_`/`Xa_`（升级漂移、键名稳定）。
-- 侧栏结构自 dsh-client-ui-sidebar bundle 的 `SidebarRoot_module_css_default.*` 键名实证：`root/logoRow/controls(HeaderLeadingControls)/panelList/regionArea/footArea/collapsed/newSession`；侧栏列 `sidebarCol` 来自 dsh-client-ui-layout。
+- dsh `@deepseek-ai/dsh` **0.2.2-rc.5**（2026-11-25 真机基线；rc.1 基线记录见下方实锚表），CSS-modules 哈希前缀形如 `hHd-Xa_`/`bhn1Oq_`（升级漂移、键名稳定）。
+- 侧栏结构自 dsh-client-ui-sidebar bundle 的 `SidebarRoot_module_css_default.*` 键名实证：`root/logoRow/newSessionRow/scrollRegion/scrollArea/panelList/regionArea/footArea/collapsed/newSession`（rc.1：`controls` 代替 `newSessionRow`，无 `scrollRegion`/`scrollArea` 包裹——nav/region 为 root 直子）；侧栏列 `sidebarCol` 来自 dsh-client-ui-layout。
+- **rc.5 结构改版要点**（升级适配记录）：①新会话容器改名 `controls`→`newSessionRow` 且不再自带下边距；②内容区包上滚动机 `scrollRegion(margin-top:4px, flex:1 1 0%) > scrollArea(display:grid, overflow:auto)`，nav/region 移入其中；③侧栏根推导不能用 `nav.parentElement`（会拿到 scrollArea），用 `nav.closest('[class*="root"]')`；④tab 栏放根列、scrollRegion 之前（禁入 scrollArea，理由见上方结构图）；⑤间距定稿：bar `margin: 12px 12px -4px`——上 12px 呼吸（rc.5 newSessionRow 无下边距），下 `-4px` 精确抵消 scrollRegion 自带 `margin-top:4px` 实现贴零（2026-11-25 用户定稿值）。
 - 主题 token 自 dsh-client-ui-theme bundle 实证（暗主题标记 = `body[data-ds-dark-theme]`）：轨道 浅 `--dsw-static-neutral-bluish-150` / 暗 `bluish-850`；选中活动块 = 轨道上的增白区分块（2026-11-24 用户反馈：去底部品牌色指示条、选中背景增白）——浅 `bluish-00`（白）/ 暗 `bluish-700`；文字 `--dsw-alias-label-primary/secondary`。
 
-**真机实锚命中记录**（隔离 profile 实测，2026-11-24，dsh 0.2.2-rc.1）：
+**真机实锚命中记录**（隔离 profile 实测 2026-11-24 dsh 0.2.2-rc.1；live 实测 2026-11-25 dsh 0.2.2-rc.5）：
 
 | 锚点 | 运行时类值（哈希前缀实例） | 命中形态 |
 | --- | --- | --- |
-| 侧栏列 `sidebarCol` | `bhn1Oq_sidebarCol`（布局列，56px 窄轨/展开全形态在位） | 命中 |
-| 全局导航 `panelList` | `nav.hHd-Xa_panelList`（SidebarRoot 直下唯一 `<nav>`，8 个 button 子元素：概览/配置/Plugins/运维/指挥中心/Automation tasks/帮助/More） | 命中 |
-| Workspaces 区 `regionArea` | `div.hHd-Xa_regionArea`（搜索框/高级搜索入口/View options/Add workspace/会话树挂载壳） | 命中 |
-| 注入位置 | `.fdx-sbt-bar` 前邻 `button.hHd-Xa_newSession`、后邻 `nav.hHd-Xa_panelList`（新会话按钮容器之后、全局导航之前） | 命中 |
-| 窄轨标记 | root 附加 `hHd-Xa_collapsed`（56px 列宽实测），tab 栏 `data-rail=true` display:none | 命中 |
+| 侧栏列 `sidebarCol` | rc.1 `bhn1Oq_sidebarCol` / rc.5 同键名（布局列，56px 窄轨/展开全形态在位） | 命中（两版） |
+| 全局导航 `panelList` | `nav.hHd-Xa_panelList`（rc.1 SidebarRoot 直下；rc.5 移入 scrollArea，仍唯一 `<nav>`，8 子元素） | 命中（两版） |
+| Workspaces 区 `regionArea` | `div.hHd-Xa_regionArea`（搜索框/高级搜索入口/View options/Add workspace/会话树挂载壳） | 命中（两版） |
+| 注入位置 | rc.1：bar 前邻 `newSession` 后邻 `nav.panelList`；rc.5：bar 挂根列、前邻 `newSessionRow` 后邻 `scrollRegion` | 命中（两版） |
+| 钉底锚 `footArea` | rc.5 `footArea` 根列末位（footerActions+settingsArea，软锚点） | 命中 |
+| 窄轨标记 | root 附加 `hHd-Xa_collapsed`（56px 列宽实测），tab 栏 `data-rail=true` display:none | 命中（两版） |
 
 **失配模拟演练结果**（2026-11-24，隔离 profile）：
 

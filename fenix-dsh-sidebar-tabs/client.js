@@ -5,14 +5,21 @@
  * 「功能 / 工作区」双 tab 分段控件，把两类异质内容分区直达（dsh 0.2.2-rc.1
  * 安装版 bundle 实证，升级失配时零注入退出回官方形态）：
  *
- * 官方侧栏 DOM（SidebarRoot，dsh-client-ui-sidebar 0.2.2-rc.1 实证结构）：
+ * 官方侧栏 DOM（SidebarRoot；rc.1 平铺结构 / rc.5 起滚动机包裹结构，两者实证）：
  *   div.<hash>_root                       ← 侧栏根（!wide 窄轨时附加 <hash>_collapsed）
  *     div.<hash>_logoRow                  ← 品牌区
- *     div.<hash>_controls                 ← 新会话按钮容器（HeaderLeadingControls）
- *     nav.<hash>_panelList                ← 全局导航容器（aria-label=panels.label，8 官方入口）
- *     div.<hash>_regionArea               ← Workspaces 区容器（renderSlot("sidebar.workspaces")
+ *     div.<hash>_newSessionRow/_controls  ← 新会话按钮容器（rc.5 改名 newSessionRow）
+ *     [rc.5+] div.<hash>_scrollRegion > div.<hash>_scrollArea   ← 滚动机包裹（grid 容器，
+ *                                           overflow-y:auto；rc.1 无此层）
+ *       nav.<hash>_panelList              ← 全局导航容器（aria-label=panels.label，8 官方入口）
+ *       div.<hash>_regionArea             ← Workspaces 区容器（renderSlot("sidebar.workspaces")
  *                                           挂载壳：搜索框/高级搜索入口/View options/树）
- *     div.<hash>_footArea                 ← 底部（footerActions + Account/设置区）
+ *     div.<hash>_footArea                 ← 底部（footerActions + Account/⋯ More 设置区）
+ *
+ *   ★ tab 栏 MUST 放在侧栏根 flex 列（scrollRegion 之前），MUST NOT 进 scrollArea：
+ *     scrollArea 是官方 grid 滚动容器，外来子元素会被 auto-flow 分到退化轨道
+ *     （rc.5 实测 tab 栏被压成 6px 宽且扰动官方行轨道）。rc.1 无滚动机时回退
+ *     插在 nav 之前（旧形态）。
  *
  * 行为（对齐 SPEC specs/sidebar-tabs）：
  *   - 切换 = display 级可见性切换，MUST NOT reparent（官方 React
@@ -76,7 +83,7 @@
 				/* 分段控件轨道：原型分段控件（深色轨道 + 增白活动块，无指示条——
 				 * 2026-11-24 用户反馈调整），高 30px tab、栏含 3px 内边距、左右 12px 边距；
 				 * token 随官方暗/浅主题自适应 */
-				'.fdx-sbt-bar { --fdx-sbt-track: var(--dsw-static-neutral-bluish-150); --fdx-sbt-active-bg: var(--dsw-static-neutral-bluish-00); margin: 0 12px 8px; flex: none; background: var(--fdx-sbt-track); border-radius: 8px; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }',
+				'.fdx-sbt-bar { --fdx-sbt-track: var(--dsw-static-neutral-bluish-150); --fdx-sbt-active-bg: var(--dsw-static-neutral-bluish-00); margin: 12px 12px -4px; flex: none; background: var(--fdx-sbt-track); border-radius: 8px; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }',
 				'body[data-ds-dark-theme] .fdx-sbt-bar { --fdx-sbt-track: var(--dsw-static-neutral-bluish-850); --fdx-sbt-active-bg: var(--dsw-static-neutral-bluish-700); }',
 				/* 收起窄轨：tab 栏不渲染（窄轨内容与官方现状一致） */
 				'.fdx-sbt-bar[data-rail="true"] { display: none; }',
@@ -175,7 +182,7 @@
 						if (col) {
 							var nav = col.querySelector(SEL.nav)
 							var ws = col.querySelector(SEL.workspaces)
-							clearPinning(nav ? nav.parentElement : null)
+							clearPinning(nav ? sidebarRootOf(nav) : null)
 							if (nav) nav.style.removeProperty('display')
 							if (ws) ws.style.removeProperty('display')
 						}
@@ -291,10 +298,22 @@
 						watchedRoot = root
 					}
 
+					/* 侧栏根推导：nav 的最近 root 类祖先（rc.1/rc.5 通用——rc.5 起nav
+					 * 被包进 scrollRegion/scrollArea 滚动机，nav.parentElement 不再是
+					 * 侧栏根而是官方 grid 滚动容器，误用会连锁破坏 tab 栏放置、窄轨
+					 * collapsed 监测与 footArea 钉底软锚点）。 */
+					function sidebarRootOf(nav) {
+						return nav.closest('[class*="root"]') || nav.parentElement
+					}
+
+					/* tab 栏放置：侧栏根 flex 列内、nav 的滚动区祖先（scrollRegion）
+					 * 之前；rc.1 无滚动区时回退 nav 之前（旧形态）。MUST NOT 插进
+					 * scrollArea（官方 grid 滚动容器，见头部说明）。 */
 					function placeTabbar(anchors) {
 						if (!tabbar) tabbar = buildTabbar()
-						if (tabbar.parentElement !== anchors.nav.parentElement || tabbar.nextSibling !== anchors.nav) {
-							anchors.nav.parentElement.insertBefore(tabbar, anchors.nav)
+						var target = anchors.nav.closest('[class*="scrollRegion"]') || anchors.nav
+						if (tabbar.parentElement !== target.parentElement || tabbar.nextSibling !== target) {
+							target.parentElement.insertBefore(tabbar, target)
 						}
 					}
 
@@ -334,9 +353,9 @@
 							warnMissing('regionArea(' + SEL.workspaces + ')')
 							return
 						}
-						var root = nav.parentElement
+						var root = sidebarRootOf(nav)
 						if (!root || !root.contains(ws)) {
-							warnMissing('sidebarRoot(nav.parentElement)')
+							warnMissing('sidebarRoot(nav.closest([class*="root"]))')
 							return
 						}
 						/* 命中恢复：失配限流复位（失配→修复→再失配可再次告警） */
