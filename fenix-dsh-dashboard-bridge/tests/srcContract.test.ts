@@ -280,17 +280,22 @@ describe('条目注册（桩 slots）', () => {
       'fenix-activities',
       'fenix-help',
     ])
-    // 运维条目 label 为 thunk（2026-11-13 菜单文字后告警计数 pill；求值含
-    // 「运维」文字），其余四条仍为字符串 label。
+    // label 全量 thunk 化（i18n 宿主语言跟随轮）：求值期经 pluginT 取菜单
+    // 词典当前档；运维条目求值含告警计数 pill（原 2026-11-13 形态）。
     expect(fixed.map((entry) => entry.options.label)).toEqual([
-      '概览',
-      '指挥中心',
-      '配置',
       expect.any(Function),
-      '帮助',
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
     ])
-    const activitiesLabel = fixed[3]?.options.label as () => unknown
-    expect(JSON.stringify(activitiesLabel())).toContain('运维')
+    // 缺省（zh）档求值逐字=FIXED_ENTRIES 钉串
+    const zhLabels = fixed.map((entry) => (entry.options.label as () => unknown)())
+    expect(String(zhLabels[0])).toBe('概览')
+    expect(String(zhLabels[1])).toBe('指挥中心')
+    expect(String(zhLabels[2])).toBe('配置')
+    expect(String(zhLabels[4])).toBe('帮助')
+    expect(JSON.stringify(zhLabels[3])).toContain('运维')
     // order 段位（2026-11-05 重排）：概览10 / 配置13 / 运维15 / 指挥中心16 /
     // 帮助18。视觉序由 OFFICIAL_PANEL_REORDER 遮蔽段位（14/17）合成。
     expect(fixed.map((entry) => entry.options.order)).toEqual([10, 16, 13, 15, 18])

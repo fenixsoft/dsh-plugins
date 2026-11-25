@@ -187,6 +187,24 @@ export function opsAlertLabelThunk(text: string): () => ReactElement {
   return () => opsAlertLabelElement(text, alertCountStore.getSnapshot().count)
 }
 
+/**
+ * 固定条目 label 工厂（i18n 宿主语言跟随轮增强）：全部条目 thunk 化，求值期
+ * 经 pluginT 取菜单词典当前档（宿主 resolveSlotLabel 对 function label 每次
+ * syncPanels 求值——dsh-client-ui-slots lib/index.js:28 契约）；运维条目求值
+ * 仍含告警计数 pill（opsAlertLabelElement）。词典缺省 zh=FIXED_ENTRIES 钉串
+ * （零回归）；locale/change 后 installMenuLocaleRefresher 遮蔽重注册触发宿主
+ * 重读即显新档。
+ */
+export function fixedEntryLabelThunk(id: FixedEntryId): () => string | ReactElement {
+  const key = `menu.${id}`
+  return () => {
+    const text = pluginT(key)
+    return id === 'fenix-activities'
+      ? opsAlertLabelElement(text, alertCountStore.getSnapshot().count)
+      : text
+  }
+}
+
 /** 固定条目线性图标组件工厂（每个条目 id 一枚）。 */
 export function fixedIconComponent(id: FixedEntryId): (props: PanelIconProps) => ReactElement {
   const glyph = FIXED_GLYPHS[id]

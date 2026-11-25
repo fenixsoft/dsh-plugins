@@ -33,11 +33,12 @@ import { buildPanelSrc, resolveBridgeConfig } from '../shared/config.js'
 import type { BridgeConfigInput } from '../shared/config.js'
 import { alertCountStore, fetchAlertCount, startAlertCountSync } from './alertCount.js'
 import type { AlertCountFetcher } from './alertCount.js'
-import { DashboardPanel, fixedIconComponent, installWorkspaceNav, opsAlertLabelThunk, projectGroupStore } from './panels.js'
+import { DashboardPanel, fixedEntryLabelThunk, fixedIconComponent, installWorkspaceNav, projectGroupStore } from './panels.js'
 import type { FixedEntryId } from './panels.js'
 import { registerFileContextMenu } from './locate.js'
 import { currentThemeScheme, installThemeFollow } from './themeFollow.js'
 import { currentLocaleScheme, installLocaleFollow } from './localeFollow.js'
+import type { LocaleFollowContext } from './localeFollow.js'
 import {
   createSidebarProjectOpener,
   LOCATE_ICON_KEY,
@@ -173,6 +174,74 @@ export function reorderOfficialPanels(ctx: Context): () => void {
   unsubscribe = ctx.slots.subscribe('sidebar.panellist', attempt)
   attempt() // 官方先于本插件注册时首轮即中
   return unsubscribe
+}
+
+/**
+ * 菜单语言跟随刷新器（i18n 宿主语言跟随轮）：语言切换时对 5 个固定条目做
+ * 「先收旧遮蔽、再以 priority -10 重注册」——panellist 变更驱动宿主 syncPanels
+ * 重读 label thunk，菜单立即显新档（不等下一次告警计数/交互重渲染）。
+ *
+ * - label thunk 本身已是渲染期实时求值（pluginT 当前档），重注册只为**触发**
+ *   宿主重读，不再承担取值职责——两处语义解耦。
+ * - icon 用模块级单例复用（组件身份稳定，重注册零 remount/零闪烁）。
+ * - -10 优先于基注册缺省 priority（entriesOfSlot 升序取首，OFFICIAL_PANEL_
+ *   REORDER 同款语义）；收口时逐条 dispose 遮蔽注册，基注册（词典 thunk）
+ *   自然回胜，语言跟随能力保留。
+ * - 降级：ctx.locale 缺席/订阅抛错（旧版宿主/测试桩）→ 不订阅零开销。
+ *
+ * @returns 收口函数（退订 + 清全部遮蔽注册；插件卸载统一收口）。
+ */
+export function installMenuLocaleRefresher(
+  ctx: LocaleFollowContext & Pick<Context, 'slots'>,
+): () => void {
+  const icons = new Map<string, ReturnType<typeof fixedIconComponent>>()
+  const disposers = new Map<string, () => void>()
+  const refresh = (): void => {
+    for (const entry of FIXED_ENTRIES) {
+      let icon = icons.get(entry.id)
+      if (icon === undefined) {
+        icon = fixedIconComponent(entry.id)
+        icons.set(entry.id, icon)
+      }
+      try {
+        disposers.get(entry.id)?.()
+        disposers.set(
+          entry.id,
+          ctx.slots.register(
+            {
+              name: 'sidebar.panellist',
+              id: entry.id,
+              order: entry.order,
+              priority: -10,
+              label: fixedEntryLabelThunk(entry.id),
+            },
+            icon,
+          ),
+        )
+      } catch {
+        // 恒定错误（同 id 冲突等）：吞掉——label thunk 实时求值兜底，仅失去
+        // 「立即刷新」，语言档在宿主下一次 syncPanels 时仍会跟上。
+      }
+    }
+  }
+  let stop: () => void = () => {}
+  try {
+    if (typeof ctx.on === 'function') {
+      const unsubscribe = ctx.on('locale/change', refresh)
+      if (typeof unsubscribe === 'function') stop = unsubscribe as () => void
+    }
+  } catch {
+    stop = () => {}
+  }
+  return () => {
+    try {
+      stop()
+    } catch {
+      /* 收口自守 */
+    }
+    for (const dispose of disposers.values()) dispose()
+    disposers.clear()
+  }
 }
 
 /**
@@ -713,10 +782,11 @@ export function installOpsAlertBadge(
           id: entry.id,
           order: entry.order,
           priority: -10,
-          // label 用 thunk（2026-11-13 用户指令：告警计数移到菜单文字后红底
-          // pill 显示，宿主 14px 文字渲染；求值读 alertCountStore 当前快照，
-          // 本重注册即宿主重读 label/重渲染图标圆点的触发面）。
-          label: opsAlertLabelThunk(entry.label),
+          // label 用词典 thunk（i18n 宿主语言跟随轮）：固定条目 label 已全量
+          // thunk 化，此处遮蔽注册（-10 胜出）必须同词典求值，否则告警在场时
+          // 英文档会被静态 zh 钉串拉回中文。求值读 alertCountStore 当前快照，
+          // 本重注册即宿主重读 label/重渲染图标圆点的触发面。
+          label: fixedEntryLabelThunk(entry.id),
         },
         icon,
       )
@@ -772,6 +842,12 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   // 与现状逐字符一致）、不订阅。
   const stopLocaleFollow = installLocaleFollow(ctx)
 
+  // 菜单语言即时刷新（i18n 宿主语言跟随轮）：固定条目 label 虽为渲染期实时
+  // thunk，但宿主 syncPanels 只在注册变更/交互时重读——语言切换后需一次
+  // 遮蔽重注册把「重读」立即触发。接入点紧随 installLocaleFollow（词典档
+  // 喂入先于刷新回调，事件订阅序天然正确）。
+  const stopMenuLocale = installMenuLocaleRefresher(ctx)
+
   // 固定侧栏条目（order 10–18，线性图标）；「Fenix 项目」总览入口在右侧
   // 边栏页签（m02220 语义纠正，见 rightTab.tsx），不在左侧 rail。
   ctx.slots.inject('sidebar.panellist', () => {
@@ -781,10 +857,11 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
           name: 'sidebar.panellist',
           id: entry.id,
           order: entry.order,
-          // 运维条目 label 用 thunk（菜单文字后告警计数 pill，2026-11-13 用户
-          // 指令）；其余条目字符串原样。基注册 thunk 与遮蔽注册同求值路径，
-          // count≤0 时求值回落纯文字（零告警隐匿）。
-          label: entry.id === 'fenix-activities' ? opsAlertLabelThunk(entry.label) : entry.label,
+          // label 全量 thunk 化（i18n 宿主语言跟随轮）：求值期经 pluginT 取
+          // 菜单词典当前档（宿主 resolveSlotLabel 每次 syncPanels 求值）；
+          // 运维条目求值含告警计数 pill（原 2026-11-13 形态，词典文字）。
+          // FIXED_ENTRIES.label 保持 zh 钉串（深链/order/文案契约不变）。
+          label: fixedEntryLabelThunk(entry.id),
         },
         fixedIconComponent(entry.id),
       ),
@@ -880,5 +957,6 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     sink.disposeAll()
     stopThemeFollow() // 面板注销后再退订 theme/change + 清缓存（收口序，防悬空广播）
     stopLocaleFollow() // 同收口序：退订 locale/change + 清缓存（i18n 宿主跟随轮）
+    stopMenuLocale() // 收菜单遮蔽注册 + 退订（label thunk 实时求值兜底保留）
   }
 }

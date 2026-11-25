@@ -46,3 +46,21 @@ describe('文案取值', () => {
     expect(pluginT('wsTooltip.status.nonexistent')).toBe('wsTooltip.status.nonexistent')
   })
 })
+
+describe('菜单词典（i18n 宿主跟随轮：侧栏固定条目 label）', () => {
+  it('缺省 zh 逐字=FIXED_ENTRIES 钉串；en 档即时切换；切回 zh 生效', () => {
+    expect(pluginT('menu.fenix-overview')).toBe('概览')
+    expect(pluginT('menu.fenix-command-center')).toBe('指挥中心')
+    expect(pluginT('menu.fenix-settings')).toBe('配置')
+    expect(pluginT('menu.fenix-activities')).toBe('运维')
+    expect(pluginT('menu.fenix-help')).toBe('帮助')
+    setPluginLocale('en')
+    expect(pluginT('menu.fenix-overview')).toBe('Overview')
+    expect(pluginT('menu.fenix-command-center')).toBe('Command Center')
+    expect(pluginT('menu.fenix-settings')).toBe('Config')
+    expect(pluginT('menu.fenix-activities')).toBe('Ops')
+    expect(pluginT('menu.fenix-help')).toBe('Help')
+    setPluginLocale('zh')
+    expect(pluginT('menu.fenix-overview')).toBe('概览')
+  })
+})

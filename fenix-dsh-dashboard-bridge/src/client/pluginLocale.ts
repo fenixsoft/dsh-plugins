@@ -79,6 +79,16 @@ const PANELS: Record<string, Entry> = {
   'common.loading': ['加载中', 'Loading'],
 }
 
+/** 菜单（侧栏固定条目；键与 FixedEntryId 机械映射 menu.<id>）。
+ * zh 值逐字=FIXED_ENTRIES 现状钉串（srcContract 契约），en 按 dashboard 术语。 */
+const MENU: Record<string, Entry> = {
+  'menu.fenix-overview': ['概览', 'Overview'],
+  'menu.fenix-command-center': ['指挥中心', 'Command Center'],
+  'menu.fenix-settings': ['配置', 'Config'],
+  'menu.fenix-activities': ['运维', 'Ops'],
+  'menu.fenix-help': ['帮助', 'Help'],
+}
+
 /** locate（文件右键「定位」菜单项）。 */
 const LOCATE: Record<string, Entry> = {
   // 2026-11-11 用户需求原文形态：`在 <项目名> 项目定位`（en 侧经 template 组装）
@@ -87,7 +97,7 @@ const LOCATE: Record<string, Entry> = {
   'locate.failureLabel': ['定位失败，请重试', 'Locate failed, please retry'],
 }
 
-const DICTS: Array<Record<string, Entry>> = [WS_TOOLTIP, LOCATE, PANELS]
+const DICTS: Array<Record<string, Entry>> = [WS_TOOLTIP, LOCATE, PANELS, MENU]
 
 /**
  * 取文案（渲染/求值期调用，返回当前档串）。键不存在回退 zh 列（防键位
