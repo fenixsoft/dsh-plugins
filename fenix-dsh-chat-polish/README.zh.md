@@ -2,16 +2,18 @@
 
 dsh web 对话区打磨插件（纯 client 半，零构建，先例 `dsh-plugin-loopback-trust`）。
 
-**0.3.0 起**核心功能在官方设置页「Fenix 插件设置」分区内带独立开关，默认全开
+**0.3.0 起**核心功能在官方设置页「Fenix 插件」分区内带独立开关，默认全开
 （等于安装即用形态），关闭某项即时回退官方原生形态，无需刷新页面——见下文
 [设置页独立开关](#设置页独立开关0310-起)。0.3.x 起设置页可经「嵌入设置页面」
 开关由弹出模态改为嵌入内容区的整页形态。
 
 ## 功能
 
-1. **对话列左右留白固定 24px**
+1. **对话列左右留白固定（2026-11-25：左 14px / 右 24px）**
    - 官方布局把消息列锁在 `--dsh-chat-content-width`（最大 920px）居中，宽屏两侧留白巨大；
-   - 覆盖后：消息列与输入卡对齐铺满，两侧各留 24px；
+   - 覆盖后：消息列与输入卡对齐铺满；原先两侧各留 24px，2026-11-25 按用户要求
+     滚动容器左内边距收窄至 14px（消息更贴近左侧栏；右侧保持 24px，贴边滚动条
+     不受影响；列为填充布局，右缘不变）；
    - 列宽拖拽把手隐藏（固定留白后无拖拽空间，且防止拖拽写入 localStorage 宽度偏好）；
    - 「回到底部」浮钮同步对齐；
    - **嵌入形态豁免**：fenixd dashboard 嵌入（root 带 `.embeddedBody`）不受影响。
@@ -23,9 +25,18 @@ dsh web 对话区打磨插件（纯 client 半，零构建，先例 `dsh-plugin-
      `body[data-ds-dark-theme]` 模式翻转（thumb `#969696`/轨道 `#202124`）；
    - 宽度 5px → 10px（`--dsh-scrollbar-width` 同时驱动 composer overlay 的滚动条
      让位偏移，随变量自适应）；
-   - 补出四向箭头按钮：定义 `::-webkit-scrollbar` 系列后 UA 不再自动绘制 button，
-     需显式给出 `::-webkit-scrollbar-button` 规则（SVG 三角箭头 data URI），否则
-     箭头消失。
+   - 2026-11-25 按用户要求收敛箭头按钮：四向 SVG 箭头只保留在会话滚动容器
+     （`[data-conversation-scroll]` 作用域）上，其余滚动条（侧栏等）不再绘制；
+   - 同日修复「底部 ▲▼ 两枚箭头叠排」：Chromium 对自定义滚动条按钮按老 Mac
+     双按钮风格布局——decrement/increment 在顶、底两端各渲染一份。用
+     `:start`/`:end` 隐藏错位副本（vertical end:decrement / start:increment、
+     horizontal 同构），只留顶部 ▲ + 底部 ▼ 各一枚；底部 ▼ 按钮加高
+     （11→16px）且三角上移（`background-position:center 3px`），箭头下方多留
+     白、不贴页面底缘；
+   - 同日把会话滚动条钉住页面最右缘：官方 ChatView root 右 padding 24px +
+     scrollBody 自身 margin-right 2px，滚动条距页缘 26px，加
+     `margin-right:-24px` 让滚动条贴住视口右缘（root/body overflow 可见、
+     centerCol 右缘即视口右缘，无裁切）。
 
 3. **输入框 80% 宽度居中**：`.card` 设 `width:80%`（InputBar 根节点本身
    `align-items:center` 自动居中），提示条与队列坞卡同步 80% 同轴。2026-11-24
@@ -72,7 +83,7 @@ dsh web 对话区打磨插件（纯 client 半，零构建，先例 `dsh-plugin-
    - 监听为 document 捕获阶段单例，先于 Lexical 命令处理；组件异常由宿主
      SlotErrorBoundary/abdicate 兜底。
 
-7. **嵌入设置页面**（0.3.x 新增，默认关闭）
+7. **嵌入设置页面**（0.3.x 新增，**默认开启**）
    - 官方设置页是 `createPortal` 到 body 的弹出模态对话框（overlay + 遮罩 +
      800px 居中面板）；开启后改为**嵌入内容区**的整页形态；
    - 实现为 JS 内联几何接管（不 reparent、不碰 React 内部）：面板挂载时把
@@ -81,26 +92,40 @@ dsh web 对话区打磨插件（纯 client 半，零构建，先例 `dsh-plugin-
      清除；内容区尺寸变化经 `ResizeObserver` 跟随重算；
    - fenixd dashboard embed 等无外壳 frame 的形态自动回退锚定对话根节点本身；
    - 关闭开关 / 面板卸载 / 内容区缺席（安全降级）时清除全部内联样式，即时
-     恢复官方模态；Escape 与 header 关闭钮不受影响（遮罩点击关闭被隐藏）。
+     恢复官方模态；Escape 与 header 关闭钮恢复可用；
+   - **与 fenix-dsh-settings-dock 的共存反制**（2026-11-25）：settings-dock 的
+     样式表会无条件把面板停靠铺满内容区（含遮罩隐藏、关闭钮隐藏），使「关闭
+     = 回退官方模态」形同虚设。本插件在关闭态注入 EMBED_OFF 反制样式表（特异
+     性逐条压过 dock），按官方 `VOzbGW_*` 声明值还原弹出模态；dock 未装机时
+     反制值 = 官方值，无副作用。dock 的停靠职责已被本开关完全覆盖，可卸载。
 
 ## 设置页独立开关（0.3.0 起）
 
 ### 设置页入口
 
-打开 dsh web **设置页**，左侧分区导航在既有分区（账户/通用/模型/内置插件）之后
-出现**「Fenix 插件设置」**条目（带对话气泡图标），点击进入分区面板，可见 5 个
-功能行，每行含功能名、一句话说明与独立开关控件（复用宿主基线包 `Switch`，宿主
-升级致导出漂移时降级为同构自绘 toggle）。
+打开 dsh web **设置页**，左侧分区导航在既有分区（账户/通用/模型/内置插件/登录）
+之后出现**「Fenix 插件」**条目（带对话气泡图标），点击进入分区面板。面板按
+DSH 语境**分组渲染，每个分组整体装在一张圆角卡片里**（主题变量着色，暗色由
+宿主接管）：
+
+- **Deepseek Harness UI调整** —— 本插件的 5 个功能行，每行含功能名、一句话说明
+  与独立开关控件（复用宿主基线包 `Switch`，宿主升级致导出漂移时降级为同构
+  自绘 toggle）；
+- **Deepseek Harness 快捷登录** —— 检测到 `fenix-dsh-auth` 插件在装时，把其
+  「登录」分区组件嵌入本面板渲染（组内直接可用，无需切分区；用户名/密码输入框
+  横向 100% 宽度，与 fenix 配置页输入框一致——2026-11-25 起由 auth 插件自身
+  去除 320px 限宽实现）；**auth 未安装时该分组整体不出现**。
 
 ### 功能行开关（0.3.x：5 行）
 
 0.3.x 起面板不再暴露「滚动条样式」（`scrollbar`）与「hero 工作区行对齐」
-（`hero-row`）两行——两项功能**默认保持开启**，历史经 localStorage 关闭的
-override 仍生效；如需恢复官方形态可手工写 localStorage 键（见持久化小节）。
+（`hero-row`）两行——两项功能**默认保持开启**，且不再读取历史残留的关闭
+override（视同开启，console 提示一次，残留键在下次开关写入时自然清除）；如需
+恢复官方形态可手工写 localStorage 键（见持久化小节）。
 
 | 功能行 | 开关 id | 关闭后的官方回退形态 |
 | --- | --- | --- |
-| 对话列留白 24px | `whitespace` | 官方 920px 居中布局恢复、列宽把手重新可见 |
+| 对话列留白 左14/右24 | `whitespace` | 官方 920px 居中布局恢复、列宽把手重新可见 |
 | 输入框 80% 宽度居中 | `composer-width` | 官方宽度轴（952px 上限） |
 | 用户消息 Markdown 渲染 | `markdown` | 官方等效纯文本投影气泡（附件/图片卡不变） |
 | 输入框 ↑/↓ 历史导航 | `history-nav` | ↑/↓ 光标原生行为 |
@@ -164,13 +189,15 @@ dsh 升级后哈希漂移 → 覆盖静默失效回官方布局（部署实证 2
 grep -i "did not activate" /var/log/dsh-web.log | tail -1
 # 浏览器侧（playwright）：
 # - [data-width-handle] computed display == none
-# - .EvIC1a_scroll computed padding-left == 24px
+# - .EvIC1a_scroll computed padding-left == 14px (left) / 24px (right)
 # - 输入卡宽度 == 消息列宽度
 # - [data-chat-user-markdown] 节点内含 _markdown_* 类（MarkdownText 已挂载）
-# - 设置分区：nav 含「Fenix 插件设置」条目；[data-fdx-polish-feature="…"] 五行，
-#   行内 [role="switch"][aria-checked] 与实际生效状态一致
+# - 设置分区：nav 含「Fenix 插件」条目；面板含「Deepseek Harness UI调整」分组
+#   五行（auth 在装时另有「Deepseek Harness 快捷登录」分组），行内
+#   [role="switch"][aria-checked] 与实际生效状态一致
 # - 嵌入设置页面开启：设置面板 overlay 覆盖内容区（panel 100%×100%、无圆角/
-#   投影/遮罩），关闭开关即时回弹官方 800px 居中模态
+#   投影/遮罩），关闭开关即时回弹官方 800px 居中模态（含遮罩与关闭钮——
+#   settings-dock 在装时由 EMBED_OFF 反制样式表还原）
 # - 发送态宽度：按回车发送后（输入面 contenteditable="false"）输入卡仍保持
 #   80% 宽度不骤缩
 # - markdown 关闭态：[data-chat-user-plain] 节点为纯文本气泡（无 MarkdownText）

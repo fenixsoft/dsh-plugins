@@ -1,7 +1,10 @@
 /* 0.3.0 全开态预期注入基线（规则集合与 0.2.2 等效；2026-11-24 宽度锚定修复起
  * 4 条 composer 规则改锚稳定结构属性 data-composer-input / data-composer-card，
- * 行为不变、发送态恒匹配）。测试：node --test fenix-dsh-chat-polish/tests/ */
-body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_scroll"]{padding-left:24px;padding-right:24px}
+ * 行为不变、发送态恒匹配。2026-11-25 滚动条箭头改为仅会话滚动容器持有
+ * （上下各一枚），并加 margin-right:-24px 把会话滚动条钉到页面最右缘
+ * （抵消官方 root 右 padding 24px + scrollBody margin-right 2px 的 26px 让位）。
+ * 测试：node --test fenix-dsh-chat-polish/tests/ */
+body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_scroll"]{padding-left:14px;padding-right:24px}
 body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_column"]{max-width:none;--dsh-chat-content-width:calc(100cqw - 48px)}
 [data-conversation-scroll] [class$="_userStack"]{--dsh-chat-content-width:748px}
 [class$="_body"] .md-table-wide.md-table-wide{margin-left:min(0px, calc(-1 * var(--dsh-table-lead)))}
@@ -15,16 +18,22 @@ body:not(:has([class$="_embeddedBody"])) [data-width-handle][data-width-handle]{
 body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_toBottomSlot"]{padding-right:24px}
 html body{--dsh-scrollbar-width:10px;--dsh-scrollbar-thumb:#a0a0a0;--dsh-scrollbar-thumb-hover:#8c8c8c}
 html ::-webkit-scrollbar-track{background:#f1f1f1}
-html ::-webkit-scrollbar-button{width:10px;height:11px;background-color:#f1f1f1;background-repeat:no-repeat;background-position:center}
-html ::-webkit-scrollbar-button:vertical:decrement{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 5 4 0 8 5Z' fill='%23757575'/%3E%3C/svg%3E")}
-html ::-webkit-scrollbar-button:vertical:increment{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0 4 5 8 0Z' fill='%23757575'/%3E%3C/svg%3E")}
-html ::-webkit-scrollbar-button:horizontal:decrement{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M5 0 0 4 5 8Z' fill='%23757575'/%3E%3C/svg%3E")}
-html ::-webkit-scrollbar-button:horizontal:increment{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M0 0 5 4 0 8Z' fill='%23757575'/%3E%3C/svg%3E")}
+html [data-conversation-scroll]{margin-right:-24px}
+html [data-conversation-scroll]::-webkit-scrollbar-button{width:10px;height:11px;background-color:#f1f1f1;background-repeat:no-repeat;background-position:center}
+html [data-conversation-scroll]::-webkit-scrollbar-button:vertical:decrement{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 5 4 0 8 5Z' fill='%23757575'/%3E%3C/svg%3E")}
+html [data-conversation-scroll]::-webkit-scrollbar-button:vertical:increment{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0 4 5 8 0Z' fill='%23757575'/%3E%3C/svg%3E")}
+html [data-conversation-scroll]::-webkit-scrollbar-button:horizontal:decrement{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M5 0 0 4 5 8Z' fill='%23757575'/%3E%3C/svg%3E")}
+html [data-conversation-scroll]::-webkit-scrollbar-button:horizontal:increment{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M0 0 5 4 0 8Z' fill='%23757575'/%3E%3C/svg%3E")}
+html [data-conversation-scroll]::-webkit-scrollbar-button:vertical:increment{height:16px;background-position:center 3px}
+html [data-conversation-scroll]::-webkit-scrollbar-button:vertical:end:decrement{display:none}
+html [data-conversation-scroll]::-webkit-scrollbar-button:vertical:start:increment{display:none}
+html [data-conversation-scroll]::-webkit-scrollbar-button:horizontal:end:decrement{display:none}
+html [data-conversation-scroll]::-webkit-scrollbar-button:horizontal:start:increment{display:none}
 html body[data-ds-dark-theme]{--dsh-scrollbar-thumb:#969696;--dsh-scrollbar-thumb-hover:#a6a6a6}
 html body[data-ds-dark-theme] ::-webkit-scrollbar-track{background:#202124}
-html body[data-ds-dark-theme] ::-webkit-scrollbar-button{background-color:#202124}
-html body[data-ds-dark-theme] ::-webkit-scrollbar-button:vertical:decrement{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 5 4 0 8 5Z' fill='%23a8a8a8'/%3E%3C/svg%3E")}
-html body[data-ds-dark-theme] ::-webkit-scrollbar-button:vertical:increment{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0 4 5 8 0Z' fill='%23a8a8a8'/%3E%3C/svg%3E")}
+html body[data-ds-dark-theme] [data-conversation-scroll]::-webkit-scrollbar-button{background-color:#202124}
+html body[data-ds-dark-theme] [data-conversation-scroll]::-webkit-scrollbar-button:vertical:decrement{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 5 4 0 8 5Z' fill='%23a8a8a8'/%3E%3C/svg%3E")}
+html body[data-ds-dark-theme] [data-conversation-scroll]::-webkit-scrollbar-button:vertical:increment{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0 4 5 8 0Z' fill='%23a8a8a8'/%3E%3C/svg%3E")}
 .fdxchat-userRow{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
 .fdxchat-userStack{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:85%}
 .fdxchat-bubble{max-width:100%;background:var(--dsw-specific-bubble);border-radius:var(--dsw-radius-xl);padding:10px 16px;font-size:var(--dsh-content-font-size, 14px);line-height:calc(22px + var(--dsh-content-font-delta, 0px));color:var(--dsw-alias-label-primary);word-break:break-word}

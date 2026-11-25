@@ -69,9 +69,11 @@ export function currentThemeScheme(): ThemeScheme | undefined {
   return cachedScheme
 }
 
-/* ====================== 面板窗口注册表（广播目标） ====================== */
+/* ====================== 面板窗口注册表（广播目标） ======================
+ * 语言跟随（localeFollow.ts）共享同一集合：主题与语言是同一 iframe 面板面的
+ * 两个宿主档，注册表 MUST 单源（注册/注销只有 DashboardPanel ref 一条驱动）。 */
 
-const panelWindows = new Set<Window>()
+export const panelWindows = new Set<Window>()
 
 /**
  * 挂载登记（DashboardPanel callback ref attach 半驱动）；win 缺席（iframe
@@ -93,7 +95,7 @@ export function unregisterPanelWindow(win: Window | null | undefined): void {
  * targetOrigin 只接受 origin 不接受路径前缀（spec「theme/change 实时广播」）。
  * node 测试环境无 window 降级 `'*'`（该环境无真实跨帧面，选择不可观测）。
  */
-function broadcastOrigin(): string {
+export function broadcastOrigin(): string {
   const origin = (globalThis as { window?: { location?: { origin?: unknown } } }).window?.location
     ?.origin
   return typeof origin === 'string' && origin.length > 0 ? origin : '*'

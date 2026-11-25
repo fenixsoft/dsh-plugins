@@ -636,20 +636,22 @@ describe('工作区行项目富提示契约面', () => {
       repairing: 'info',
       queued: 'warning',
     })
+    // i18n 宿主跟随轮：STATUS_LABEL_MAP 值为 pluginLocale 词典键（显示名
+    // 双语在 pluginLocale.ts 词典，渲染求值期经 pluginT 取当前档）。
     expect(STATUS_LABEL_MAP).toEqual({
-      drafted: '草稿',
-      ready: '就绪',
-      reviewing: '评审中',
-      implementing: '实现中',
-      implemented: '已实现',
-      testing: '验证中',
-      verified: '已验证',
-      'bug-found': '有Bug',
-      blocked: '阻塞',
-      done: '完成',
-      pushed: '已推送',
-      repairing: '修复中',
-      queued: '排队中',
+      drafted: 'wsTooltip.status.drafted',
+      ready: 'wsTooltip.status.ready',
+      reviewing: 'wsTooltip.status.reviewing',
+      implementing: 'wsTooltip.status.implementing',
+      implemented: 'wsTooltip.status.implemented',
+      testing: 'wsTooltip.status.testing',
+      verified: 'wsTooltip.status.verified',
+      'bug-found': 'wsTooltip.status.bugFound',
+      blocked: 'wsTooltip.status.blocked',
+      done: 'wsTooltip.status.done',
+      pushed: 'wsTooltip.status.pushed',
+      repairing: 'wsTooltip.status.repairing',
+      queued: 'wsTooltip.status.queued',
     })
   })
 
@@ -1051,11 +1053,16 @@ describe('宿主主题跟随（add-bridge-theme-channel）', () => {
     // 装配点在 apply 内、先于固定条目注入与项目同步（grep 对账：三处调用点
     // 全部注入，design Risks「三挂载点漏改」条款）。
     expect(clientSrc).toContain('const stopThemeFollow = installThemeFollow(ctx)')
-    expect(clientSrc).toContain('buildPanelSrc(prefix, entry.route, currentThemeScheme())')
-    expect(clientSrc).toContain('buildPanelSrc(prefix, route, currentThemeScheme())')
+    expect(clientSrc).toContain('const stopLocaleFollow = installLocaleFollow(ctx)')
+    expect(clientSrc).toContain(
+      'src: buildPanelSrc(prefix, entry.route, currentThemeScheme(), currentLocaleScheme()),',
+    )
+    expect(clientSrc).toContain(
+      'const src = buildPanelSrc(prefix, route, currentThemeScheme(), currentLocaleScheme())',
+    )
     const rightTabSrc = readFileSync(new URL('../src/client/rightTab.tsx', import.meta.url), 'utf8')
     expect(rightTabSrc).toContain(
-      'buildPanelSrc(prefix, routeForSidebarParams(params), currentThemeScheme())',
+      'buildPanelSrc(prefix, routeForSidebarParams(params), currentThemeScheme(), currentLocaleScheme()),',
     )
   })
 })

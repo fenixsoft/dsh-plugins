@@ -19,6 +19,7 @@
  * 全部纯函数可 node 直测；resolve/run 全错误路径 warn 降级，无未处理异常。
  */
 import type { ProjectRowInfo } from './projectSync.js'
+import { locateMenuLabel, pluginT } from './pluginLocale.js'
 import { normalizeWorkspacePath } from './projectSync.js'
 
 /**
@@ -165,10 +166,11 @@ export function registerFileContextMenu(ctx: {
         const route = homeFileRouteFor(hit.name, hit.rel)
         const action: FileMenuAction = {
           id: LOCATE_MENU_ID,
-          // 2026-11-11 用户需求：文案「在 <项目名> 项目定位」。
-          label: `在 ${hit.name} 项目定位`,
+          // 2026-11-11 用户需求：文案「在 <项目名> 项目定位」（i18n 宿主跟随
+          // 轮：label/failureLabel 经 pluginLocale 词典，求值期取当前档）。
+          label: locateMenuLabel(hit.name),
           ...(deps.iconKey !== undefined && deps.iconKey !== '' ? { icon: { key: deps.iconKey } } : {}),
-          failureLabel: '定位失败，请重试',
+          failureLabel: pluginT('locate.failureLabel'),
           run: async () => {
             try {
               if (typeof deps.openSidebarProjectTab === 'function') {

@@ -57,7 +57,6 @@
 			var labelStyle = { display: 'block', margin: '12px 0 4px', fontSize: 13, color: COLOR_LABEL_SECONDARY }
 			var inputStyle = {
 				width: '100%',
-				maxWidth: 320,
 				padding: '6px 10px',
 				fontSize: 14,
 				border: '1px solid ' + COLOR_BORDER,
@@ -268,8 +267,9 @@
 							? '已配置账号密码：' + String(status.username ?? '')
 							: '未配置账号密码（仅 token 登录）'
 
-				return createElement('div', { style: { maxWidth: 480, paddingBottom: 16 } },
-					createElement('h3', { style: { margin: '0 0 12px', fontSize: 15, fontWeight: 600, color: COLOR_LABEL } }, '账号密码登录'),
+				return createElement('div', { style: { paddingBottom: 16 } },
+					/* 「账号密码登录」标题已移除（2026-11-25 用户要求）：分区 nav
+					 * 标签/chat-polish 快捷登录组名已表达语境，行内标题冗余 */
 					createElement('p', { style: { margin: rowStyle.margin, fontSize: 13, color: COLOR_LABEL_SECONDARY } }, statusText),
 					createElement('label', { style: labelStyle, htmlFor: 'fenix-auth-username' }, '用户名'),
 					createElement('input', {

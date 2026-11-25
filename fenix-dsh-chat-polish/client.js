@@ -2,7 +2,7 @@
  * fenix-dsh-chat-polish — Client 半（零构建，形态对齐 dsh-plugin-loopback-trust）。
  *
  * Fenix 插件打磨功能（dsh 0.2.0-rc.2 实测约束，升级失配时各覆盖自动失效回官方布局），
- * 0.3.0 起每项功能在官方设置页「Fenix 插件设置」分区内带独立开关（默认全开 = 与
+ * 0.3.0 起每项功能在官方设置页「Fenix 插件」分区内带独立开关（默认全开 = 与
  * 0.2.2 无开关形态一致；关闭 = 该功能即时回退官方原生形态，无需刷新页面）：
  *
  * 1. 对话列左右留白固定 24px（开关 whitespace）。
@@ -63,11 +63,15 @@
  *    常驻），事件处理器入口读开关状态直接放行（不接管、不 preventDefault）。
  *
  * 4. 设置分区开关（0.3.0）。
- *    经官方 keyed 插槽 settings.section / settings.section.icon 注册「Fenix 插件设置」
+ *    经官方 keyed 插槽 settings.section / settings.section.icon 注册「Fenix 插件」
  *    分区（先例 fenix-dsh-auth「登录」分区的同构写法：order 经 ctx.slots.entries
  *    尾随探测、失败回退 FALLBACK_MAX_ORDER、逐槽 try/catch 失配仅 console.warn
- *    菜单缺席）。分区面板渲染各功能行（功能名 + 一句话说明 + 开关控件，控件
- *    复用基线包 primitives Switch），点击开关写模块级开关 store 即时生效。
+ *    菜单缺席）。分区面板按 DSH 语境分组渲染：组「Deepseek Harness UI调整」=
+ *    本插件各功能行（功能名 + 一句话说明 + 开关控件，控件复用基线包 primitives
+ *    Switch）；组「Deepseek Harness 快捷登录」= 探测到 fenix-dsh-auth 的分区注册
+ *    时，经 ui-slots entries 记录的 component 字段把其分区组件嵌入本面板渲染
+ *    （close 透传官方关闭回调；auth 未安装或槽契约漂移时该组整体不出现）。
+ *    点击开关写模块级开关 store 即时生效。
  *    开关状态持久化于 localStorage 键 fenix-chat-polish.toggles（JSON
  *    {功能ID: bool}，只记录关闭项，缺省即开启）；读取容错（损坏/未知键忽略按
  *    开启）、写入失败（隐私模式/配额）降级为会话内生效 + console.warn 一次。
@@ -84,6 +88,12 @@
  *    不 reparent、不碰 React 树；ResizeObserver 跟随内容区尺寸（侧栏折叠/窗口
  *    缩放）重算；关闭面板/关开关/dispose 清内联恢复官方模态。锚点缺席（会话区
  *    未挂载、dashboard embed 无 frame）时安全降级，本次保持官方模态。
+ *    2026-11-25 反制修复：兄弟插件 fenix-dsh-settings-dock 的样式表会无条件把
+ *    面板停靠铺满内容区（含遮罩隐藏与关闭钮隐藏），开关关闭后仅清内联样式时
+ *    视觉上仍是「嵌入」——本插件改为在关闭态追加注入 EMBED_OFF_CSS 反制样式表
+ *    （特异性逐条压过 dock），逐属性还原官方 .VOzbGW_{overlay,mask,panel,_close}
+ *    声明值，兑现「关闭 = 回退官方弹出模态」；dock 未装机时反制值 = 官方值，
+ *    注入无副作用。
  */
 (function () {
 	'use strict'
@@ -134,8 +144,10 @@
 			 * 主体类 + :has() 收窄（0.2.2 修复，见下方 InputBar 段注释） */
 			var CSS_BLOCKS = {
 				whitespace: [
-					/* ChatView .scroll 侧距（clearance+16=32px）→ 24px */
-					'body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_scroll"]{padding-left:24px;padding-right:24px}',
+					/* ChatView .scroll 侧距（clearance+16=32px）→ 24px；2026-11-25 按
+					 * 用户要求左边距再收窄至 14px（右侧保持 24px，滚动条贴边不变；
+					 * 列为填充布局，右缘不受影响） */
+					'body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_scroll"]{padding-left:14px;padding-right:24px}',
 					/* ChatView .column 解除 --dsh-chat-content-width 居中上限 */
 					'body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_column"]{max-width:none;--dsh-chat-content-width:calc(100cqw - 48px)}',
 					/* 全宽变量随列下发（列=唯一后缀锚点）：md-table 对称出血公式、
@@ -200,22 +212,40 @@
 					'body:not(:has([class$="_embeddedBody"])) [class$="_heroWorkspaceRow"]{margin-left:calc(24px + (100% - 48px)*0.1);margin-right:calc(24px + (100% - 48px)*0.1);padding:0}',
 				].join('\n'),
 				/* 滚动条对齐 dashboard（浏览器默认观感；宽度收至 10px、thumb 加深至
-				 * #a0a0a0，并补出 dsh 未定义的上下/左右箭头按钮——定义了 ::-webkit-scrollbar
-				 * 系列后按钮不再由 UA 自动出现，需显式绘制。暗色按 dsh 自身的
-				 * body[data-ds-dark-theme] 模式翻转；html body/html * 前缀抬特异性） */
+				 * #a0a0a0。2026-11-25 按用户要求调整两处：
+				 * ① 箭头按钮只保留在会话滚动容器（[data-conversation-scroll]）上，
+				 *   上下各一枚（:vertical:decrement/increment SVG 三角），其余滚动条
+				 *   （侧栏等）不再绘制——0.2.x 的 html 通配箭头曾让页内多条滚动条各带
+				 *   一套箭头，观感为「上下两个箭头」；
+				 * ② 会话滚动条钉住页面最右缘：官方 .wSkVaW_root 右 padding 24px +
+				 *   scrollBody 自身 margin-right 2px，滚动条距页缘 26px——负外边距
+				 *   -24px 让 scrollBody 右缘贴住视口（root/body overflow 均可见，
+				 *   centerCol 右缘=视口右缘，无裁切）。暗色按 dsh 自身的
+				 *   body[data-ds-dark-theme] 模式翻转；html 前缀抬特异性） */
 				scrollbar: [
 					'html body{--dsh-scrollbar-width:10px;--dsh-scrollbar-thumb:#a0a0a0;--dsh-scrollbar-thumb-hover:#8c8c8c}',
 					'html ::-webkit-scrollbar-track{background:#f1f1f1}',
-					'html ::-webkit-scrollbar-button{width:10px;height:11px;background-color:#f1f1f1;background-repeat:no-repeat;background-position:center}',
-					"html ::-webkit-scrollbar-button:vertical:decrement{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 5 4 0 8 5Z' fill='%23757575'/%3E%3C/svg%3E\")}",
-					"html ::-webkit-scrollbar-button:vertical:increment{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0 4 5 8 0Z' fill='%23757575'/%3E%3C/svg%3E\")}",
-					"html ::-webkit-scrollbar-button:horizontal:decrement{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M5 0 0 4 5 8Z' fill='%23757575'/%3E%3C/svg%3E\")}",
-					"html ::-webkit-scrollbar-button:horizontal:increment{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M0 0 5 4 0 8Z' fill='%23757575'/%3E%3C/svg%3E\")}",
+					'html [data-conversation-scroll]{margin-right:-24px}',
+					'html [data-conversation-scroll]::-webkit-scrollbar-button{width:10px;height:11px;background-color:#f1f1f1;background-repeat:no-repeat;background-position:center}',
+					"html [data-conversation-scroll]::-webkit-scrollbar-button:vertical:decrement{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 5 4 0 8 5Z' fill='%23757575'/%3E%3C/svg%3E\")}",
+					"html [data-conversation-scroll]::-webkit-scrollbar-button:vertical:increment{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0 4 5 8 0Z' fill='%23757575'/%3E%3C/svg%3E\")}",
+					"html [data-conversation-scroll]::-webkit-scrollbar-button:horizontal:decrement{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M5 0 0 4 5 8Z' fill='%23757575'/%3E%3C/svg%3E\")}",
+					"html [data-conversation-scroll]::-webkit-scrollbar-button:horizontal:increment{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M0 0 5 4 0 8Z' fill='%23757575'/%3E%3C/svg%3E\")}",
+					/* 底部 ▼ 按钮加高（11→16px）且三角上移（center 3px）：箭头下方多
+					 * 留白、不贴页面底缘（顶部 ▲ 不动） */
+					'html [data-conversation-scroll]::-webkit-scrollbar-button:vertical:increment{height:16px;background-position:center 3px}',
+					/* Chromium 自定义按钮布局是老 Mac 双按钮风格：decrement 在顶、底两
+					 * 端各渲染一份（底部出现 ▲▼ 叠排），increment 同理。用 :start/:end
+					 * 隐藏错位副本，只留 顶部▲ + 底部▼ 各一枚（WebKit 经典解法） */
+					'html [data-conversation-scroll]::-webkit-scrollbar-button:vertical:end:decrement{display:none}',
+					'html [data-conversation-scroll]::-webkit-scrollbar-button:vertical:start:increment{display:none}',
+					'html [data-conversation-scroll]::-webkit-scrollbar-button:horizontal:end:decrement{display:none}',
+					'html [data-conversation-scroll]::-webkit-scrollbar-button:horizontal:start:increment{display:none}',
 					'html body[data-ds-dark-theme]{--dsh-scrollbar-thumb:#969696;--dsh-scrollbar-thumb-hover:#a6a6a6}',
 					'html body[data-ds-dark-theme] ::-webkit-scrollbar-track{background:#202124}',
-					'html body[data-ds-dark-theme] ::-webkit-scrollbar-button{background-color:#202124}',
-					"html body[data-ds-dark-theme] ::-webkit-scrollbar-button:vertical:decrement{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 5 4 0 8 5Z' fill='%23a8a8a8'/%3E%3C/svg%3E\")}",
-					"html body[data-ds-dark-theme] ::-webkit-scrollbar-button:vertical:increment{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0 4 5 8 0Z' fill='%23a8a8a8'/%3E%3C/svg%3E\")}",
+					'html body[data-ds-dark-theme] [data-conversation-scroll]::-webkit-scrollbar-button{background-color:#202124}',
+					"html body[data-ds-dark-theme] [data-conversation-scroll]::-webkit-scrollbar-button:vertical:decrement{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 5 4 0 8 5Z' fill='%23a8a8a8'/%3E%3C/svg%3E\")}",
+					"html body[data-ds-dark-theme] [data-conversation-scroll]::-webkit-scrollbar-button:vertical:increment{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0 4 5 8 0Z' fill='%23a8a8a8'/%3E%3C/svg%3E\")}",
 				].join('\n'),
 			}
 
@@ -278,6 +308,34 @@
 			/* 有 CSS 分块的功能 id（cssText 拼接顺序） */
 			var CSS_BLOCK_IDS = ['whitespace', 'composer-width', 'hero-row', 'scrollbar', 'markdown']
 
+			/* settings-embed 关闭态反制样式（feature 5 倒挂 CSS，无独立 CSS 块 id）：
+			 * 兄弟插件 fenix-dsh-settings-dock 的样式表无条件把设置面板停靠铺满内容区
+			 * （html body [data-shortcut-modal="settings"] = (0,1,3) 四向定形 + 遮罩
+			 * display:none + 头部关闭钮 display:none），仅清内联样式时视觉上仍是嵌入
+			 * （2026-11-25 真机实证，即「开关无效」投诉根因）。关闭态注入本表逐条压过：
+			 * html body > div 前缀抬 b/c 位，遮罩/overlay 以同元素属性双写加位；数值
+			 * 全部取官方 .VOzbGW_{overlay,mask,panel,_close} 声明值（0.2.2-rc.1 bundle
+			 * 实测），dock 未装机时 = 官方值原样重现，注入无副作用。dock 的停靠规则
+			 * 在 @media(min-width:768px) 内、窄屏官方本就是全屏变体，media 守卫保持
+			 * 一致不越界。 */
+			var EMBED_OFF_CSS = [
+				'@media (min-width: 768px) {',
+				/* overlay 反制 dock 的 pointer-events:none（(0,3,3) 压 (0,2,3)），恢复
+				 * 官方整层模态拦截（侧栏/右栏在模态打开期不可点） */
+				'html body > div[role="presentation"][role="presentation"]:has(> [data-shortcut-modal="settings"]) { pointer-events: auto; }',
+				/* 遮罩重显：dock 以 (0,3,4) 隐藏；双写 [aria-hidden] 提到 (0,4,4)。
+				 * 官方遮罩无 display 声明（div 默认块级），还原为 block */
+				'html body > div[role="presentation"]:has(> [data-shortcut-modal="settings"]) > [aria-hidden="true"][aria-hidden="true"] { display: block; }',
+				/* 面板几何还原官方居中卡片（(0,2,3) 压 dock (0,1,3)）：官方
+				 * .VOzbGW_panel = position:relative + 800px 宽 + 高度/圆角/投影主题
+				 * 变量；inset 四向 auto 抵消 dock 的 left/top/right/bottom 定值 */
+				'html body > div[role="presentation"] [data-shortcut-modal="settings"] { position: relative; left: auto; top: auto; right: auto; bottom: auto; width: 800px; height: min(800px, calc(100vh - 2 * max(24px, var(--dsh-frame-overlay-top, 24px)))); max-width: calc(100vw - 48px); border-radius: var(--dsw-radius-panel); box-shadow: var(--dsw-elevation-prominent); pointer-events: auto; }',
+				/* 头部关闭按钮重显：dock 以 (0,3,3) display:none 退役；此处 (0,4,4)
+				 * 还原官方 _close 的 display:inline-flex */
+				'html body > div[role="presentation"] [data-shortcut-modal="settings"] [class*="_header"]:not([class*="_section"] *) > button { display: inline-flex; }',
+				'}',
+			].join('\n')
+
 			var toggleStore = (function () {
 				/* 只记录非默认（关闭）项：缺省即开启，向前加功能免迁移。
 				 * 未知 featureId / true 值 / 损坏 JSON / 存储不可用 → 忽略按开启 */
@@ -337,6 +395,10 @@
 						var id = CSS_BLOCK_IDS[i]
 						if (state[id] !== false) chunks.push(id === 'markdown' ? MARKDOWN_CSS : CSS_BLOCKS[id])
 					}
+					/* feature 5 倒挂：嵌入关闭时注入官方模态反制样式（抵消 settings-dock
+					 * 的无条件停靠）；开启时嵌入几何走内联样式（inline 天然压过样式表），
+					 * 本表随之撤除 */
+					if (state['settings-embed'] === false) chunks.push(EMBED_OFF_CSS)
 					return chunks.join('\n')
 				}
 
@@ -1115,6 +1177,8 @@
 				padding: '12px 0',
 				borderBottom: '1px solid ' + COLOR_BORDER,
 			}
+			/* 卡内末行：去掉分隔线（与卡片底边粘连观感） */
+			var sectionRowStyleLast = Object.assign({}, sectionRowStyle, { borderBottom: 'none' })
 			var sectionRowTextStyle = { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }
 			var sectionRowTitleStyle = { fontSize: '14px', fontWeight: '500', color: COLOR_LABEL, lineHeight: '22px' }
 			var sectionRowDescStyle = { fontSize: '12px', color: COLOR_LABEL_SECONDARY, lineHeight: '18px' }
@@ -1125,6 +1189,32 @@
 				color: COLOR_LABEL_SECONDARY,
 				lineHeight: '18px',
 			}
+			/* 分组卡片（2026-11-25 用户反馈「分组看着不明显，各分组要装在卡片里」）：
+			 * 每个分组（标题 + 内容）整体包进一张卡片，主题变量着色、暗色由宿主接管；
+			 * data-fdx-polish-group 落在卡片容器上（测试与样式锚点）。 */
+			var sectionCardStyle = {
+				margin: '12px 0 0',
+				padding: '0 16px',
+				background: 'var(--dsw-specific-input-major, rgba(127,127,127,0.08))',
+				border: '1px solid ' + COLOR_BORDER,
+				borderRadius: 'var(--dsw-radius-md, 8px)',
+				display: 'flex',
+				flexDirection: 'column',
+			}
+			/* 分组标题（卡片内首行，「Deepseek Harness UI调整/快捷登录」两处复用，
+			 * 必须保持同一样式对象——2026-11-25 用户反馈两卡标题观感不一致）。
+			 * 14px/600：与行标题同字号但更重，明确卡头层级（旧 12px 比行还小）；
+			 * paddingBottom 0，标题→内容间距由内容首元素统一给 12px（行 paddingTop /
+			 * auth pane marginTop），两卡严格一致 */
+			var sectionGroupStyle = {
+				padding: '12px 0 0',
+				fontSize: '14px',
+				fontWeight: '600',
+				color: COLOR_LABEL_SECONDARY,
+				lineHeight: '20px',
+				letterSpacing: '0.3px',
+			}
+			var sectionAuthPaneStyle = { marginTop: '12px' }
 
 			/* 自绘 toggle 降级替身（宿主 Switch 漂移缺失时）：role/aria-checked 同构，
 			 * 视觉对齐官方分区（胶囊轨道 + 圆点，主题变量着色） */
@@ -1161,17 +1251,43 @@
 			}
 			var ToggleControl = HostSwitch || FallbackSwitch
 
-			/* 「Fenix 插件设置」分区组件（settings.section 槽）：渲染 5 个功能行（功能名 +
-			 * 一句话说明 + 开关控件）。点击开关写 store 即时生效（store.set 内先重建
-			 * 样式后通知，本组件经订阅重渲同步行内开关态——行内开关态与实际生效状态
-			 * 单一数据源一致）；data-fdx-polish-feature/-switch 属性供真机验证定位 */
-			var PolishSection = function PolishSection() {
+			/* 「Fenix 插件」分区组件（settings.section 槽）：功能行按 DSH 语境分组——
+			 * 「Deepseek Harness UI调整」= 本插件功能行（功能名 + 一句话说明 + 开关
+			 * 控件）；探测到 fenix-dsh-auth 的分区注册时再渲染「Deepseek Harness 快捷
+			 * 登录」组，组内用 entries 记录的 component 字段直接复用其分区组件（close
+			 * 透传官方关闭回调；auth 未安装/槽契约漂移时该组整体不出现）。点击开关写
+			 * store 即时生效（store.set 内先重建样式后通知，本组件经订阅重渲同步行内
+			 * 开关态——行内开关态与实际生效状态单一数据源一致）；data-fdx-polish-
+			 * feature/-switch/-group 属性供真机验证定位 */
+			var sectionSlotsRef = null
+
+			/* 探测 fenix-dsh-auth 的 settings.section 注册。entries 返回原始注册记录数组
+			 * （含被遮蔽项；auth 单条注册不受影响），命中 options.id==='fenix-auth' 且
+			 * component 为函数才认定可用；槽 API 漂移 → null 分组缺席，不抛渲染错 */
+			var resolveAuthSectionEntry = function resolveAuthSectionEntry() {
+				var slots = sectionSlotsRef
+				if (!slots || typeof slots.entries !== 'function') return null
+				try {
+					var entries = slots.entries('settings.section')
+					for (var i = 0; i < entries.length; i += 1) {
+						var entry = entries[i]
+						if (entry && entry.options && entry.options.id === 'fenix-auth' && typeof entry.component === 'function') return entry
+					}
+				} catch (err) { /* 槽契约漂移：仅分组缺席 */ }
+				return null
+			}
+
+			var PolishSection = function PolishSection(props) {
 				var toggles = useToggles()
-				var rows = FEATURES.map(function (feature) {
+				var rows = FEATURES.map(function (feature, index) {
 					var on = toggles[feature.id] !== false
 					return react.createElement(
 						'div',
-						{ key: feature.id, style: sectionRowStyle, 'data-fdx-polish-feature': feature.id },
+						{
+							key: feature.id,
+							style: index === FEATURES.length - 1 ? sectionRowStyleLast : sectionRowStyle,
+							'data-fdx-polish-feature': feature.id,
+						},
 						react.createElement(
 							'div',
 							{ style: sectionRowTextStyle },
@@ -1190,11 +1306,37 @@
 						),
 					)
 				})
+				var uiCardChildren = [
+					react.createElement('div', { style: sectionGroupStyle }, 'Deepseek Harness UI调整'),
+				]
+				for (var i = 0; i < rows.length; i++) uiCardChildren.push(rows[i])
+				var children = [
+					react.createElement('p', { key: 'intro', style: sectionIntroStyle }, '各打磨功能可独立开关；默认全部开启（与安装即用形态一致），关闭某项即时回退官方原生形态。开关仅对当前浏览器生效。'),
+					react.createElement(
+						'div',
+						{ key: 'group-ui', style: sectionCardStyle, 'data-fdx-polish-group': 'dsh-ui' },
+						uiCardChildren,
+					),
+				]
+				var authEntry = resolveAuthSectionEntry()
+				if (authEntry) {
+					children.push(
+						react.createElement(
+							'div',
+							{ key: 'group-auth', style: sectionCardStyle, 'data-fdx-polish-group': 'dsh-auth' },
+							react.createElement('div', { style: sectionGroupStyle }, 'Deepseek Harness 快捷登录'),
+							react.createElement(
+								'div',
+								{ style: sectionAuthPaneStyle, 'data-fdx-polish-auth-pane': '' },
+								react.createElement(authEntry.component, { close: props && props.close }),
+							),
+						),
+					)
+				}
 				return react.createElement(
 					'div',
 					{ style: sectionRootStyle, 'data-fdx-polish-section': '' },
-					react.createElement('p', { style: sectionIntroStyle }, '各打磨功能可独立开关；默认全部开启（与安装即用形态一致），关闭某项即时回退官方原生形态。开关仅对当前浏览器生效。'),
-					rows,
+					children,
 				)
 			}
 
@@ -1214,6 +1356,8 @@
 				inject: ['slots'],
 				apply(ctx) {
 					var failures = []
+					/* PolishSection 组内嵌入 auth 分区组件用（渲染期读取，dispose 置空） */
+					sectionSlotsRef = ctx.slots
 					var stage = function (name, err) {
 						var detail = err && err.stack ? err.stack : String(err)
 						console.warn('[fenix-dsh-chat-polish] activation stage "' + name + '" rejected: ' + detail)
@@ -1310,7 +1454,7 @@
 								id: 'fenix-chat-polish',
 								order: maxOrder + 1,
 								label: function () {
-									return 'Fenix 插件设置'
+									return 'Fenix 插件'
 								},
 							}, PolishSection)
 						})
@@ -1329,6 +1473,7 @@
 					}
 
 					return function dispose() {
+						sectionSlotsRef = null
 						document.removeEventListener('keydown', onHistoryKeydown, true)
 						document.removeEventListener('input', onHistoryInput, true)
 						if (embedMO) {

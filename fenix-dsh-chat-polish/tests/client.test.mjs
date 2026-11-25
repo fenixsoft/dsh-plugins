@@ -10,10 +10,12 @@
  *  - 分块正确性：whitespace/scrollbar/composer-width/hero-row/markdown 各块
  *    规则归属（关闭任一块后其特征规则从注入串消失、其余块保留）；
  *  - history-nav 无 CSS：关闭不影响注入串；
- *  - 设置分区：label「Fenix 插件设置」、5 个功能行（scrollbar/hero-row 两行
- *    已移除、settings-embed 新增）、开关点击写 store 即时生效；
+ *  - 设置分区：label「Fenix 插件」、分组渲染（dsh-ui 组恒渲染；dsh-auth 组仅在
+ *    fenix-dsh-auth 的分区注册存在时出现并嵌入其组件）、5 个功能行（scrollbar/
+ *    hero-row 两行已移除、settings-embed 新增）、开关点击写 store 即时生效；
  *  - 嵌入设置页面（settings-embed）：面板挂载经 MO 同步内联几何、开关关闭/
- *    面板卸载/锚点缺席还原官方模态、dispose 断开观察器。
+ *    面板卸载/锚点缺席还原官方模态、dispose 断开观察器；关闭态注入 EMBED_OFF
+ *    反制样式表（抵消 fenix-dsh-settings-dock 的无条件停靠，恢复官方模态）。
  *
  * 运行：`node --test fenix-dsh-chat-polish/tests/`
  */
@@ -201,14 +203,19 @@ test('all-on injected css is rule-for-rule identical to the expected baseline', 
 /* ── 分块正确性 ── */
 
 const FEATURE_MARKERS = {
-	whitespace: '[data-conversation-scroll] [class$="_scroll"]{padding-left:24px',
+	whitespace: '[data-conversation-scroll] [class$="_scroll"]{padding-left:14px',
 	scrollbar: 'html ::-webkit-scrollbar-track{background:#f1f1f1}',
 	'composer-width': '{width:80%;max-width:none}',
 	'hero-row': '[class$="_heroWorkspaceRow"]{margin-left:calc(24px + (100% - 48px)*0.1)',
 	markdown: '.fdxchat-bubble{max-width:100%;background:var(--dsw-specific-bubble)',
 }
 
+/* 已下线面板开关的功能（CSS 块保留、默认恒开；readOverrides 对其持久化 off
+ * 视同开启并提示一次——面板无开关可写回，残留 override 不再生效） */
+const RETIRED_MARKER_IDS = ['scrollbar', 'hero-row']
+
 for (const [feature, marker] of Object.entries(FEATURE_MARKERS)) {
+	if (RETIRED_MARKER_IDS.includes(feature)) continue
 	test(`turning off "${feature}" removes exactly its block from the injected css`, () => {
 		const env = loadClient()
 		env.dispose()
@@ -225,6 +232,15 @@ for (const [feature, marker] of Object.entries(FEATURE_MARKERS)) {
 		}
 	})
 }
+
+test('retired feature overrides (scrollbar/hero-row) are ignored and treated as on', () => {
+	const storage = fakeStorage({ [STORAGE_KEY]: JSON.stringify({ scrollbar: false, 'hero-row': false }) })
+	const env = loadClient({ storage })
+	const text = env.styleTag.textContent
+	assert.ok(text.includes(FEATURE_MARKERS.scrollbar), 'scrollbar block stays on (retired override ignored)')
+	assert.ok(text.includes(FEATURE_MARKERS['hero-row']), 'hero-row block stays on (retired override ignored)')
+	assert.ok(env.warns.length === 0, 'retired override uses console.info, not a stage warn')
+})
 
 test('history-nav has no css block: toggling it never changes the injected css', () => {
 	const envOn = loadClient()
@@ -464,7 +480,7 @@ test('settings.section and settings.section.icon are registered with trailing or
 	assert.equal(section.spec.order, 16, 'trailing probe: max known order 15 + 1')
 	/* label 是函数（宿主按需调用取文案） */
 	assert.equal(typeof section.spec.label, 'function')
-	assert.equal(section.spec.label(), 'Fenix 插件设置')
+	assert.equal(section.spec.label(), 'Fenix 插件')
 	/* 探测失败（entries 抛异常/畸形）回退 FALLBACK_MAX_ORDER+1 */
 	const env2 = loadClient({
 		initialEntries: {
@@ -496,6 +512,103 @@ test('polish section renders 5 feature rows with switches, all on by default', (
 		assert.equal(sw.props.checked, true, `switch for ${sw.props.label} defaults to on`)
 		assert.equal(typeof sw.props.onChange, 'function')
 	}
+})
+
+test('polish section groups: dsh-ui always; dsh-auth only with fenix-auth installed', () => {
+	/* auth 已装机：dsh-ui + dsh-auth 两组，auth 组件经 slot entry 的 component
+	 * 字段嵌入、close 官方回调透传 */
+	const closeFn = function close() {}
+	const FakeAuthSection = function FakeAuthSection() {
+		return { type: 'div', props: { 'data-fake-auth': '' } }
+	}
+	const envWithAuth = loadClient({
+		initialEntries: {
+			'settings.section': [{ options: { id: 'fenix-auth', order: 99 }, component: FakeAuthSection }],
+		},
+	})
+	const section = envWithAuth.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	const tree = section.component({ close: closeFn })
+	const groups = []
+	const groupEls = {}
+	let authEl = null
+	let authPaneEl = null
+	walk(tree, (el) => {
+		if (el.props && el.props['data-fdx-polish-group']) {
+			groups.push(el.props['data-fdx-polish-group'])
+			groupEls[el.props['data-fdx-polish-group']] = el
+		}
+		if (el.type === FakeAuthSection) authEl = el
+		if (el.props && el.props['data-fdx-polish-auth-pane'] !== undefined) authPaneEl = el
+	})
+	assert.deepEqual(
+		[...groups].sort(),
+		['dsh-auth', 'dsh-ui'],
+		'both group titles render when the auth plugin is installed',
+	)
+	assert.ok(authEl, 'auth section component embedded via the slot entry component field')
+	assert.equal(authEl.props.close, closeFn, 'official close callback forwarded to the auth component')
+
+	/* 2026-11-25 用户反馈：分组要装在卡片里 —— 组容器带卡片样式（底色/边框/
+	 * 圆角），行是卡片内孩子而非平铺兄弟，卡内末行无分隔线 */
+	for (const id of ['dsh-ui', 'dsh-auth']) {
+		const card = groupEls[id]
+		assert.ok(card, `group card ${id} present`)
+		assert.ok(
+			String(card.props.style.background).includes('--dsw-specific-input-major'),
+			`${id} card uses the themed input-surface background`,
+		)
+		assert.ok(
+			String(card.props.style.border).includes('solid') &&
+				String(card.props.style.borderRadius).includes('--dsw-radius-md'),
+			`${id} card has border and rounded corners`,
+		)
+	}
+	/* fake createElement 对「单数组子参」存成 [array]（walk 靠 flat(Infinity) 穿透，
+	 * 这里同口径先展平再断言） */
+	const uiCardRows = groupEls['dsh-ui'].children.flat(Infinity).filter(
+		(el) => el && el.props && el.props['data-fdx-polish-feature'],
+	)
+	assert.equal(uiCardRows.length, 5, 'all 5 feature rows live inside the dsh-ui card')
+	assert.ok(
+		String(uiCardRows[0].props.style.borderBottom).includes('solid'),
+		'first row keeps its separator inside the card',
+	)
+	assert.equal(
+		uiCardRows[uiCardRows.length - 1].props.style.borderBottom,
+		'none',
+		'last row drops the separator that would glue to the card edge',
+	)
+	assert.ok(authPaneEl, 'auth pane wrapper present inside the dsh-auth card')
+	assert.equal(
+		groupEls['dsh-auth'].children.flat(Infinity).some((el) => el === authPaneEl),
+		true,
+		'auth pane is a direct child of its group card',
+	)
+
+	/* 2026-11-25 用户反馈：两卡标题样式（字体/颜色/与内容的间距）必须统一 */
+	const uiTitle = groupEls['dsh-ui'].children.flat(Infinity)[0]
+	const authTitle = groupEls['dsh-auth'].children.flat(Infinity)[0]
+	assert.deepEqual(uiTitle.children, ['Deepseek Harness UI调整'], 'ui card first child is its title')
+	assert.deepEqual(authTitle.children, ['Deepseek Harness 快捷登录'], 'auth card first child is its title')
+	assert.deepEqual(uiTitle.props.style, authTitle.props.style, 'both group titles share one identical style object')
+	assert.equal(uiTitle.props.style.fontSize, '14px', 'group title is 14px (no smaller than row titles)')
+	assert.equal(uiTitle.props.style.padding, '12px 0 0', 'title carries no bottom padding: the gap comes from content')
+	const uiFirstRow = uiCardRows[0]
+	assert.equal(
+		/* 行的纵向节奏写作 shorthand padding '12px 0'，取首段与 pane marginTop 对齐 */
+		uiFirstRow.props.style.padding.split(/\s+/)[0],
+		authPaneEl.props.style.marginTop,
+		'title-to-content gap is identical in both cards (row paddingTop === auth pane marginTop)',
+	)
+
+	/* auth 未安装：仅 dsh-ui 组（用户约定：对应插件未装则分组不出现） */
+	const envBare = loadClient()
+	const sectionBare = envBare.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	const bareGroups = []
+	walk(sectionBare.component(), (el) => {
+		if (el.props && el.props['data-fdx-polish-group']) bareGroups.push(el.props['data-fdx-polish-group'])
+	})
+	assert.deepEqual(bareGroups, ['dsh-ui'], 'auth group absent without the auth plugin')
 })
 
 test('clicking a switch writes the store and the next render reflects the new state', () => {
@@ -768,7 +881,7 @@ test('settings-embed: without a shell frame the conversation root itself becomes
 	assert.equal(world.panel.style.width, '100%')
 })
 
-test('settings-embed off: persisted override honored and the toggle has no css block', () => {
+test('settings-embed off: persisted override honored; only css delta is the dock counter sheet', () => {
 	const world = buildEmbedWorld()
 	const storage = fakeStorage({ [STORAGE_KEY]: JSON.stringify({ 'settings-embed': false }) })
 	const env = loadClient({ storage, documentOverrides: world.fakeDocument })
@@ -777,8 +890,33 @@ test('settings-embed off: persisted override honored and the toggle has no css b
 	mo.cb([{ target: world.body }])
 	assert.equal(world.overlay.style.position, undefined, 'embed inactive when persisted off')
 	const cssBefore = env.styleTag.textContent
+	assert.ok(cssBefore.includes('data-shortcut-modal="settings"'), 'EMBED_OFF counter sheet present while embed is off')
 	setEmbedToggle(env, true)
-	assert.equal(env.styleTag.textContent, cssBefore, 'settings-embed injects no css block')
+	assert.equal(
+		env.styleTag.textContent.includes('data-shortcut-modal="settings"'), false,
+		'counter sheet removed once embed turns on',
+	)
+})
+
+test('settings-embed off injects the dock-countering official-modal stylesheet', () => {
+	/* 默认全开：反制表缺席（styleTag 只含常规功能块） */
+	const plain = loadClient()
+	assert.equal(
+		plain.styleTag.textContent.includes('data-shortcut-modal="settings"'), false,
+		'no counter css while embed is on by default',
+	)
+	const world = buildEmbedWorld()
+	const env = loadClient({ documentOverrides: world.fakeDocument })
+	setEmbedToggle(env, false)
+	const css = env.styleTag.textContent
+	assert.ok(css.includes('@media (min-width: 768px)'), 'counter css media-scoped like the dock rules')
+	assert.ok(css.includes('[data-shortcut-modal="settings"]'), 'counter css anchored on the official settings panel')
+	assert.ok(css.includes('pointer-events: auto'), 'overlay pointer-events restored against the dock none')
+	assert.ok(css.includes('[aria-hidden="true"][aria-hidden="true"]'), 'mask rule out-specifies the dock via doubled attribute')
+	assert.ok(css.includes('width: 800px'), 'panel restored to the official 800px card width')
+	assert.ok(css.includes('--dsw-radius-panel'), 'panel radius restored from the official token')
+	assert.ok(css.includes('--dsw-elevation-prominent'), 'panel shadow restored from the official token')
+	assert.ok(css.includes('display: inline-flex'), 'header close button re-shown with its official display')
 })
 
 test('settings-embed: dispose disconnects observers and clears embedded styles', () => {

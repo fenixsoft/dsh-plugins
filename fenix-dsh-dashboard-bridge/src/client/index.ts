@@ -37,6 +37,7 @@ import { DashboardPanel, fixedIconComponent, installWorkspaceNav, opsAlertLabelT
 import type { FixedEntryId } from './panels.js'
 import { registerFileContextMenu } from './locate.js'
 import { currentThemeScheme, installThemeFollow } from './themeFollow.js'
+import { currentLocaleScheme, installLocaleFollow } from './localeFollow.js'
 import {
   createSidebarProjectOpener,
   LOCATE_ICON_KEY,
@@ -524,9 +525,10 @@ export function projectEntrySink(ctx: Context, prefix: string): ProjectEntrySink
   const registerProjectPanel = (name: string, route: string): void => {
     // 防御自守：重名重复 add 先注销旧注册，避免旧 disposer 被覆盖后无法注销（泄漏）。
     disposers.get(name)?.()
-    // 注册期拼串（非渲染惰性）取主题缓存——installThemeFollow 接入点先于
-    // 本注册（apply 顶部），首轮项目面板即注入宿主当前档（design D3）。
-    const src = buildPanelSrc(prefix, route, currentThemeScheme())
+    // 注册期拼串（非渲染惰性）取主题/语言缓存——installThemeFollow 与
+    // installLocaleFollow 接入点先于本注册（apply 顶部），首轮项目面板即
+    // 注入宿主当前档（design D3；i18n 宿主跟随轮同款纪律）。
+    const src = buildPanelSrc(prefix, route, currentThemeScheme(), currentLocaleScheme())
     const disposePanel = ctx.slots.register({ name: 'main', key: projectIdFor(name) }, () =>
       DashboardPanel({ src }),
     )
@@ -763,6 +765,13 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   // 缓存 undefined（三挂载点注入档为空，输出与现状逐字符一致）、不订阅。
   const stopThemeFollow = installThemeFollow(ctx)
 
+  // 宿主语言跟随（i18n 宿主跟随轮）：接入点与主题跟随同位同序（注册期
+  // 拼串取缓存，MUST 先于固定条目注入与项目同步，design D3 同款纪律）。
+  // 宿主语言 API 缺席（旧版 dsh web / dsh-client-locale 未装）→
+  // installLocaleFollow 内部降级：缓存 undefined（三挂载点注入档为空，输出
+  // 与现状逐字符一致）、不订阅。
+  const stopLocaleFollow = installLocaleFollow(ctx)
+
   // 固定侧栏条目（order 10–18，线性图标）；「Fenix 项目」总览入口在右侧
   // 边栏页签（m02220 语义纠正，见 rightTab.tsx），不在左侧 rail。
   ctx.slots.inject('sidebar.panellist', () => {
@@ -791,9 +800,11 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   ctx.slots.inject('main', () => {
     const disposers = FIXED_ENTRIES.map((entry) =>
       ctx.slots.register({ name: 'main', key: entry.id }, () =>
-        // 渲染期同步取主题缓存（固定条目面板为渲染惰性求值，注入档恒为
-        // 宿主最近档）；缓存 undefined（宿主主题 API 缺席）→ 无 theme 段。
-        DashboardPanel({ src: buildPanelSrc(prefix, entry.route, currentThemeScheme()) }),
+        // 渲染期同步取主题/语言缓存（固定条目面板为渲染惰性求值，注入档恒为
+        // 宿主最近档）；缓存 undefined（宿主 API 缺席）→ 无 theme/locale 段。
+        DashboardPanel({
+          src: buildPanelSrc(prefix, entry.route, currentThemeScheme(), currentLocaleScheme()),
+        }),
       ),
     )
     return () => {
@@ -868,5 +879,6 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     stopSync()
     sink.disposeAll()
     stopThemeFollow() // 面板注销后再退订 theme/change + 清缓存（收口序，防悬空广播）
+    stopLocaleFollow() // 同收口序：退订 locale/change + 清缓存（i18n 宿主跟随轮）
   }
 }

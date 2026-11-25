@@ -89,6 +89,22 @@ export function normalizeThemeScheme(value: unknown): ThemeScheme | undefined {
   return value === 'dark' || value === 'light' ? value : undefined
 }
 
+/** 语言档白名单值域（buildPanelSrc 第四参与语言广播 locale 值共用；i18n
+ * 宿主跟随轮）。宿主 dsh-client-locale LocaleRuntime 快照 active 是 'zh'|'en'
+ * （两键词典值域），本仓契约统一映射为 fenix 档 'zh-CN'|'en-US' 后广播/注入
+ * ——fenixd 侧白名单与本地偏好档同值域，零映射负担。 */
+export type LocaleScheme = 'zh-CN' | 'en-US'
+
+/** 宿主语言快照值 → fenix 档：'zh'→'zh-CN'、'en'→'en-US'；'zh-CN'|'en-US'
+ * 已是 fenix 档值原样通过（防御性宽面）；其余值（含 undefined/null/形状漂移
+ * 值）返回 undefined（调用方按「无语言档」处理）。buildPanelSrc 与
+ * localeFollow 广播共用单源。 */
+export function normalizeLocaleScheme(value: unknown): LocaleScheme | undefined {
+  if (value === 'zh') return 'zh-CN'
+  if (value === 'en') return 'en-US'
+  return value === 'zh-CN' || value === 'en-US' ? value : undefined
+}
+
 /**
  * iframe src 契约拼装：`<prefix>/?embed=1&apiBase=<apiBase>[&theme=<档>]#<hash-route>`。
  * - 参数位于 hash 之前，`location.search` 可读；深链在 hash 内不受影响；
@@ -96,15 +112,22 @@ export function normalizeThemeScheme(value: unknown): ThemeScheme | undefined {
  * - theme 为附加可选参数（spec add-bridge-theme-channel）：白名单 `dark|light`
  *   命中时在 apiBase 之后、hash 之前拼 `&theme=<档>`；未提供/undefined/白名单
  *   外值一律不产生 theme 段——输出与既有契约逐字符一致（缺省路径零变化）；
+ * - locale 为附加可选参数（i18n 宿主跟随轮）：normalizeLocaleScheme 命中
+ *   时在 theme 段之后、hash 之前拼 `&locale=<档>`；未提供/白名单外不产生
+ *   locale 段（同缺省路径零变化纪律）；
  * - prefix 为原始 URL 路径语法（需 path-safe），原样拼入不转义，
  *   默认前缀下产出与 specs Scenario 逐字符一致的
  *   `/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard#/projects`。
  */
-export function buildPanelSrc(prefix: string, hashRoute: string, theme?: unknown): string {
+export function buildPanelSrc(prefix: string, hashRoute: string, theme?: unknown, locale?: unknown): string {
   const base = normalizePrefix(prefix)
   const route = hashRoute.startsWith('#') ? hashRoute.slice(1) : hashRoute
   const hash = `#${route.startsWith('/') ? route : `/${route}`}`
   const scheme = normalizeThemeScheme(theme)
   const themeSegment = scheme === undefined ? '' : `&theme=${scheme}`
-  return `${base}?embed=1&apiBase=${base.slice(0, -1)}${themeSegment}${hash}`
+  const localeSegment = (() => {
+    const loc = normalizeLocaleScheme(locale)
+    return loc === undefined ? '' : `&locale=${loc}`
+  })()
+  return `${base}?embed=1&apiBase=${base.slice(0, -1)}${themeSegment}${localeSegment}${hash}`
 }

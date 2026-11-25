@@ -23,6 +23,7 @@
  * 奏效时按静默降级纪律处理（富提示自身显隐不受影响，不破坏原生提示）。
  */
 import type { ProjectSummaryProjection } from './projectSync.js'
+import { pluginT } from './pluginLocale.js'
 
 /** 富提示卡锚属性（幂等/消解判定的存活锚；srcContract 钉值）。 */
 export const WORKSPACE_TIP_ATTR = 'data-fenix-wstip'
@@ -65,21 +66,22 @@ export const STATUS_TONE_MAP: Record<string, TipTone> = {
   queued: 'warning',
 }
 
-/** 状态→中文标签映射（与 fenixd STATUS_META 逐键一致 + blocked 分相扩展）。 */
+/** 状态枚举单源（键序=胶囊序契约；i18n 宿主跟随轮：显示名迁 pluginLocale
+ * 词典，键名 <文件>.<语义> 与 fenixd STATUS_META 显示名逐键同义）。 */
 export const STATUS_LABEL_MAP: Record<string, string> = {
-  drafted: '草稿',
-  ready: '就绪',
-  reviewing: '评审中',
-  implementing: '实现中',
-  implemented: '已实现',
-  testing: '验证中',
-  verified: '已验证',
-  'bug-found': '有Bug',
-  blocked: '阻塞',
-  done: '完成',
-  pushed: '已推送',
-  repairing: '修复中',
-  queued: '排队中',
+  drafted: 'wsTooltip.status.drafted',
+  ready: 'wsTooltip.status.ready',
+  reviewing: 'wsTooltip.status.reviewing',
+  implementing: 'wsTooltip.status.implementing',
+  implemented: 'wsTooltip.status.implemented',
+  testing: 'wsTooltip.status.testing',
+  verified: 'wsTooltip.status.verified',
+  'bug-found': 'wsTooltip.status.bugFound',
+  blocked: 'wsTooltip.status.blocked',
+  done: 'wsTooltip.status.done',
+  pushed: 'wsTooltip.status.pushed',
+  repairing: 'wsTooltip.status.repairing',
+  queued: 'wsTooltip.status.queued',
 }
 
 /**
@@ -118,10 +120,10 @@ export const TIP_CARD_CSS =
 export function daemonPillOf(summary: ProjectSummaryProjection): { readonly label: string; readonly tone: TipTone } | null {
   if (summary.daemon === 'running') {
     return summary.hosting === 'unmanaged'
-      ? { label: '运行中·未托管', tone: 'warning' }
-      : { label: '运行中', tone: 'good' }
+      ? { label: pluginT('wsTooltip.running.unmanaged'), tone: 'warning' }
+      : { label: pluginT('wsTooltip.running'), tone: 'good' }
   }
-  if (summary.daemon === 'stopped') return { label: '未运行', tone: 'warning' }
+  if (summary.daemon === 'stopped') return { label: pluginT('wsTooltip.notRunning'), tone: 'warning' }
   return null
 }
 
@@ -152,7 +154,7 @@ export function statusPillsOf(counts: Readonly<Record<string, number>> | null): 
     .filter(([, count]) => count > 0)
     .map(([status, count]) => ({
       status,
-      label: STATUS_LABEL_MAP[status] ?? status,
+      label: STATUS_LABEL_MAP[status] === undefined ? status : pluginT(STATUS_LABEL_MAP[status]!),
       tone: STATUS_TONE_MAP[status] ?? 'muted',
       count,
     }))
@@ -206,9 +208,9 @@ export function tipCardSpec(summary: ProjectSummaryProjection): TipCardSpec {
   return {
     name: summary.name,
     daemon: daemonPillOf(summary),
-    discovered: summary.discovered ? { label: '自动发现', tone: 'muted' } : null,
+    discovered: summary.discovered ? { label: pluginT('wsTooltip.autoDiscover'), tone: 'muted' } : null,
     path: summary.path,
-    description: { text: descText.length > 0 ? descText : '暂无简介', empty: descText.length === 0 },
+    description: { text: descText.length > 0 ? descText : pluginT('wsTooltip.noDesc'), empty: descText.length === 0 },
     pills: statusPillsOf(summary.status_counts),
     tasks: summary.task_done === null || summary.task_total === null ? null : `${summary.task_done}/${summary.task_total}`,
     activeRuns: summary.active_runs === null ? null : String(summary.active_runs),
@@ -266,11 +268,11 @@ export function renderTipCard(spec: TipCardSpec): HTMLElement {
     const node = el('b', 'font-weight:600;font-variant-numeric:tabular-nums;', value)
     return node
   }
-  stats.appendChild(document.createTextNode('任务 '))
+  stats.appendChild(document.createTextNode(pluginT('wsTooltip.stats.head')))
   stats.appendChild(num(spec.tasks ?? '—'))
-  stats.appendChild(document.createTextNode(' 个 · 活跃 Agent '))
+  stats.appendChild(document.createTextNode(pluginT('wsTooltip.stats.mid')))
   stats.appendChild(num(spec.activeRuns ?? '—'))
-  stats.appendChild(document.createTextNode(' 个'))
+  stats.appendChild(document.createTextNode(pluginT('wsTooltip.stats.tail')))
   card.appendChild(stats)
 
   return card

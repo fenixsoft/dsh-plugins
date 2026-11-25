@@ -70,7 +70,7 @@ describe('wsTooltip 源码钉（消解器交互面守卫接线）', () => {
       fileURLToPath(new URL('../src/client/locate.ts', import.meta.url)),
       'utf8',
     )
-    expect(locate).toContain('在 ${hit.name} 项目定位')
+    expect(locate).toContain('label: locateMenuLabel(hit.name)')
     expect(src()).toContain('文件右键弹不出来')
   })
 })
