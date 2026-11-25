@@ -1,7 +1,9 @@
 /**
  * 菜单语言即时刷新单测（i18n 宿主跟随轮）：fixedEntryLabelThunk 求值档随
- * pluginLocale 切换；installMenuLocaleRefresher 在 locale/change 时对 5 条目
- * 遮蔽重注册（priority -10 + 词典 thunk label + icon 单例），收口清注册退订。
+ * pluginLocale 切换；installMenuLocaleRefresher 在 locale/change 时对 4 条目
+ * 遮蔽重注册（priority -10 + 词典 thunk label + icon 单例；fenix-activities 的
+ * -10 遮蔽位归 installOpsAlertBadge 独占、由其订阅 locale/change 自行重注册，
+ * 见 2026-11-26 review e8a287ba1bee），收口清注册退订。
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { fixedEntryLabelThunk } from '../src/client/panels.js'
@@ -48,22 +50,23 @@ function makeStubCtx() {
 }
 
 describe('installMenuLocaleRefresher', () => {
-  it('locale/change → 5 条目遮蔽重注册（-10 + 词典 thunk）；en 档求值即英文', () => {
+  it('locale/change → 4 条目遮蔽重注册（-10 + 词典 thunk，跳过 fenix-activities）；en 档求值即英文', () => {
     const { ctx, registered, disposed } = makeStubCtx()
     const stop = installMenuLocaleRefresher(ctx as never)
     // 真实装配链：installLocaleFollow 先于本刷新器订阅并在其回调喂
     // setPluginLocale——本桩按同一语义先喂档再触发事件。
     setPluginLocale('en')
     ctx.fire({ active: 'en' })
-    expect(registered).toHaveLength(5)
+    expect(registered).toHaveLength(4)
     for (const entry of registered) {
       expect(entry.options.priority).toBe(-10)
       expect(typeof entry.options.label).toBe('function')
+      expect(entry.options.id).not.toBe('fenix-activities')
     }
     const labels = registered.map((e) => (e.options.label as () => unknown)())
     expect(labels[0]).toBe('Overview')
     expect(labels[2]).toBe('Config')
-    expect(labels[4]).toBe('Help')
+    expect(labels[3]).toBe('Help')
     stop()
   })
 
@@ -72,12 +75,12 @@ describe('installMenuLocaleRefresher', () => {
     const stop = installMenuLocaleRefresher(ctx as never)
     ctx.fire({ active: 'en' })
     ctx.fire({ active: 'zh' })
-    expect(registered).toHaveLength(10) // 5 × 2 轮
-    expect(disposed).toHaveLength(5) // 每轮先收上一轮
-    expect(String((registered[5]?.options.label as () => unknown)())).toBe('概览')
+    expect(registered).toHaveLength(8) // 4 × 2 轮
+    expect(disposed).toHaveLength(4) // 每轮先收上一轮
+    expect(String((registered[4]?.options.label as () => unknown)())).toBe('概览')
     stop()
-    expect(disposed).toHaveLength(10) // 收口清本轮全部
+    expect(disposed).toHaveLength(8) // 收口清本轮全部
     ctx.fire({ active: 'en' }) // 退订后事件不再触发
-    expect(registered).toHaveLength(10)
+    expect(registered).toHaveLength(8)
   })
 })
