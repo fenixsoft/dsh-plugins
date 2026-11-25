@@ -988,12 +988,14 @@
 
 ### 浪费
 - **车道探针unhealthy日志每分钟2条连刷24小时占窗口WARNING九成半**
+  - 自进化：问题成立 / 建议合理 / — 不需要
   - 影响：近24小时 fenixd.log 被同一句「车道前置自检 unhealthy」WARNING 刷入 2882 条（agent_runner 与 fenixd 两个组件行各 1441 条，精确每 60 秒重打一次，状态零变化仍重述），占窗口 WARNING 总量 3029 条的 95.2%；日志文件累计 5748 条，排查其他 WARNING（仅剩 147 条）的信噪比被系统性压低。
   - 证据：fenixd.log 12629-12651 行可见 03:20:49→03:21:49→03:22:49 精确每分钟两条的序列；按窗口 11-24T18:01Z~11-25T18:03Z 逐行统计得 agent_runner 1441 条、fenixd 1441 条；同一 unhealthy 状态在 admin_alerts 台账侧是单发的（窗口内仅 1 条升级告警），说明「单发」设计只约束了台账未约束日志层。
   - 调查评估：问题源是 arbiter/repair 裁决车道前置健康探针（lane_env_unavailable 信号的产生源，fenixd 框架 core/agent_runner/lane_preflight.py，2026-11-09 秒挂事故防线）持续 unhealthy 的背景噪音面。已核实：探针每分钟重探一次并在结论不变时照打两组件 WARNING，无状态去重或 TTL 节流；台账层 append_if_absent 单发正常，唯日志层无同款纪律。根因是环境不自愈（见 improvements 同因条目）叠加日志层无节流的设计缺口。与存量工作关系：属 fenixd 框架域（lane_preflight R2），本仓 spec/changes 活跃区与归档均无覆盖此噪音面的立项。结论：监控自身成了日志主要占用者，值得框架侧小改。
   - 建议：框架侧给车道探针 unhealthy 日志加状态去重：结论与原因文本均未变化时不重打（或 30 分钟 TTL 节流一次），状态翻转或原因变化立即打印。
 
 - **蒸馏重试欠账推进至27天仍零处置（既有条目恶化重述）**
+  - 自进化：问题成立 / 建议合理 / — 不需要
   - 影响：蒸馏重试欠账 26 天推进到 27 天仍无人消费：2026-10-30 登记的归档 spec（2026-10-30-add-dsh-dashboard-bridge）知识页蒸馏一直未重试，dashboard-bridge 能力域知识页至今缺失，窗口内 major 级欠账提醒再发 1 条且未处置，纯告警噪音零产出。
   - 证据：告警（knowledge_distill_retry_stale，蒸馏重试台账欠账超 24 小时扫描信号）evidence 自述「stale_entries=2026-10-30-add-dsh-dashboard-bridge（登记 2026-10-30，欠账 27 天）」handled=false；.fenix/todo.md「## 2026-10-30」节重试条目仍未勾选（本次读取核实）；knowledge-distill-pending.json（在飞蒸馏批次台账）batches 为空即无重试在跑；spec/knowledge/index.md 现六域无 dashboard-bridge（本次读取核实）。
   - 调查评估：问题源是 knowledge-distill 车道（归档 SPEC 知识页自动蒸馏）对 10-30 归档件的重试欠账。与存量对账：todo.md 已有 11-16/11-19/11-20/11-21/11-22 同因条目链，根因链与三项建议（admin 处置轮按 sources=git: 页首注释形态补蒸馏、幂等标记落盘、超 N 天自动重派）已完整登记，本条为（恶化）重述不重复立项，增量仅 26→27 天与「窗口处置记录 0 条」（数据摘要第 3 节）——止血建议挂多日零执行。结论：出口不变，一轮补蒸馏即可断链。
@@ -1001,6 +1003,7 @@
 
 ### 失误
 - **9条升级告警被无留痕批量闭环，闭环主体与依据在台账日志双缺**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：一次批量闭环把 9 条 escalation（升级人工告警）同秒置为已处理，但台账条目无任何主体留痕（handled_by、admin_run_id、resolve_note、close_cause 四字段全缺）、daemon 日志同时刻零动作记录——事后无法追认这批闭环的执行者与依据；其中车道环境告警被闭环 9 秒后同因重发新件，恰好暴露「闭环动作未解决状态」的矛盾。
   - 证据：admin_alerts.json 条目 3b3a4abe8b0b（lane_env_unavailable 升级告警，created 2026-11-22T03:58:19Z）handled_at=2026-11-25T03:23:40.938248 且 handled=true，但无 handled_by/admin_run_id/resolve_note/close_cause 字段（本次读取核实）；同秒 03:23:40.720~.938 另有多条 maintree_stray_wip_stale（主树 tracked 散件滞留信号）升级件同形态闭环；fenixd.log 该 10 秒窗口内除每分钟车道探针行外零日志，supervisor.log 无该时刻重启记录。
   - 调查评估：问题源是 admin 告警台账的闭环写点纪律（与具体 SPEC 无关，框架面）。已核实形态：闭环确实发生但审计署名整体缺失。与存量对账：fenixd core/admin_store.py 现有四类批量闭环写点均强制署名——auto_resolve 写 handled_by=AUTO_RESOLVE_BY、close_escalations_for_run 写 close_cause=CLOSED_BY_DISPOSITION、close_escalations_by_chain 写 CLOSED_BY_CHAIN、admin_auto_exec 写 AUTO_POLICY_ACTOR（逐个读取核实），与本批四字段全缺的形态均不符。归因证据只覆盖形态（署名缺失）而不足以在写点假说间裁决——未索引的旧路径、人工直改台账文件、外部脚本三假说并存，根因未定，此处只写形态层。结论：单次无直接损失，但绕过了框架既有的闭环三分审计纪律，属审计链破口。
@@ -1008,12 +1011,14 @@
 
 ### 可改进
 - **裁决车道凭据不可判定持续4天不自愈，自主修复闭环整段不可用**
+  - 自进化：问题成立 / 建议部分合理 / — 不需要
   - 影响：复发敞口：arbiter/repair 裁决车道（验证失败后的裁决与修复派发车道）自 11-22T03:58Z 起探针持续 unhealthy 已 4 天，窗口内该车道全部派发被前置自检拦截（零状态变更跳过）。本窗口 runs 全成功故零直接损失，但任一 spec 验证失败需要 repair 时自主修复闭环即不可用、只能转人工；告警自述「随恢复自动关闭、无需人工处置」，而其根因是 daemon 进程环境无凭据路由痕迹的宿主配置形态，结构性不会自愈——11-25T03:23:40 旧告警被闭环后 9 秒同因重发（新件 8508da76f772 现挂未处理），构成「闭环→重发」永续循环。
   - 证据：告警 8508da76f772（lane_env_unavailable 升级告警，created 2026-11-25T03:23:49Z，handled=false）evidence「repair 回落 harness 默认链凭据不可判定（fallback=true）：daemon 进程环境无 ANTHROPIC_BASE_URL/AUTH_TOKEN/API_KEY 路由痕迹（OAuth/CLI 默认档形态本地不可判定）」；前件 3b3a4abe8b0b created 11-22T03:58:19 同文本；fenixd.log 12629-12651 行每分钟 unhealthy WARNING 贯穿窗口；本仓 .fenix/config.yaml 无 arbiter/repair 角色显式 provider 链配置段（grep 核实零命中，回落形态）。
   - 调查评估：问题源是车道环境配置（arbiter/repair 角色未分配显式链，回落默认链在本地不可判定，core/agent_runner/lane_preflight.py 的 provider-fallback-dispatch-gate 按设计冻结）。已核实：主车道（implementer/code-fix）凭据正常（窗口内 2 run 全成功、code-fix 完成十提交 merge），仅裁决双角色被拦；框架已有防御（探针拦截不烧死人开关资格），缺的是把「环境修复」落到配置动作。与存量关系：fenixd 域知识 run-resilience/arbiter-lane-infra-failure-reset.md 为同域既有沉淀，本仓无覆盖配置补齐的立项；且 blocked 中的 add-bridge-theme-channel（用户指令冻结转人工）恰好是「修复闭环不可用只能转人工」的现实注脚。结论：一条配置动作即可让探针转 healthy、告警自动关闭、循环终止，属低成本高杠杆项。
   - 建议：按告警指引给 arbiter/repair 两角色在 config 显式分配 provider 链（与主车道同源凭据即可），派发一次成功后探针转 healthy，确认升级告警自动关闭、WARNING 噪音归零；框架侧可另议「indeterminable 持续超 3 天」升级为明确配置提请的措辞（当前 recommended_action 以「无需人工处置」结尾与需人工配置的现实矛盾）。
 
 - **验证截图png落位无约定，两次告警指引未执行后被路过提交裹挟入库**
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：立项失败 · 删除：否
   - 影响：复发敞口：主树验证截图散件窗口内两次触发 info 告警（8 文件 885189 字节、9 文件 886143 字节两次盘点），告警建议的三归宿（挪 .fenix/verify-evidence/<spec>/、补 ignore、删除）均未执行，最终被无关主题的 bridge i18n 提交裹挟 tracked 进各插件 tests/ 目录——885KB 二进制证据永久进入主仓 git 历史；下次真机走查产生的截图将复现「滞留→告警→被路过提交裹挟」同循环。
   - 证据：两条告警（maintree_untracked_stray_stale，主树 untracked 散件超阈值滞留 info 级信号）evidence 含完整清单：指纹 156438dcfa143c5a（first_seen 2026-11-25T03:27:50Z，8 文件）与指纹 5192577ff9f09338（first_seen 2026-11-25T11:19:57Z，9 文件含 .ws-hook.js）；git log --diff-filter=A 核实 verify-*.png 均由提交 11705af（bridge i18n 宿主语言跟随轮，11-25 23:35 本地）首次入库；grep 核实这些 png 不被任何测试代码引用（纯人工核验证据）；.gitignore 无 png 类规则（本次读取核实）；当前 git status clean。
   - 调查评估：问题源是插件真机验证走查的证据资产落位约定缺失（跨 add-chat-polish/add-auth 等已归档插件的共性面）。已核实事实：verify-*.png 是人工核验证据而非测试夹具（零代码引用），入库非必需；告警指引的 .fenix/verify-evidence/<spec>/ 路径在框架侧已存在指引但项目侧无配套约定（无 ignore 规则、无落位习惯）。根因：约定缺位导致每次处置都靠临场决定，最终由语义无关的 i18n 提交顺手收编（收编动作本身符合知识域 maintree-stray-wip 规则 2 的「兄弟文件随收编」精神，但对零引用证据资产是次优归宿）。与存量关系：plugin-rollout 域（真机验收能力页）未约定证据落位，属该域能力页可增补一条的缺口，非重复立项。结论：约定成本一次、根治后续每轮验证的散件告警。
