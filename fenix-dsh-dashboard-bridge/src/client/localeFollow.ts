@@ -93,36 +93,73 @@ function localeOf(snapshot: unknown): LocaleScheme | undefined {
  */
 export function installLocaleFollow(ctx: LocaleFollowContext): () => void {
   cachedLocale = undefined // 装入即重置：降级路径缓存恒 undefined，重装不残留旧值
-  try {
-    const localeService = ctx?.locale
-    if (localeService === null || localeService === undefined || typeof localeService.getSnapshot !== 'function') {
-      return () => {}
-    }
-    if (typeof ctx.on !== 'function') return () => {}
-    let initial: LocaleScheme | undefined
-    try {
-      initial = localeOf(localeService.getSnapshot())
-    } catch {
-      return () => {} // getSnapshot 抛错（形状漂移）：按缺席降级
-    }
-    if (initial === undefined) return () => {} // 快照非白名单档：无可注入值，降级
-    cachedLocale = initial
-    setPluginLocale(initial) // 插件自绘控件文案（tooltip/菜单）跟随宿主档
-    const unsubscribe = ctx.on('locale/change', (snapshot) => {
+  let unsubscribe: (() => void) | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let stopped = false
+
+  const subscribe = (
+    localeService: NonNullable<LocaleFollowContext['locale']>,
+    on: NonNullable<LocaleFollowContext['on']>,
+  ): void => {
+    const dispose = on('locale/change', (snapshot) => {
       const loc = localeOf(snapshot)
       if (loc === undefined) return // 白名单外值：缓存与广播均保持不变
       cachedLocale = loc // 先刷新缓存再广播（晚挂载面板取最新档）
       setPluginLocale(loc) // 插件文案档同步刷新
       broadcastLocale(loc)
     })
-    return () => {
-      if (typeof unsubscribe === 'function') unsubscribe()
-      cachedLocale = undefined
+    unsubscribe = typeof dispose === 'function' ? (dispose as () => void) : undefined
+  }
+
+  /**
+   * 单轮接入尝试。true = 已终局（订阅成功或「宁缺毋错」降级）；false = 未就绪需再等。
+   *
+   * 时序事实（dsh-client-locale lib/client.js apply）：locale 服务 await
+   * __DSH_LOCALE__.read() **之后**才 ctx.provide("locale")——本插件同步 apply
+   * 时 ctx.locale 大概率未注入。一次性判定会让跟随永久失效（真实宿主实证：
+   * dsh 语言设 en、菜单仍 zh）。故服务缺席/抛错/快照 active 为空（服务已注入
+   * 但 settings 未回同步的早期空快照）→ 继续等；快照非空但非白名单档 → 坏值，
+   * 「宁缺毋错」终局降级。
+   */
+  const attempt = (): boolean => {
+    try {
+      const localeService = ctx?.locale
+      if (localeService === null || localeService === undefined || typeof localeService.getSnapshot !== 'function') {
+        return false // 服务未注入：等下一次轮询
+      }
+      if (typeof ctx.on !== 'function') return true // 订阅面缺席：无法跟随，终局降级
+      const on = ctx.on
+      let initial: LocaleScheme | undefined
+      try {
+        const snap = localeService.getSnapshot()
+        const raw = (snap as { active?: unknown } | null | undefined)?.active
+        if (raw === undefined || raw === null || raw === '') return false // 早期空快照：等 settings 回同步
+        initial = localeOf(snap)
+      } catch {
+        return false // getSnapshot 抛错（形状漂移/未就绪）：继续等
+      }
+      if (initial === undefined) return true // 非空且非白名单：坏值，宁缺毋错
+      cachedLocale = initial
+      setPluginLocale(initial) // 插件自绘控件文案（tooltip/菜单）跟随宿主档
+      subscribe(localeService, on)
+      return true
+    } catch {
+      return false // ctx.locale 属性访问抛错（cordis proxy）→ 继续等
     }
-  } catch {
-    // ctx.locale 属性访问抛错（cordis proxy：服务未注入/未就绪）→ 降级。
+  }
+
+  const poll = (): void => {
+    if (stopped) return
+    if (attempt()) return // 终局（成功或降级），不再排程
+    timer = setTimeout(poll, 1000) // 未就绪：1s 后再试（locale 服务 late provide）
+  }
+
+  poll()
+  return () => {
+    stopped = true
+    if (timer !== undefined) clearTimeout(timer)
+    if (typeof unsubscribe === 'function') unsubscribe()
     cachedLocale = undefined
-    return () => {}
   }
 }
 

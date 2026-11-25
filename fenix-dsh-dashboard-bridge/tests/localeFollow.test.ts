@@ -207,17 +207,69 @@ describe('installLocaleFollow（缓存 / 事件 / 降级）', () => {
     expect(currentLocaleScheme()).toBeUndefined()
   })
 
-  it('白名单外快照档：装入与事件均不驱动缓存/广播（last-known-good 保持不变）', () => {
-    const ctx = ctxOf('ja') // 装入快照即漂移
+  it('白名单外快照档：终局降级不订阅（宁缺毋错）；后续独立装入不受影响', () => {
+    const ctx = ctxOf('ja') // 装入快照即漂移：非空但非白名单 → 坏值终局降级
     const stop = installLocaleFollow(ctx)
     expect(currentLocaleScheme()).toBeUndefined()
-    expect(ctx.listeners).toHaveLength(0) // 不订阅（无可注入值）
-    // 装入成功后事件发漂移值：缓存维持 last-known-good
+    expect(ctx.listeners).toHaveLength(0) // 终局降级：不订阅、不再轮询
+    stop()
+    // 独立装入正常档不受前例影响
     const ctx2 = ctxOf('en')
     const stop2 = installLocaleFollow(ctx2)
-    ctx2.listeners[0]!(snapshotOf('ko'))
     expect(currentLocaleScheme()).toBe('en-US')
-    stop()
+    ctx2.listeners[0]!(snapshotOf('ko')) // 事件发漂移值：缓存维持 last-known-good
+    expect(currentLocaleScheme()).toBe('en-US')
     stop2()
+  })
+
+  it('late provide：装入时 locale 缺席 → 轮询等服务注入后正常接档（真实宿主时序）', async () => {
+    vi.useFakeTimers()
+    try {
+      const listeners: Array<(snapshot: unknown) => void> = []
+      const ctx: LocaleFollowContext = {
+        // 初始缺席（插件同步 apply 时 locale 服务尚未 provide）
+        on: ((_event: unknown, listener: (snapshot: unknown) => void) => {
+          listeners.push(listener)
+          return () => {}
+        }) as LocaleFollowContext['on'],
+      }
+      const stop = installLocaleFollow(ctx)
+      expect(currentLocaleScheme()).toBeUndefined() // 未就绪：不误降级
+      // 1s 后 locale 服务 provide（late provide），快照 active 就绪
+      ;(ctx as { locale?: LocaleFollowContext['locale'] }).locale = {
+        getSnapshot: () => snapshotOf('en'),
+      }
+      await vi.advanceTimersByTimeAsync(1100)
+      expect(currentLocaleScheme()).toBe('en-US') // 轮询接入成功
+      expect(listeners).toHaveLength(1) // 事件订阅也接上
+      stop()
+      expect(currentLocaleScheme()).toBeUndefined() // 收口清缓存
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("早期空快照（active 为空串）：不终局，等服务回同步后接档", async () => {
+    vi.useFakeTimers()
+    try {
+      let active: unknown = ''
+      const listeners: Array<(snapshot: unknown) => void> = []
+      const ctx: LocaleFollowContext = {
+        locale: { getSnapshot: () => snapshotOf(active) },
+        on: ((_event: unknown, listener: (snapshot: unknown) => void) => {
+          listeners.push(listener)
+          return () => {}
+        }) as LocaleFollowContext['on'],
+      }
+      const stop = installLocaleFollow(ctx)
+      expect(currentLocaleScheme()).toBeUndefined() // 空档：等
+      active = 'zh' // settings 回同步
+      await vi.advanceTimersByTimeAsync(1100)
+      expect(currentLocaleScheme()).toBe('zh-CN')
+      expect(listeners).toHaveLength(1)
+      stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

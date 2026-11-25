@@ -225,6 +225,8 @@ export function installMenuLocaleRefresher(
     }
   }
   let stop: () => void = () => {}
+  let pollTimer: ReturnType<typeof setTimeout> | undefined
+  let lastScheme: string | undefined
   try {
     if (typeof ctx.on === 'function') {
       const unsubscribe = ctx.on('locale/change', refresh)
@@ -233,7 +235,21 @@ export function installMenuLocaleRefresher(
   } catch {
     stop = () => {}
   }
+  // 档变化轮询兜底：locale 服务 late provide（async apply 晚于本插件同步 apply）
+  // 场景没有初始 locale/change 事件前的档跳变可依赖；每秒比对 currentLocaleScheme()
+  // 与上次值，变化（undefined → 'en-US' 等即 late provide 首次拿到档）即刷新菜单。
+  // 开销：每秒一次字符串比较，零负担。事件订阅保留（即时性），轮询兜底（时序鲁棒）。
+  const poll = (): void => {
+    const scheme = currentLocaleScheme()
+    if (scheme !== lastScheme) {
+      lastScheme = scheme
+      refresh()
+    }
+    pollTimer = setTimeout(poll, 1000)
+  }
+  poll()
   return () => {
+    if (pollTimer !== undefined) clearTimeout(pollTimer)
     try {
       stop()
     } catch {
