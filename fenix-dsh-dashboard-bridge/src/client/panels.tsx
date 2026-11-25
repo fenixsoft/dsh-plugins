@@ -239,6 +239,7 @@ export function DashboardPanel({ src }: { readonly src: string }): ReactElement 
   // 翻转，注册表 Set 去重后净效果恒为「挂载期间在册」。iframe 暂无
   // contentWindow 的瞬态两侧均静默跳过。
   let attachedWindow: Window | null = null
+  let detachBootVeil: (() => void) | null = null
   const attachPanelWindow = (iframe: HTMLIFrameElement | null): void => {
     if (iframe !== null) {
       const win = iframe.contentWindow
@@ -246,11 +247,28 @@ export function DashboardPanel({ src }: { readonly src: string }): ReactElement 
         attachedWindow = win
         registerPanelWindow(win)
       }
+      // 启动遮罩（dashboard-loading-veil）：挂载即显示（标记态初始 true），
+      // iframe load 后淡出——load 含同步脚本执行完毕，此刻 dashboard 内部
+      // loading.tsx 已在渲染，两层过渡无缝衔接；src 深链换页时 MutationObserver
+      // 重新拉起遮罩盖住旧文档，直至新文档 load。iframe 节点移除时 load 监听
+      // 与观察器随节点消亡/显式断开，无泄漏。
+      const veil = iframe.parentElement?.querySelector(`.${BOOT_VEIL_CLASS}`)
+      if (veil !== null && veil !== undefined) {
+        // Element → BootVeilVeilLike 适配：标记态落 data-active 属性（CSS 按
+        // 属性选择器换档，React 状态不介入，无 hook 纪律维持）。
+        detachBootVeil = wireBootVeil(iframe, {
+          setActive: (active) => veil.setAttribute('data-active', active ? 'true' : 'false'),
+        })
+      }
       return
     }
     if (attachedWindow !== null) {
       unregisterPanelWindow(attachedWindow)
       attachedWindow = null
+    }
+    if (detachBootVeil !== null) {
+      detachBootVeil()
+      detachBootVeil = null
     }
   }
   return (
@@ -262,6 +280,7 @@ export function DashboardPanel({ src }: { readonly src: string }): ReactElement 
         height: '100%',
         minHeight: 0,
         boxSizing: 'border-box',
+        position: 'relative',
         // layout 契约：主面板内容触顶时按窗口控件带让位（缺省 0）。
         paddingTop: 'var(--dsh-frame-leading-clearance, 0px)',
       }}
@@ -281,8 +300,95 @@ export function DashboardPanel({ src }: { readonly src: string }): ReactElement 
           backgroundColor: 'var(--dsw-specific-sidebar-fill, #fff)',
         }}
       />
+      <div
+        className={BOOT_VEIL_CLASS}
+        data-active="true"
+        aria-hidden="true"
+        style={{ top: 'var(--dsh-frame-leading-clearance, 0px)' }}
+      >
+        <div className={`${BOOT_VEIL_CLASS}-ring`} />
+        <div className={`${BOOT_VEIL_CLASS}-label`}>加载中</div>
+      </div>
     </div>
   )
+}
+
+/* ============ 启动遮罩（dashboard-loading-veil，2026-11-25 用户反馈） ============ */
+
+/**
+ * 面板挂载到 iframe 首帧之间的空白窗口（经隧道时 2-3s，SPEC 深链尤甚），
+ * 用户易误判系统故障。遮罩形态与 dashboard 内层 loading.tsx 同语言（居中
+ * 主色 spinner + 次级文案，dashboard 侧见 fenixd 仓 global.less 启动加载
+ * 过渡块），颜色全部走宿主 --dsw-* 变量随主题换档、hex 仅作降级兜底。
+ * 标记态驱动（data-active）而非 React 状态：本组件无 hook 纪律维持。
+ */
+export const BOOT_VEIL_CLASS = 'fenix-dashboard-boot-veil'
+
+export const PANEL_BOOT_VEIL_CSS = [
+  `.${BOOT_VEIL_CLASS} { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: var(--dsw-specific-sidebar-fill, #fff); opacity: 1; transition: opacity 0.2s ease; }`,
+  `.${BOOT_VEIL_CLASS}[data-active='false'] { opacity: 0; visibility: hidden; pointer-events: none; }`,
+  `.${BOOT_VEIL_CLASS}-ring { width: 30px; height: 30px; border: 2.5px solid transparent; border-radius: 50%; border-top-color: var(--dsw-specific-button-major, #0f1115); border-right-color: var(--dsw-specific-button-major, #0f1115); opacity: 0.9; animation: fenix-bridge-veil-spin 0.9s linear infinite; }`,
+  `.${BOOT_VEIL_CLASS}-label { font-family: var(--dsw-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif); font-size: 12.5px; letter-spacing: 0.04em; color: var(--dsw-alias-label-tertiary, #adb2b8); }`,
+  '@keyframes fenix-bridge-veil-spin { to { transform: rotate(360deg); } }',
+  '@media (prefers-reduced-motion: reduce) { .fenix-dashboard-boot-veil-ring { animation: none; } }',
+].join('\n')
+
+/** 注入样式单例的 data-plugin-css 标识（幂等重挂防重）。 */
+const PANEL_BOOT_VEIL_CSS_TAG = 'fenix-dsh-dashboard-bridge/panel-boot-veil.css'
+
+function injectPanelBootVeilCss(): void {
+  if (typeof document === 'undefined') return
+  if (document.querySelector(`style[data-plugin-css="${PANEL_BOOT_VEIL_CSS_TAG}"]`) !== null) return
+  const tag = document.createElement('style')
+  tag.dataset.plugin = 'fenix-dsh-dashboard-bridge'
+  tag.dataset.pluginCss = PANEL_BOOT_VEIL_CSS_TAG
+  tag.textContent = PANEL_BOOT_VEIL_CSS
+  document.head?.appendChild(tag)
+}
+injectPanelBootVeilCss()
+
+/** 遮罩接线最小消费面（node 测试以桩替身满足；真实 DOM 结构兼容）。 */
+export interface BootVeilIframeLike {
+  addEventListener(type: string, fn: () => void): void
+  removeEventListener(type: string, fn: () => void): void
+}
+
+export interface BootVeilVeilLike {
+  /** data-active 标记态写入（true=遮罩显示，false=淡出隐藏）。 */
+  setActive(active: boolean): void
+}
+
+export interface BootVeilWiringOptions {
+  /** src 属性观察缝（缺省 MutationObserver；node 测试注入桩观察器）。 */
+  observeSrcAttr?(target: BootVeilIframeLike, onSrcChange: () => void): () => void
+}
+
+/**
+ * 遮罩状态机接线：接线即显示 → iframe load 淡出 → src 属性变化（宿主深链
+ * 换页，React 就地改 attribute 不换节点）重新拉起 → 新文档 load 再淡出。
+ * 返回解线口：摘 load 监听 + 断开观察器（面板卸载时调用，防观察器持节点
+ * 引用泄漏）。
+ */
+export function wireBootVeil(
+  iframe: BootVeilIframeLike,
+  veil: BootVeilVeilLike,
+  options?: BootVeilWiringOptions,
+): (() => void) {
+  veil.setActive(true)
+  const onLoad = (): void => veil.setActive(false)
+  iframe.addEventListener('load', onLoad)
+  const observe =
+    options?.observeSrcAttr ??
+    ((target, onSrcChange): (() => void) => {
+      const observer = new MutationObserver(onSrcChange)
+      observer.observe(target as Element, { attributes: true, attributeFilter: ['src'] })
+      return () => observer.disconnect()
+    })
+  const disconnect = observe(iframe, () => veil.setActive(true))
+  return () => {
+    iframe.removeEventListener('load', onLoad)
+    disconnect()
+  }
 }
 
 /* ================== 官方工作区列表滚动条（注入式 CSS，既有 polish 维持） ================== */

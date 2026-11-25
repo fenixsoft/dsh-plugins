@@ -122,8 +122,10 @@ describe('registerFenixRightTab（definition + body seat 两段注册）', () =>
 
 describe('createFenixProjectsBody（iframe src 随 navigation.params 深链）', () => {
   const iframeSrcOf = (el: ReactElement): string => {
-    const child = el.props.children as ReactElement
-    return String(child.props.src)
+    const kids = (Array.isArray(el.props.children) ? el.props.children : [el.props.children]) as ReactElement[]
+    const iframe = kids.find((child) => child.type === 'iframe')
+    if (iframe === undefined) throw new Error('DashboardPanel 树中找不到 iframe')
+    return String(iframe.props.src)
   }
 
   it('guide 点击（无 useTabInfo/无 params）：iframe src 落项目总览 #/projects', () => {
