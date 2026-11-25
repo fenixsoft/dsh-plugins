@@ -38,8 +38,8 @@ export interface ResolvedBridgeConfig {
 
 /**
  * 归一 URL 路径前缀到尾斜杠形态：`fenix-dashboard` / `/fenix-dashboard` /
- * `/fenix-dashboard/` → `/fenix-dashboard/`。空串或非「/」开头且无法补全的
- * 输入抛错（loader 配置错误应在装载期显式失败，而非静默挂错路径）。
+ * `/fenix-dashboard/` → `/fenix-dashboard/`。空串抛错；缺前导/尾斜杠自动
+ * 补全、不抛错（loader 配置错误应在装载期显式失败，而非静默挂错路径）。
  */
 export function normalizePrefix(input: string): string {
   const trimmed = input.trim()

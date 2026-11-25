@@ -26,6 +26,7 @@ import type { ReactElement } from 'react'
 import { buildPanelSrc } from '../shared/config.js'
 import { DashboardPanel } from './panels.js'
 import { homeFileRouteFor } from './locate.js'
+import { pluginT } from './pluginLocale.js'
 import { currentThemeScheme } from './themeFollow.js'
 import { currentLocaleScheme } from './localeFollow.js'
 
@@ -176,32 +177,67 @@ export function registerFenixRightTab(
 ): () => void {
   const registry = ctx.sidebarRightTabs
   const seats = ctx.slots
-  if (registry === undefined || typeof registry.register !== 'function' || seats === undefined) {
+  if (
+    registry === undefined ||
+    typeof registry.register !== 'function' ||
+    seats === undefined ||
+    typeof seats.register !== 'function'
+  ) {
     return () => {}
   }
-  const disposeDefinition = registry.register({
-    id: FENIX_TAB_ID,
-    kind: FENIX_TAB_KIND,
-    // iframe 跨页签隐藏/会话切换保活：右键定位后用户切走再回来，视图不重置。
-    keepMounted: true,
-    title: () => 'Fenix 项目',
-    guide: [
-      {
-        id: 'projects',
-        order: 40,
-        title: () => 'Fenix 项目',
-        description: () => 'Fenix Dashboard 项目首页（项目列表 / 文件浏览）',
-        icon: FenixGuideIcon,
-      },
-    ],
-  })
-  const disposeBody = seats.register(
-    { name: 'sidebar.right.pane.tab', key: FENIX_TAB_ID },
-    createFenixProjectsBody(prefix),
-  )
-  return () => {
-    disposeBody()
-    disposeDefinition()
+  let disposeDefinition: () => void
+  try {
+    disposeDefinition = registry.register({
+      id: FENIX_TAB_ID,
+      kind: FENIX_TAB_KIND,
+      // iframe 跨页签隐藏/会话切换保活：右键定位后用户切走再回来，视图不重置。
+      keepMounted: true,
+      // i18n 宿主跟随（code-review e27cf35aea7b）：title/guide 文案渲染期经
+      // pluginT 取词典当前档（宿主每次渲染调用 thunk），与左侧菜单同语言跟随。
+      title: () => pluginT('rightTab.title'),
+      guide: [
+        {
+          id: 'projects',
+          order: 40,
+          title: () => pluginT('rightTab.guide.projects'),
+          description: () => pluginT('rightTab.guide.projectsDesc'),
+          icon: FenixGuideIcon,
+        },
+      ],
+    })
+  } catch (error) {
+    // definition 注册同步抛错（宿主注册表校验等）：warn 降级返回 no-op，页面
+    // 不崩（与文件头「形状漂移按降级处理」声明对齐）。
+    console.warn(
+      `[fenix-dsh-dashboard-bridge] sidebarRightTabs.register 失败，已降级为 no-op：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    )
+    return () => {}
+  }
+  try {
+    const disposeBody = seats.register(
+      { name: 'sidebar.right.pane.tab', key: FENIX_TAB_ID },
+      createFenixProjectsBody(prefix),
+    )
+    return () => {
+      disposeBody()
+      disposeDefinition()
+    }
+  } catch (error) {
+    // body seat 注册失败：先注销已成功的 definition 再降级 no-op（防 definition
+    // 泄漏，code-review 7d937b06b2c9）；注销本身抛错不再外溢。
+    console.warn(
+      `[fenix-dsh-dashboard-bridge] sidebar.right.pane.tab 注册失败，已降级为 no-op：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    )
+    try {
+      disposeDefinition()
+    } catch {
+      // definition 注销抛错按已注销处理
+    }
+    return () => {}
   }
 }
 
