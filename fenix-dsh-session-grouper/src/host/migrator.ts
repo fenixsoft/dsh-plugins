@@ -506,7 +506,16 @@ export class Migrator {
     if (indexShapeOk) {
       headers.set(sessionId, newHeader)
       sessionPaths.set(sessionId, toCwdCanonical)
-      this.registry.invalidSessionPaths?.delete(sessionId)
+      // invalidSessionPaths 清理不参与 attach 失败语义：此处若放任 delete 抛错
+      // （形状漂移/异常子类），异常会沿 migrate 内层 catch 走 rollbackPartialMigration——
+      // 数据回滚而注册表 headers/sessionPaths 已指向新位且不随回滚校正，会话增量
+      // 双位分叉，后果重于 pending-attach 兜底设计。对齐 rollback.ts 撤销口径：
+      // try/catch 降级 warn，残留 invalid 标记待下次全量重索引自愈（review a858d8603860）。
+      try {
+        this.registry.invalidSessionPaths?.delete(sessionId)
+      } catch (cleanupError) {
+        this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 注册表 invalidSessionPaths 清理失败（不影响迁移与归组生效，待下次全量重索引自愈）：${errorMessage(cleanupError)}`)
+      }
     } else {
       pendingDetail = '注册表实例索引形态不符（headers/sessionPaths 非 Map），转 pending-attach 兜底'
       this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} ${pendingDetail}`)
