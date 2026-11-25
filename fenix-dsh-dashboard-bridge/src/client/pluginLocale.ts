@@ -73,6 +73,12 @@ const WS_TOOLTIP: Record<string, Entry> = {
   'wsTooltip.stats.tail': [' 个', ''],
 }
 
+/** panels（宿主侧 iframe 启动遮罩）。 */
+const PANELS: Record<string, Entry> = {
+  // 遮罩文案（iframe 首帧前；渲染期求值=实时档）
+  'common.loading': ['加载中', 'Loading'],
+}
+
 /** locate（文件右键「定位」菜单项）。 */
 const LOCATE: Record<string, Entry> = {
   // 2026-11-11 用户需求原文形态：`在 <项目名> 项目定位`（en 侧经 template 组装）
@@ -81,7 +87,7 @@ const LOCATE: Record<string, Entry> = {
   'locate.failureLabel': ['定位失败，请重试', 'Locate failed, please retry'],
 }
 
-const DICTS: Array<Record<string, Entry>> = [WS_TOOLTIP, LOCATE]
+const DICTS: Array<Record<string, Entry>> = [WS_TOOLTIP, LOCATE, PANELS]
 
 /**
  * 取文案（渲染/求值期调用，返回当前档串）。键不存在回退 zh 列（防键位

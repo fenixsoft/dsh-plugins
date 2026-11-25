@@ -29,6 +29,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ReactElement } from 'react'
 import { alertCountStore } from './alertCount.js'
+import { pluginT } from './pluginLocale.js'
 import { buildProjectRowMap, compareNames } from './projectSync.js'
 import type { ProjectRowInfo, ProjectSummaryProjection, WorkspaceItemLike } from './projectSync.js'
 import { createNativeTipSuppressor, createWorkspaceTipController } from './wsTooltip.js'
@@ -307,7 +308,7 @@ export function DashboardPanel({ src }: { readonly src: string }): ReactElement 
         style={{ top: 'var(--dsh-frame-leading-clearance, 0px)' }}
       >
         <div className={`${BOOT_VEIL_CLASS}-ring`} />
-        <div className={`${BOOT_VEIL_CLASS}-label`}>加载中</div>
+        <div className={`${BOOT_VEIL_CLASS}-label`}>{pluginT('common.loading')}</div>
       </div>
     </div>
   )
