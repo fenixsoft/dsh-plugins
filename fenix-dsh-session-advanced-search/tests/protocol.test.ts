@@ -17,6 +17,7 @@ import {
   SEARCH_DEGRADED_REASONS,
   SEARCH_PHASES,
   UI_TEXT,
+  UI_TITLE,
 } from '../src/shared/protocol.js'
 
 describe('API 路径常量', () => {
@@ -207,6 +208,12 @@ describe('UI_TEXT', () => {
     expect(UI_TEXT.buttonTitle).toBe('高级搜索')
     expect(UI_TEXT.degradedBadge).toBe('LLM 分析不可用，已按机械匹配排序')
     expect(UI_TEXT.empty).toBe('未找到匹配的会话')
+  })
+
+  it('语言档标题表：zh 与 buttonTitle 同源，en 对应 Advanced Search', () => {
+    expect(UI_TITLE.zh).toBe(UI_TEXT.buttonTitle)
+    expect(UI_TITLE.zh).toBe('高级搜索')
+    expect(UI_TITLE.en).toBe('Advanced Search')
   })
 
   it('降级原因文案映射覆盖全部枚举；凭证缺失含两动作文案', () => {

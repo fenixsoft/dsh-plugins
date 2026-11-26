@@ -26,13 +26,15 @@
  * 模块体经 `window.__ModuleLoader__.load({ id, factory })` 注册（tsdown
  * banner/footer 包装），dsh plugin-manager 消费 `inject` 服务键 + `apply(ctx)`
  * 停止函数。`inject` 声明 uiWorkspace（跳转服务缝）；缝运行期缺失仍自守
- * （跳转走兜底、切会话收视图走侧栏点击兜底）。apply 在无 document 环境
- * 自守跳过不抛错。
+ * （跳转走兜底、切会话收视图走侧栏点击兜底）。locale/theme 偏好走运行时
+ * inject 子上下文（hostFollow.ts——静态声明是激活 fence，禁止）；宿主缺缝
+ * 时页面自守默认（zh + light）。apply 在无 document 环境自守跳过不抛错。
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { PAGE_PATH } from '../shared/protocol.js'
+import { PAGE_PATH, UI_TITLE } from '../shared/protocol.js'
 import { injectSearchButton, ANCHOR } from './searchButton.js'
 import type { SearchButtonHandle } from './searchButton.js'
+import { installHostUiFollow } from './hostFollow.js'
 
 /** 本插件消费的 client 服务键（uiWorkspace：openSession 跳转缝 + selection 收视图缝）。 */
 export const inject: readonly string[] = ['uiWorkspace']
@@ -174,6 +176,34 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   let observedHost: Element | undefined
   let layoutWarned = false
 
+  // 宿主偏好缓存（installHostUiFollow 落定；undefined=宿主缝缺失/未定，
+  // 页面 boot 自守读 ?locale=/?theme= 或父文档属性）。
+  let currentLocale: 'zh' | 'en' | undefined
+  let currentTheme: 'dark' | 'light' | undefined
+
+  /** 独立页 src：已知偏好拼查询段（首载免闪白/免错档）；均未知 = PAGE_PATH
+   *  原样（测试桩 ctx 无 inject 缝时走此分支，src 断言保持原值）。 */
+  const buildPageSrc = (): string => {
+    if (currentLocale === undefined && currentTheme === undefined) return PAGE_PATH
+    const params = new URLSearchParams()
+    if (currentTheme !== undefined) params.set('theme', currentTheme)
+    if (currentLocale !== undefined) params.set('locale', currentLocale)
+    return `${PAGE_PATH}?${params.toString()}`
+  }
+
+  /** 偏好推送（iframe 已挂载才有意义）：fenix-theme / fenix-locale 消息与
+   *  bridge themeFollow / fenixd localeChannel 契约同形，页面只认父窗口源。 */
+  const syncIframePrefs = (): void => {
+    const frameWindow = iframe?.contentWindow
+    if (frameWindow === undefined || frameWindow === null) return
+    try {
+      if (currentTheme !== undefined) frameWindow.postMessage({ kind: 'fenix-theme', theme: currentTheme }, '*')
+      if (currentLocale !== undefined) frameWindow.postMessage({ kind: 'fenix-locale', locale: currentLocale }, '*')
+    } catch {
+      // contentWindow 未就绪（about:blank 初始态等）：首载 src 段已带偏好。
+    }
+  }
+
   /** 同步面板位置（内容区矩形随窗口/侧栏宽度变化时对齐）。
    *  注意：cssText 整体赋值会清掉 display:none——收起态下 ResizeObserver
    *  触发（如开关右侧边栏导致内容区 resize）曾把视图“洗”回可见，而 open
@@ -205,8 +235,8 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
       container.dataset.fenixSasViewRoot = 'true'
       container.style.display = 'none'
       iframe = doc.createElement('iframe')
-      iframe.src = PAGE_PATH
-      iframe.title = '高级搜索'
+      iframe.src = buildPageSrc()
+      iframe.title = UI_TITLE[currentLocale ?? 'zh']
       iframe.style.cssText = 'display:block;width:100%;height:100%;border:none;background:transparent;'
       container.append(iframe)
       // body 挂载：React 重渲染不可达（内容区挂载会被摘除成孤儿——上一形态
@@ -319,6 +349,23 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     },
   })
 
+  // 宿主偏好跟随（运行时 inject 子上下文声明 locale/theme——静态声明是激活
+  // fence，禁止；缝缺失静默跳过走自守默认）。语言档变化同步按钮文案与 iframe
+  // 标题；两档变化都推送给已挂载的 iframe 页（未挂载则由 buildPageSrc 首载段
+  // 承载）。follow 装配在 button 之后：onLocale 回调需要 button.setTitle。
+  const follow = installHostUiFollow(ctx, {
+    onLocale: (locale) => {
+      currentLocale = locale
+      button.setTitle(UI_TITLE[locale])
+      if (iframe !== undefined) iframe.title = UI_TITLE[locale]
+      syncIframePrefs()
+    },
+    onTheme: (theme) => {
+      currentTheme = theme
+      syncIframePrefs()
+    },
+  })
+
   // 窗口尺寸变化时重对齐（面板 fixed 定位不随文档流）。
   const onResize = (): void => {
     if (open) syncPosition()
@@ -326,6 +373,7 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   win.addEventListener?.('resize', onResize)
 
   return () => {
+    follow.dispose()
     button.dispose()
     observer?.disconnect()
     disposeSelectionWatch?.()

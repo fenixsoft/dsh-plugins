@@ -468,7 +468,20 @@
 					 * 注册——settings.section 的 label thunk 为渲染期实时求值，晚
 					 * 装入会让首轮分区标签取到未初始化缓存（bridge apply 同款纪律）。
 					 * 内部自带降级与轮询，返回收口函数在 dispose 统一调用。 */
-					var stopLocaleFollow = installLocaleFollow(ctx)
+					/* 服务闸（2026-11-26 真机实证）：ctx.locale 只对「inject 声明过
+					 * locale 的 fiber」放行（未声明属性访问恒抛 cannot get property
+					 * "locale" without inject），本插件 apply ctx 只声明 slots（fence
+					 * 约束：静态声明宿主缺服务 = 激活永远 pending）→ 装配经运行时
+					 * inject 子上下文（cc-import lib/client.js:5017 同款形态）：子
+					 * fiber 持 ['locale'] 声明，服务就绪后回调触发，属性访问过闸；
+					 * 原轮询路径保留作无害兜底。 */
+					var localeFollowDisposed = false
+					var stopLocaleFollow = function () {}
+					ctx.inject(['locale'], function (localeCtx) {
+						if (localeFollowDisposed) return
+						stopLocaleFollow = installLocaleFollow(localeCtx)
+						return stopLocaleFollow
+					})
 					/* 注册回调由宿主框架在渲染时声明（brand-fenix 先例：模块装载器
 					 * 保证插件晚于 inject 宿主到达），此刻官方分区已注册，可探测
 					 * 排序尾；枚举失败回退 FALLBACK_MAX_ORDER。逐槽 try/catch 降级，
@@ -514,6 +527,7 @@
 					}
 					return function dispose() {
 						/* [fenix-ignore:44ca15f49734] 槽位回收已由宿主框架接管：两个 inject 工厂均返回 ctx.slots.register 的注销 disposer（dsh-runtime.d.ts 契约「工厂返回值由框架在插件卸载时收集执行」，chat-polish 同款形态、bridge apply 注释同口径），dispose 无需再逐槽保存 disposer。 */
+						localeFollowDisposed = true
 						stopLocaleFollow()
 						return failures.length === 0
 					}

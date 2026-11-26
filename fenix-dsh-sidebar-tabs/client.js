@@ -20,6 +20,11 @@
  *     scrollArea 是官方 grid 滚动容器，外来子元素会被 auto-flow 分到退化轨道
  *     （rc.5 实测 tab 栏被压成 6px 宽且扰动官方行轨道）。rc.1 无滚动机时回退
  *     插在 nav 之前（旧形态）。
+ *   ★ 间距双版本自适应（live 曾在 rc.1 ↔ rc.5 间摆动）：按 scrollRegion 有无
+ *     在注入时选 margin 组——rc.5（scrollRegion 在，自带 margin-top:4px、
+ *     newSessionRow 无下边距）= 12px 12px -4px（2026-11-25 定稿）；rc.1
+ *     （nav 为根列直子，旧 controls 自带 margin-bottom:10px）= 0 12px 8px
+ *     （rc.1 期定稿）。内联 margin 覆盖类默认，placeTabbar 每次重贴幂等。
  *
  * 行为（对齐 SPEC specs/sidebar-tabs）：
  *   - 切换 = display 级可见性切换，MUST NOT reparent（官方 React
@@ -94,9 +99,11 @@
 
 			var TABS_CSS = [
 				/* 分段控件轨道：原型分段控件（深色轨道 + 增白活动块，无指示条——
-				 * 2026-11-24 用户反馈调整），高 30px tab、栏含 3px 内边距、左右 12px 边距；
+				 * 2026-11-24 用户反馈调整），高 30px tab、栏含 3px 内边距、左右 12px
+				 * 边距；外边距不在此静态写死——双版本自适应由 placeTabbar 按结构
+				 * 探测以内联样式注入（rc.1/rc.5 margin 组不同，见头部 ★ 间距节）；
 				 * token 随官方暗/浅主题自适应 */
-				'.fdx-sbt-bar { --fdx-sbt-track: var(--dsw-static-neutral-bluish-150); --fdx-sbt-active-bg: var(--dsw-static-neutral-bluish-00); margin: 12px 12px -4px; flex: none; background: var(--fdx-sbt-track); border-radius: 8px; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }',
+				'.fdx-sbt-bar { --fdx-sbt-track: var(--dsw-static-neutral-bluish-150); --fdx-sbt-active-bg: var(--dsw-static-neutral-bluish-00); flex: none; background: var(--fdx-sbt-track); border-radius: 8px; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }',
 				'body[data-ds-dark-theme] .fdx-sbt-bar { --fdx-sbt-track: var(--dsw-static-neutral-bluish-850); --fdx-sbt-active-bg: var(--dsw-static-neutral-bluish-700); }',
 				/* 收起窄轨：tab 栏不渲染（窄轨内容与官方现状一致） */
 				'.fdx-sbt-bar[data-rail="true"] { display: none; }',
@@ -310,13 +317,20 @@
 					 * 订阅 locale/change 实时刷新（宿主切换语言后 tab 栏即时换档）。
 					 * 返回停止函数（停轮询 + 退订）随 dispose 清理。全读在 try/catch：
 					 * cordis proxy 对缺失服务属性访问会抛错。 */
-					function installLocaleFollow() {
+					/* 服务闸（2026-11-26 真机实证）：ctx.locale 只对「inject 声明过
+					 * locale 的 fiber」放行（未声明属性访问恒抛 cannot get property
+					 * "locale" without inject），本插件 apply ctx 不声明（fence 约束：
+					 * 静态声明宿主缺服务 = 激活永远 pending）→ 装配经运行时 inject
+					 * 子上下文（cc-import lib/client.js 同款形态）：子 fiber 持
+					 * ['locale'] 声明，服务就绪后回调触发，属性访问过闸；早于回调的
+					 * 原轮询路径保留作无害兜底。 */
+					function installLocaleFollow(localeCtx) {
 						/* 单轮接入：undefined = 未就绪继续等；true = 已取得；false = 坏值终局降级 */
 						function attempt() {
-							if (ctx === null || ctx === undefined) return false // 无 ctx（调用形态漂移防御）：终局降级 zh
+							if (localeCtx === null || localeCtx === undefined) return false // 无 ctx（调用形态漂移防御）：终局降级 zh
 							var service
 							try {
-								service = ctx.locale
+								service = localeCtx.locale
 							} catch (e) {
 								return undefined // 服务未注入（cordis proxy 抛错）：等下一轮
 							}
@@ -337,9 +351,9 @@
 						}
 
 						function subscribe() {
-							if (ctx === null || ctx === undefined || typeof ctx.on !== 'function') return // 订阅面缺席：不跟随实时切换（初始档已生效）
+							if (localeCtx === null || localeCtx === undefined || typeof localeCtx.on !== 'function') return // 订阅面缺席：不跟随实时切换（初始档已生效）
 							try {
-								var dispose = ctx.on('locale/change', function (snapshot) {
+								var dispose = localeCtx.on('locale/change', function (snapshot) {
 									adoptLocale(snapshot === null || snapshot === undefined ? undefined : snapshot.active)
 								})
 								if (typeof dispose === 'function') unsubLocale = dispose
@@ -430,10 +444,17 @@
 
 					/* tab 栏放置：侧栏根 flex 列内、nav 的滚动区祖先（scrollRegion）
 					 * 之前；rc.1 无滚动区时回退 nav 之前（旧形态）。MUST NOT 插进
-					 * scrollArea（官方 grid 滚动容器，见头部说明）。 */
+					 * scrollArea（官方 grid 滚动容器，见头部说明）。外边距双版本
+					 * 自适应：scrollRegion 在（rc.5 滚动机结构）贴 12px 12px -4px
+					 * （上补 newSessionRow 失去的下边距、下负 margin 精确抵消
+					 * scrollRegion 自带 margin-top:4px）；不在（rc.1，nav 为根列
+					 * 直子、旧 controls 自带 margin-bottom:10px）贴 0 12px 8px。
+					 * 内联样式每次重贴，幂等。 */
 					function placeTabbar(anchors) {
 						if (!tabbar) tabbar = buildTabbar()
-						var target = anchors.nav.closest('[class*="scrollRegion"]') || anchors.nav
+						var region = anchors.nav.closest('[class*="scrollRegion"]')
+						var target = region || anchors.nav
+						tabbar.style.margin = region ? '12px 12px -4px' : '0 12px 8px'
 						if (tabbar.parentElement !== target.parentElement || tabbar.nextSibling !== target) {
 							target.parentElement.insertBefore(tabbar, target)
 						}
@@ -506,7 +527,13 @@
 					}
 
 					ensure()
-					installLocaleFollow()
+					/* 语言跟随装配走运行时 inject（服务闸见 installLocaleFollow 注释）；
+					 * 回调返回的停止函数按 cordis 对象插件 apply 约定作 disposer，
+					 * 随本插件 fiber 卸载级联清理（dispose 内 localeStopped/定时器/
+					 * 退订三重兜底不变）。 */
+					ctx.inject(['locale'], function (localeCtx) {
+						return installLocaleFollow(localeCtx)
+					})
 
 					return function dispose() {
 						disposed = true

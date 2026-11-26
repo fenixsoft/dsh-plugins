@@ -101,6 +101,22 @@ describe('injectSearchButton 交互', () => {
     expect(parentClicks).toEqual([])
     handle.dispose()
   })
+
+  it('setTitle 更新 title/aria-label（宿主语言档跟随），重插沿用新值', async () => {
+    const { input } = mountSearchBox(document)
+    const handle = injectSearchButton({ document, log: makeLog(), onClick: () => {} })
+    await flush()
+    handle.setTitle('Advanced Search')
+    const button = document.querySelector('button.fenix-sas-entry') as HTMLButtonElement
+    expect(button.title).toBe('Advanced Search')
+    expect(button.getAttribute('aria-label')).toBe('Advanced Search')
+    // 官方重渲染移除后补插的按钮也用当前文案（currentTitle 闭包）。
+    button.remove()
+    await flush()
+    const reinserted = input.nextElementSibling as HTMLButtonElement
+    expect(reinserted.title).toBe('Advanced Search')
+    handle.dispose()
+  })
 })
 
 describe('injectSearchButton 失配降级', () => {

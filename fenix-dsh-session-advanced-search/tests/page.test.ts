@@ -94,6 +94,26 @@ describe('registerPageRoute（独立高级搜索页）', () => {
     expect(html).not.toContain('ws:')
   })
 
+  it('宿主偏好跟随：双主题令牌 + 偏好引导 + postMessage 契约 + 双语词典', () => {
+    const html = renderPageHtml()
+    // 双主题：light 默认 + dark 全量 override（真机采集令牌锚点）。
+    expect(html).toContain('html[data-theme="dark"]')
+    expect(html).toContain('#151517')
+    expect(html).toContain('color-scheme: dark')
+    // head 早执行 boot script：?theme=/?locale= → 父文档属性回退 → 首帧落档。
+    expect(html).toContain("data-ds-theme-source")
+    expect(html).toContain('data-theme')
+    // 实时跟随通道：只认父窗口源的 postMessage 监听（bridge themeFollow /
+    // fenixd localeChannel 契约同形）。
+    expect(html).toContain("kind === 'fenix-theme'")
+    expect(html).toContain("kind === 'fenix-locale'")
+    expect(html).toContain('applyI18n')
+    // 双语词典关键 en 文案（zh 默认静态值保留）。
+    expect(html).toContain("'Advanced Search'")
+    expect(html).toContain('Search session history in natural language')
+    expect(html).toContain("tr('step.' + p.step)")
+  })
+
   it('HEAD 同响应头但空体；其余方法 405 JSON', async () => {
     const { server } = setup()
     const headRes = new PageRes()

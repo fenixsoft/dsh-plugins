@@ -1608,9 +1608,21 @@
 
 					/* UI 文案宿主语言跟随装配（失败仅 stage 降级留痕、回退 zh 直出现状，
 					 * 不阻断激活；词典与装配器见 UI_DICT / installLocaleFollow） */
+					/* 服务闸（2026-11-26 真机实证）：ctx.locale 只对「inject 声明过
+					 * locale 的 fiber」放行（未声明属性访问恒抛 cannot get property
+					 * "locale" without inject），本插件 apply ctx 不声明 locale（fence
+					 * 约束：静态声明宿主缺服务 = 激活永远 pending）→ 装配经运行时
+					 * inject 子上下文（cc-import lib/client.js:5017 同款形态）：子
+					 * fiber 持 ['locale'] 声明，服务就绪后回调触发，属性访问过闸；
+					 * 原轮询路径保留作无害兜底。 */
+					var localeFollowDisposed = false
 					var stopLocaleFollow = null
 					try {
-						stopLocaleFollow = installLocaleFollow(ctx)
+						ctx.inject(['locale'], function (localeCtx) {
+							if (localeFollowDisposed) return
+							stopLocaleFollow = installLocaleFollow(localeCtx)
+							return stopLocaleFollow
+						})
 					} catch (err) {
 						stage('locale follow', err)
 					}
@@ -1620,6 +1632,7 @@
 					 * （dsh-runtime.d.ts 契约「工厂返回值（disposer）由框架在插件卸载时收集执行」；
 					 * fenix-dsh-auth 同款条目、同款核实口径），dispose 无需逐槽保存 disposer。 */
 					return function dispose() {
+						localeFollowDisposed = true
 						sectionSlotsRef = null
 						document.removeEventListener('keydown', onHistoryKeydown, true)
 						document.removeEventListener('input', onHistoryInput, true)

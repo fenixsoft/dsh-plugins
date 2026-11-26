@@ -208,7 +208,7 @@ export function isSearchCandidate(value: unknown): value is SearchCandidate {
 
 /** 客户端展示用的固定文案（双半共享，保持文案单一来源）。 */
 export const UI_TEXT = {
-  /** 入口按钮 hover 提示（client 注入，点击跳转独立搜索页）。 */
+  /** 入口按钮 hover 提示（client 注入，点击跳转独立搜索页；zh 默认档）。 */
   buttonTitle: '高级搜索',
   /** 描述输入 placeholder。 */
   queryPlaceholder: '描述你想找的会话内容，例如「上周调试登录超时的会话」',
@@ -245,3 +245,13 @@ export const UI_TEXT = {
   /** 已取消文案。 */
   cancelled: '已取消',
 } as const
+
+/**
+ * 语言档文案（zh/en 两档，宿主语言档跟随轮）：入口按钮与 iframe 标题。
+ * UI_TEXT.buttonTitle 保留 zh 字面量（默认档 + 旧测试钉兼容）；本表是
+ * client 半运行时取值源（installHostUiFollow onLocale 回调查表）。
+ */
+export const UI_TITLE: Record<'zh' | 'en', string> = {
+  zh: '高级搜索',
+  en: 'Advanced Search',
+}

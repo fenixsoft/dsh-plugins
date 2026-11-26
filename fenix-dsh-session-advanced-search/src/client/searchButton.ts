@@ -31,6 +31,8 @@ export interface SearchButtonLog {
 export interface SearchButtonHandle {
   /** 断开 observer 并移除按钮（幂等）。 */
   dispose(): void
+  /** 更新按钮 title/aria-label（宿主语言档变化时由 client 调用）。 */
+  setTitle(title: string): void
 }
 
 /** 官方 IconSearchOutlineMedium 内联 SVG（optimize 轮 3.3：几何原样 specs/.../prototype ICONS，无星标；viewBox 0 0 16 16、stroke 1.3）。 */
@@ -49,7 +51,9 @@ const ICON_SVG = [
  */
 export function injectSearchButton(deps: { document: Document; log: SearchButtonLog; onClick: () => void }): SearchButtonHandle {
   const doc = deps.document
-  const button = createButton(doc, deps.onClick)
+  // 按钮文案可变（宿主语言档跟随）：当前值闭包持有，observer 补插时用新值。
+  let currentTitle: string = UI_TEXT.buttonTitle
+  const button = createButton(doc, deps.onClick, () => currentTitle)
   let warned = false
   let disposed = false
   let scheduled = false
@@ -92,16 +96,21 @@ export function injectSearchButton(deps: { document: Document; log: SearchButton
       observer.disconnect()
       button.remove()
     },
+    setTitle: (title) => {
+      currentTitle = title
+      button.title = title
+      button.setAttribute('aria-label', title)
+    },
   }
 }
 
 /** 构造入口按钮（内联 SVG、title=hover 提示；点击回调隔离默认行为与冒泡）。 */
-function createButton(doc: Document, onClick: () => void): HTMLButtonElement {
+function createButton(doc: Document, onClick: () => void, getTitle: () => string): HTMLButtonElement {
   const button = doc.createElement('button')
   button.type = 'button'
   button.className = 'fenix-sas-entry'
-  button.title = UI_TEXT.buttonTitle
-  button.setAttribute('aria-label', UI_TEXT.buttonTitle)
+  button.title = getTitle()
+  button.setAttribute('aria-label', getTitle())
   button.innerHTML = ICON_SVG
   // all:unset 脱离宿主 button 默认样式；尺寸贴官方 28px 图标按钮（optimize 轮：去降透明，color inherit 随主题）。
   button.style.cssText =

@@ -37,8 +37,17 @@ import { DashboardPanel, fixedEntryLabelThunk, fixedIconComponent, installWorksp
 import type { FixedEntryId } from './panels.js'
 import { registerFileContextMenu } from './locate.js'
 import { currentThemeScheme, installThemeFollow } from './themeFollow.js'
+import type { ThemeFollowContext } from './themeFollow.js'
 import { currentLocaleScheme, installLocaleFollow } from './localeFollow.js'
 import type { LocaleFollowContext } from './localeFollow.js'
+
+/** cordis 运行时 inject 回调缝（cc-import src/client/index.ts:26 同款结构化
+ * 断言）：ctx.inject 为 registry 运行时 mixin，类型面未声明（cordis context.ts
+ * 仅注释说明），按运行时形态断言（实现 = ctx.plugin({ inject, apply: callback })，
+ * cordis lib/index.js:1672）。 */
+interface ContextWithInject {
+  inject(inject: string[], apply: (ctx: unknown) => unknown): unknown
+}
 import {
   createSidebarProjectOpener,
   LOCATE_ICON_KEY,
@@ -886,16 +895,43 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   // （非渲染惰性求值），晚装入会让首轮项目面板取到未初始化缓存（design D3）。
   // 宿主主题服务缺席/未就绪（旧版 dsh web / late provide）→ installThemeFollow
   // 运行时探测 + 1s 轮询等待；订阅面缺席/坏值终局降级：缓存 undefined（三
-  // 挂载点注入档为空，输出与现状逐字符一致）、不订阅（'theme' 不入 inject，
-  // 见上方 inject 声明口径注释）。
-  const stopThemeFollow = installThemeFollow(ctx)
+  // 挂载点注入档为空，输出与现状逐字符一致）、不订阅。
+  // 服务闸（2026-11-26 真机实证）：ctx.theme / ctx.locale 属性访问只对
+  // 「inject 声明过该服务的 fiber」放行（未声明恒抛 cannot get property …
+  // without inject），而本插件静态 inject 不声明 theme/locale（fence 约束：
+  // 静态声明宿主缺服务 = 激活永远 pending，见上方 inject 声明口径注释）→
+  // 二者装配改经运行时 inject 子上下文（cc-import src/client/index.ts:241
+  // 同款形态）：子 fiber 持声明，服务就绪后回调触发、属性访问过闸，早于任何
+  // 槽位工厂/项目同步（微任务级，快于原 1s 轮询发现路径）；卸载随本插件
+  // fiber 级联，返回的停止函数按对象插件 apply 约定作 disposer，ref 收口链
+  // 保留（回调早于 dispose 到达时仍显式清理）。原轮询路径原样保留作兜底。
+  const stopThemeFollowRef: { current: () => void } = { current: () => {} }
+  const stopLocaleFollowRef: { current: () => void } = { current: () => {} }
+  try {
+    ;(ctx as unknown as ContextWithInject).inject(['theme'], (themeCtx) => {
+      const stop = installThemeFollow(themeCtx as unknown as ThemeFollowContext)
+      stopThemeFollowRef.current = stop
+      return stop
+    })
+  } catch {
+    // 桩 ctx（单测）无 logger：降级留痕须容忍缺席（真实宿主 ctx.logger 恒在）
+    ctx.logger?.warn('fenix-dsh-dashboard-bridge: theme follow install rejected (theme follow degraded)')
+  }
 
   // 宿主语言跟随（i18n 宿主跟随轮）：接入点与主题跟随同位同序（注册期
   // 拼串取缓存，MUST 先于固定条目注入与项目同步，design D3 同款纪律）。
   // 宿主语言 API 缺席（旧版 dsh web / dsh-client-locale 未装）→
   // installLocaleFollow 内部降级：缓存 undefined（三挂载点注入档为空，输出
-  // 与现状逐字符一致）、不订阅。
-  const stopLocaleFollow = installLocaleFollow(ctx)
+  // 与现状逐字符一致）、不订阅。服务闸同上（运行时 inject 子上下文）。
+  try {
+    ;(ctx as unknown as ContextWithInject).inject(['locale'], (localeCtx) => {
+      const stop = installLocaleFollow(localeCtx as unknown as LocaleFollowContext)
+      stopLocaleFollowRef.current = stop
+      return stop
+    })
+  } catch {
+    ctx.logger?.warn('fenix-dsh-dashboard-bridge: locale follow install rejected (locale follow degraded)')
+  }
 
   // 菜单语言即时刷新（i18n 宿主语言跟随轮）：固定条目 label 虽为渲染期实时
   // thunk，但宿主 syncPanels 只在注册变更/交互时重读——语言切换后需一次
@@ -1010,8 +1046,8 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
     stopAlertBadge()
     stopSync()
     sink.disposeAll()
-    stopThemeFollow() // 面板注销后再退订 theme/change + 清缓存（收口序，防悬空广播）
-    stopLocaleFollow() // 同收口序：退订 locale/change + 清缓存（i18n 宿主跟随轮）
+    stopThemeFollowRef.current() // 面板注销后再退订 theme/change + 清缓存（收口序，防悬空广播）
+    stopLocaleFollowRef.current() // 同收口序：退订 locale/change + 清缓存（i18n 宿主跟随轮）
     stopMenuLocale() // 收菜单遮蔽注册 + 退订（label thunk 实时求值兜底保留）
   }
 }

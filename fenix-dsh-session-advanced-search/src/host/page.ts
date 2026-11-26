@@ -108,7 +108,12 @@ export function renderPageHtml(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>高级搜索 · DeepSeek Harness</title>
 <style>
-/* ===== DSH 真实主题令牌（dsh-client-ui 0.2.2-rc.1 light）===== */
+/* ===== DSH 真实主题令牌（dsh web 0.2.2-rc.1 真机 getComputedStyle 采集，双档）=====
+   light 档 = 原令牌；dark 档 = 宿主 data-ds-theme-source="dark" 实测值
+   （bg-base #151517 / layer-1 #232324 / markdown-code-block #1b1b1c / border
+   白系低透 / link #7aaaff / warn-tertiary #27241f / success #22c55e 等）。
+   派生档（ds-50/100/200 深蓝 tint、卡片阴影、琥珀描边）无同款宿主令牌，
+   由对应 dark 值按宿主「低透明叠层」口径推导，注释逐项标注。 */
 :root {
   --dsw-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --dsw-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -122,6 +127,35 @@ export function renderPageHtml(): string {
   --amber-bg: #fff7e8; --amber-fg: #b45309; --amber-dot: #f59e0b;
   --red-fg: #b42318; --green-fg: #067647;
   --r-xs: 4px; --r-sm: 8px; --r-md: 12px; --r-lg: 16px;
+  /* 派生态（模板内曾硬编码、dark 需换值的场面全部变量化） */
+  --page-rgb: 249,250,251;            /* page-composer 渐变起点色 = --n-50 */
+  --card-border: #00000029;           /* composer 卡片描边（border-l4 light） */
+  --card-shadow: 0 1px 3px rgba(15,17,21,.05);
+  --card-shadow-s: 0 1px 2px rgba(15,17,21,.04);
+  --done-bg: #ecfdf3;                 /* status-pill.done 底 */
+  --amber-border: #fde3b7;            /* 降级横幅/amber 按钮描边 */
+  --amber-hover: #ffffff;             /* btn-amber:hover 底 */
+  --amber-mono-bg: #ffffffb3;         /* db-d .mono 底 */
+  --accent-hover: #3565cc;            /* send-btn:hover */
+}
+html[data-theme="dark"] {
+  --n-00: #1b1b1c; --n-50: #151517; --n-60: #232324; --n-100: #ffffff0f; --n-150: #1f1f22;
+  --n-300: #43454a; --n-400: #81858c; --n-600: #adb2b8; --n-700: #cfd3d6; --n-1000: #f9fafb;
+  --bg-hover: #232324;
+  --divider: #ffffff0f;
+  --ds-500: #7aaaff; --ds-400: #9ec2ff; --ds-50: #7aaaff1f; --ds-100: #7aaaff33; --ds-200: #7aaaff4d;
+  --amber-bg: #27241f; --amber-fg: #f7ad31; --amber-dot: #f59e0b;
+  --red-fg: #f25a5a; --green-fg: #22c55e;
+  --page-rgb: 27,27,28;
+  --card-border: #ffffff1f;
+  --card-shadow: 0 1px 3px rgba(0,0,0,.45);
+  --card-shadow-s: 0 1px 2px rgba(0,0,0,.4);
+  --done-bg: #22c55e1f;
+  --amber-border: #f59e0b3d;
+  --amber-hover: #2c2c2e;
+  --amber-mono-bg: #ffffff1a;
+  --accent-hover: #699ff2;
+  color-scheme: dark;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; }
@@ -145,15 +179,15 @@ svg { display: block; flex: none; }
 .page-body { flex: 1; overflow-y: auto; padding: 14px 20px 24px; }
 
 /* 底部输入区（对齐 DSH 会话 composer：max 952px / 28px / 底部渐变座）*/
-.page-composer { flex: none; position: relative; background: linear-gradient(180deg, rgba(249,250,251,0) 0px, var(--n-50) 36px); padding: 10px 20px 14px; }
-.composer-card { width: min(calc(100% - 16px), 952px); margin: 0 auto; background: var(--bg-base); border: 1px solid #00000029; border-radius: 28px; padding: 8px 10px 8px 16px; box-shadow: 0 1px 3px rgba(15,17,21,.05); transition: border-color .15s ease, box-shadow .15s ease; display: flex; flex-direction: column; gap: 6px; }
+.page-composer { flex: none; position: relative; background: linear-gradient(180deg, rgba(var(--page-rgb),0) 0px, var(--n-50) 36px); padding: 10px 20px 14px; }
+.composer-card { width: min(calc(100% - 16px), 952px); margin: 0 auto; background: var(--bg-base); border: 1px solid var(--card-border); border-radius: 28px; padding: 8px 10px 8px 16px; box-shadow: var(--card-shadow); transition: border-color .15s ease, box-shadow .15s ease; display: flex; flex-direction: column; gap: 6px; }
 .composer-card:focus-within { border-color: var(--ds-400); box-shadow: 0 0 0 3px var(--ds-100); }
 .composer-row { display: flex; align-items: center; gap: 8px; }
 .composer-row .q-ic { color: var(--label-caption); }
 .composer-row input { flex: 1; border: none; outline: none; font: inherit; font-size: 13px; color: var(--label-primary); background: none; }
 .composer-row input::placeholder { color: var(--label-caption); }
 .send-btn { width: 32px; height: 32px; flex: none; border-radius: 50%; background: var(--ds-500); color: #fff; display: inline-flex; align-items: center; justify-content: center; transition: background .12s ease, opacity .12s ease, transform .12s ease; }
-.send-btn:hover { background: #3565cc; }
+.send-btn:hover { background: var(--accent-hover); }
 .send-btn:active { transform: scale(.96); }
 .send-btn:disabled { opacity: .4; cursor: default; }
 .composer-meta { display: flex; align-items: center; gap: 8px; }
@@ -161,14 +195,14 @@ svg { display: block; flex: none; }
 .composer-meta .hint kbd { font-family: var(--dsw-font-mono); font-size: 11px; background: var(--n-100); border-radius: 4px; padding: 1px 5px; }
 
 /* AI 分析面板（Agent 对话风格）*/
-.ai-panel { background: var(--bg-base); border: 1px solid var(--divider); border-radius: var(--r-lg); margin-bottom: 14px; overflow: hidden; box-shadow: 0 1px 2px rgba(15,17,21,.04); animation: viewIn .2s ease; }
+.ai-panel { background: var(--bg-base); border: 1px solid var(--divider); border-radius: var(--r-lg); margin-bottom: 14px; overflow: hidden; box-shadow: var(--card-shadow-s); animation: viewIn .2s ease; }
 @keyframes viewIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .ai-panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--divider); background: linear-gradient(180deg, var(--ds-50), var(--bg-base)); }
 .ai-panel-head .ai-ic { color: var(--ds-500); }
 .ai-panel-head .ai-ttl { font-size: 13px; font-weight: 600; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; }
 .status-pill.run { background: var(--ds-50); color: var(--ds-500); }
-.status-pill.done { background: #ecfdf3; color: var(--green-fg); }
+.status-pill.done { background: var(--done-bg); color: var(--green-fg); }
 .status-pill.fail { background: var(--amber-bg); color: var(--amber-fg); }
 .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
 .status-pill.run .dot { background: var(--ds-500); animation: pulse 1.2s ease infinite; }
@@ -205,15 +239,15 @@ svg { display: block; flex: none; }
 .log-line.warn { color: var(--amber-fg); }
 
 /* 降级横幅 */
-.degrade-banner { display: flex; gap: 10px; align-items: flex-start; background: var(--amber-bg); border: 1px solid #fde3b7; border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 14px; animation: viewIn .2s ease; }
+.degrade-banner { display: flex; gap: 10px; align-items: flex-start; background: var(--amber-bg); border: 1px solid var(--amber-border); border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 14px; animation: viewIn .2s ease; }
 .degrade-banner svg { color: var(--amber-dot); margin-top: 1px; }
 .degrade-banner .db-body { flex: 1; }
 .degrade-banner .db-t { font-size: 13px; font-weight: 600; color: var(--amber-fg); }
 .degrade-banner .db-d { font-size: 12px; line-height: 17px; color: var(--amber-fg); opacity: .85; margin-top: 2px; }
-.degrade-banner .db-d .mono { background: #ffffffb3; border-radius: 4px; padding: 0 4px; }
+.degrade-banner .db-d .mono { background: var(--amber-mono-bg); border-radius: 4px; padding: 0 4px; }
 .degrade-banner .db-actions { display: flex; gap: 8px; margin-top: 8px; }
-.btn-amber { height: 26px; padding: 0 10px; border-radius: var(--r-sm); font-size: 12px; background: var(--bg-base); border: 1px solid #fde3b7; color: var(--amber-fg); display: inline-flex; align-items: center; gap: 5px; transition: all .12s ease; }
-.btn-amber:hover { background: #fff; border-color: var(--amber-dot); }
+.btn-amber { height: 26px; padding: 0 10px; border-radius: var(--r-sm); font-size: 12px; background: var(--bg-base); border: 1px solid var(--amber-border); color: var(--amber-fg); display: inline-flex; align-items: center; gap: 5px; transition: all .12s ease; }
+.btn-amber:hover { background: var(--amber-hover); border-color: var(--amber-dot); }
 
 /* 结果区 */
 .results-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 2px 10px; }
@@ -221,7 +255,7 @@ svg { display: block; flex: none; }
 .results-head .r-cnt { font-size: 12px; color: var(--label-caption); }
 .results-head .sort-by { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--label-tertiary); }
 .result-card { background: var(--bg-base); border: 1px solid var(--divider); border-radius: var(--r-md); padding: 12px 14px; margin-bottom: 8px; cursor: pointer; transition: border-color .12s ease, box-shadow .12s ease, transform .12s ease; animation: viewIn .25s ease backwards; }
-.result-card:hover { border-color: var(--ds-200); box-shadow: 0 2px 8px rgba(15,17,21,.06); transform: translateY(-1px); }
+.result-card:hover { border-color: var(--ds-200); box-shadow: var(--card-shadow-s); transform: translateY(-1px); }
 .rc-top { display: flex; align-items: center; gap: 8px; }
 .rc-title { font-size: 13px; font-weight: 600; color: var(--label-primary); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conf { display: inline-flex; align-items: center; gap: 6px; flex: none; }
@@ -244,7 +278,7 @@ svg { display: block; flex: none; }
 
 /* 初始态 */
 .initial-state { padding: 48px 0 0; text-align: center; color: var(--label-tertiary); animation: viewIn .2s ease; }
-.initial-state .big-ic { margin: 0 auto 12px; width: 44px; height: 44px; border-radius: var(--r-md); background: var(--bg-base); border: 1px solid var(--divider); display: flex; align-items: center; justify-content: center; color: var(--label-caption); box-shadow: 0 1px 2px rgba(15,17,21,.04); }
+.initial-state .big-ic { margin: 0 auto 12px; width: 44px; height: 44px; border-radius: var(--r-md); background: var(--bg-base); border: 1px solid var(--divider); display: flex; align-items: center; justify-content: center; color: var(--label-caption); box-shadow: var(--card-shadow-s); }
 .initial-state .h { font-size: 14px; font-weight: 600; color: var(--label-secondary); margin-bottom: 4px; }
 .initial-state .d { font-size: 12px; color: var(--label-caption); }
 
@@ -254,19 +288,40 @@ svg { display: block; flex: none; }
 .spinner { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>
+<script>
+/* 早执行 boot（防首帧错档闪烁）：主题档与语言档先于 body 渲染落到 <html>。
+   ① URL ?theme=dark|light / ?locale=en|zh（client 半创建 iframe 时已知档即拼入）；
+   ② 兜底同源直读宿主 <html> 属性（data-ds-theme-source / lang——dsh web
+      同步主题与语言档的真实挂点，真机实证）；③ 再兜底 zh / 不设主题档。
+   实时变化由页尾主脚本 message 监听（fenix-theme / fenix-locale）接管。 */
+(function () {
+  var m = String(location.search).match(/[?&]theme=([a-z]+)/);
+  var th = m && (m[1] === 'dark' || m[1] === 'light') ? m[1] : null;
+  if (!th) {
+    try { var pth = window.parent.document.documentElement.getAttribute('data-ds-theme-source'); if (pth === 'dark' || pth === 'light') th = pth; } catch (e) { /* 跨源宿主：兜底不设档 */ }
+  }
+  if (th) document.documentElement.setAttribute('data-theme', th);
+  var lm = String(location.search).match(/[?&]locale=([A-Za-z_-]+)/);
+  var loc = lm ? lm[1] : null;
+  if (loc !== 'en' && loc !== 'en-US' && loc !== 'zh' && loc !== 'zh-CN') {
+    try { loc = window.parent.document.documentElement.getAttribute('lang'); } catch (e) { loc = null; }
+  }
+  document.documentElement.lang = (loc === 'en' || loc === 'en-US') ? 'en-US' : 'zh-CN';
+})();
+</script>
 </head>
 <body>
 <div class="page">
   <header class="page-header">
     <div class="ttl">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M6.58727 11.8586C9.55061 11.8586 11.9529 9.45637 11.9529 6.49304C11.9529 3.5297 9.55061 1.12744 6.58727 1.12744C3.62394 1.12744 1.22168 3.5297 1.22168 6.49304C1.22168 9.45637 3.62394 11.8586 6.58727 11.8586Z"/><path d="M10.2991 10.3933L14.7783 14.8725"/><path d="M8 4.2V7.8" stroke-width="1.1"/><path d="M6.2 6H9.8" stroke-width="1.1"/></svg>
-      高级搜索
+      <span id="ttlText">高级搜索</span>
     </div>
-    <span class="scope-chip">全部工作区</span>
+    <span class="scope-chip" id="scopeChip">全部工作区</span>
     <span class="spacer"></span>
     <button class="back-btn" id="backBtn" title="返回会话界面">
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M11.7256 2.77441C12.5538 2.77469 13.2256 3.44616 13.2256 4.27441V10.1416H12.2256V4.27441C12.2256 3.99844 12.0015 3.77469 11.7256 3.77441H5.7207V2.77441H11.7256Z"/><path d="M2.77441 13.2255L12.3756 3.62427"/></svg>
-      返回会话
+      <span id="backBtnText">返回会话</span>
     </button>
   </header>
 
@@ -275,8 +330,8 @@ svg { display: block; flex: none; }
       <div class="big-ic">
         <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M6.58727 11.8586C9.55061 11.8586 11.9529 9.45637 11.9529 6.49304C11.9529 3.5297 9.55061 1.12744 6.58727 1.12744C3.62394 1.12744 1.22168 3.5297 1.22168 6.49304C1.22168 9.45637 3.62394 11.8586 6.58727 11.8586Z"/><path d="M10.2991 10.3933L14.7783 14.8725"/><path d="M8 4.2V7.8" stroke-width="1.1"/><path d="M6.2 6H9.8" stroke-width="1.1"/></svg>
       </div>
-      <div class="h">用自然语言搜索历史会话</div>
-      <div class="d">先机械预筛，再由 AI 按语义相关性排序；分析过程实时可见，随时可中断</div>
+      <div class="h" id="initialH">用自然语言搜索历史会话</div>
+      <div class="d" id="initialD">先机械预筛，再由 AI 按语义相关性排序；分析过程实时可见，随时可中断</div>
     </div>
     <div id="dynamicArea"></div>
   </div>
@@ -293,7 +348,7 @@ svg { display: block; flex: none; }
         </button>
       </div>
       <div class="composer-meta">
-        <span class="hint"><kbd>Enter</kbd> 搜索 · 点击结果卡跳回对应会话</span>
+        <span class="hint" id="composerHint"><kbd>Enter</kbd> 搜索 · 点击结果卡跳回对应会话</span>
       </div>
     </div>
   </footer>
@@ -318,24 +373,204 @@ var ICONS = {
   x: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M2.5 2.5L13.5 13.5"/><path d="M13.5 2.5L2.5 13.5"/></svg>'
 };
 
-/* ===== 端点与文案（与 shared/protocol.ts UI_TEXT 对齐）===== */
+/* ===== 端点与文案 ===== */
 var API = '/api/session-advanced-search/jobs';
-var STEP_TITLES = {
-  collecting: '收集与解析会话内容',
-  filtering: '机械预筛候选会话',
-  analyzing: 'AI 语义分析',
-  done: '整理搜索结果'
+
+/* ===== i18n（宿主语言档跟随；与 bridge 菜单词典同款 [zh,en] 单源）=====
+   档位：head boot script 已按 ?locale= / 宿主 lang 落 <html lang>；此处重读
+   同源决定 LOC，后续经 fenix-locale message 实时切档（applyI18n 静态面 +
+   refreshDoneI18n 已完成结果面；运行中面板由下一帧渲染自愈）。 */
+var T = {
+  zh: {
+    'page.title': '高级搜索 · DeepSeek Harness',
+    'header.ttl': '高级搜索',
+    'scope.chip': '全部工作区',
+    'back.title': '返回会话界面',
+    'back.btn': '返回会话',
+    'initial.h': '用自然语言搜索历史会话',
+    'initial.d': '先机械预筛，再由 AI 按语义相关性排序；分析过程实时可见，随时可中断',
+    'input.placeholder': '描述你想找的会话内容，例如「上周调试登录超时的会话」',
+    'run.title': '搜索（Enter）',
+    'composer.hint': '<kbd>Enter</kbd> 搜索 · 点击结果卡跳回对应会话',
+    'ai.title': 'AI 语义分析',
+    'pill.preparing': '准备中',
+    'pill.analyzing': '分析中',
+    'pill.doneAi': 'AI 分析完成',
+    'pill.doneMech': '机械搜索 · 已完成',
+    'pill.fail': '失败',
+    'pill.auth': '未登录',
+    'pill.cancelled': '已中断',
+    'detail.toggle': '详细信息',
+    'action.stop': '中断',
+    'step.collecting': '收集与解析会话内容',
+    'step.filtering': '机械预筛候选会话',
+    'step.analyzing': 'AI 语义分析',
+    'step.analyzing.run': '调用 AI 语义分析',
+    'step.done': '整理搜索结果',
+    'degraded.llm-missing': 'LLM 分析服务不可用，已按机械匹配排序',
+    'degraded.credential-missing': '分析模型路由缺少凭证，已按机械匹配排序',
+    'degraded.timeout': '分析超时，守卫已中断等待，已按机械匹配排序',
+    'degraded.call-failed': '模型调用失败，已按机械匹配排序',
+    'degraded.parse-failed': '分析输出解析失败，已按机械匹配排序',
+    'degraded.fallback': 'LLM 分析不可用，已按机械匹配排序',
+    'detail.credential-missing': '请在 DSH「设置 → 模型」为分析模型路由的 provider 配置凭证（环境变量或凭据库）后重试。',
+    'banner.cause': '原因：',
+    'action.goConfig': '返回主界面，前往「设置 → 模型」',
+    'action.retryAiOnly': '仅重试 AI 分析',
+    'action.retryAi': '重试 AI 分析',
+    'action.goLogin': '打开 DSH 登录',
+    'results.title': '搜索结果',
+    'results.countSuffix': ' 个会话',
+    'results.sortAi': '按 AI 相关性排序',
+    'results.sortMech': '按机械匹配排序',
+    'results.empty': '未找到匹配的会话',
+    'card.mechPrefix': '机械匹配 · ',
+    'card.sortAi': 'AI 相关性排序',
+    'card.sortMech': '机械匹配排序',
+    'card.kw': '命中',
+    'card.noTitle': '(无标题会话)',
+    'card.ungrouped': '(未归组)',
+    'time.today': '今天 ',
+    'time.yesterday': '昨天 ',
+    'err.timeout': '请求超时（30 秒无响应），请稍后重试',
+    'err.auth': '未登录或会话已过期：请先打开 DSH 主界面登录后再使用本页',
+    'err.createShape': '任务创建响应异常，请稍后重试',
+    'err.badPayload': '任务状态载荷形状非法',
+    'err.searchFailed': '搜索失败',
+    'fail.bannerPrefix': '搜索失败：',
+    'mark.aiFailed': 'AI 分析失败',
+    'mark.aiCancelled': 'AI 分析已中断'
+  },
+  en: {
+    'page.title': 'Advanced Search · DeepSeek Harness',
+    'header.ttl': 'Advanced Search',
+    'scope.chip': 'All workspaces',
+    'back.title': 'Back to session view',
+    'back.btn': 'Back to sessions',
+    'initial.h': 'Search session history in natural language',
+    'initial.d': 'Mechanical prefilter first, then AI semantic relevance ranking; analysis streams live and can be interrupted anytime',
+    'input.placeholder': 'Describe the sessions you are looking for, e.g. "debugging a login timeout last week"',
+    'run.title': 'Search (Enter)',
+    'composer.hint': '<kbd>Enter</kbd> to search · click a result card to jump back to that session',
+    'ai.title': 'AI semantic analysis',
+    'pill.preparing': 'Preparing',
+    'pill.analyzing': 'Analyzing',
+    'pill.doneAi': 'AI analysis complete',
+    'pill.doneMech': 'Mechanical search · done',
+    'pill.fail': 'Failed',
+    'pill.auth': 'Not signed in',
+    'pill.cancelled': 'Interrupted',
+    'detail.toggle': 'Details',
+    'action.stop': 'Stop',
+    'step.collecting': 'Collecting and parsing sessions',
+    'step.filtering': 'Mechanical candidate prefilter',
+    'step.analyzing': 'AI semantic analysis',
+    'step.analyzing.run': 'Running AI semantic analysis',
+    'step.done': 'Organizing results',
+    'degraded.llm-missing': 'LLM analysis service unavailable, sorted by mechanical match',
+    'degraded.credential-missing': 'Analysis model route has no credentials, sorted by mechanical match',
+    'degraded.timeout': 'Analysis timed out (guard interrupted the wait), sorted by mechanical match',
+    'degraded.call-failed': 'Model call failed, sorted by mechanical match',
+    'degraded.parse-failed': 'Failed to parse analysis output, sorted by mechanical match',
+    'degraded.fallback': 'LLM analysis unavailable, sorted by mechanical match',
+    'detail.credential-missing': 'Configure credentials (environment variables or the credential store) for the analysis model route provider in DSH "Settings → Models", then retry.',
+    'banner.cause': 'Cause: ',
+    'action.goConfig': 'Back to home, then "Settings → Models"',
+    'action.retryAiOnly': 'Retry AI analysis only',
+    'action.retryAi': 'Retry AI analysis',
+    'action.goLogin': 'Open DSH sign-in',
+    'results.title': 'Results',
+    'results.countSuffix': ' sessions',
+    'results.sortAi': 'Sorted by AI relevance',
+    'results.sortMech': 'Sorted by mechanical match',
+    'results.empty': 'No matching sessions',
+    'card.mechPrefix': 'Mechanical match · ',
+    'card.sortAi': 'AI relevance ranking',
+    'card.sortMech': 'Mechanical match ranking',
+    'card.kw': 'Matched',
+    'card.noTitle': '(untitled session)',
+    'card.ungrouped': '(ungrouped)',
+    'time.today': 'Today ',
+    'time.yesterday': 'Yesterday ',
+    'err.timeout': 'Request timed out (no response for 30s), please retry',
+    'err.auth': 'Not signed in or session expired: sign in from the DSH main UI first, then use this page',
+    'err.createShape': 'Unexpected job creation response, please retry',
+    'err.badPayload': 'Job status payload has an invalid shape',
+    'err.searchFailed': 'Search failed',
+    'fail.bannerPrefix': 'Search failed: ',
+    'mark.aiFailed': 'AI analysis failed',
+    'mark.aiCancelled': 'AI analysis interrupted'
+  }
 };
-var DEGRADED_TEXT = {
-  'llm-missing': 'LLM 分析服务不可用，已按机械匹配排序',
-  'credential-missing': '分析模型路由缺少凭证，已按机械匹配排序',
-  'timeout': '分析超时，守卫已中断等待，已按机械匹配排序',
-  'call-failed': '模型调用失败，已按机械匹配排序',
-  'parse-failed': '分析输出解析失败，已按机械匹配排序'
-};
-var DEGRADED_DETAIL = {
-  'credential-missing': '请在 DSH「设置 → 模型」为分析模型路由的 provider 配置凭证（环境变量或凭据库）后重试。'
-};
+var LOC = 'zh';
+function tr(key) {
+  var row = T[LOC];
+  if (row && row[key] !== undefined) return row[key];
+  return T.zh[key];
+}
+function normalizeLoc(v) {
+  return (v === 'en' || v === 'en-US' || v === 'en_US') ? 'en' : ((v === 'zh' || v === 'zh-CN' || v === 'zh_CN') ? 'zh' : null);
+}
+var STREAM_DOTS = '<span class="streaming-dots"><i></i><i></i><i></i></span>';
+
+/* 静态文案面整体刷写（id 锚点见静态 HTML 包装）。 */
+function applyI18n() {
+  var el;
+  document.documentElement.lang = LOC === 'en' ? 'en-US' : 'zh-CN';
+  document.title = tr('page.title');
+  if ((el = $('#ttlText'))) el.textContent = tr('header.ttl');
+  if ((el = $('#scopeChip'))) el.textContent = tr('scope.chip');
+  if ((el = $('#backBtnText'))) el.textContent = tr('back.btn');
+  if ((el = $('#backBtn'))) el.title = tr('back.title');
+  if ((el = $('#initialH'))) el.textContent = tr('initial.h');
+  if ((el = $('#initialD'))) el.textContent = tr('initial.d');
+  if ((el = $('#queryInput'))) el.placeholder = tr('input.placeholder');
+  if ((el = $('#runBtn'))) el.title = tr('run.title');
+  if ((el = $('#composerHint'))) el.innerHTML = tr('composer.hint');
+}
+/* boot 档位（head boot script 已落 <html lang>，此处对齐内层状态）。 */
+LOC = normalizeLoc(document.documentElement.lang) || 'zh';
+applyI18n();
+
+/* 宿主实时通道（bridge themeFollow/localeFollow 的 iframe 侧契约镜像：
+   {kind:'fenix-theme',theme} / {kind:'fenix-locale',locale}，仅认父窗口）。
+   主题：换 data-theme attr（CSS 变量全档切换）。语言：静态面 + 已完成结果
+   面即时重渲染；运行中面板/耗时 pill 由下一帧渲染自然换档（renderProgress
+   增量协调按词典值比较后写、elapsedTimer 逐秒重写），失败横幅等下一次
+   runSearch 自愈——有意取舍，不为此重建在途面板。 */
+window.addEventListener('message', function (ev) {
+  if (ev.source !== window.parent) return;
+  var d = ev.data;
+  if (!d || typeof d !== 'object') return;
+  if (d.kind === 'fenix-theme' && (d.theme === 'dark' || d.theme === 'light')) {
+    document.documentElement.setAttribute('data-theme', d.theme);
+    return;
+  }
+  if (d.kind === 'fenix-locale') {
+    var loc = normalizeLoc(d.locale);
+    if (loc && loc !== LOC) {
+      LOC = loc;
+      applyI18n();
+      refreshDoneI18n();
+    }
+  }
+});
+
+/* 语言切换时已完成态结果面重渲染（finishDone 缓存载荷；未见完成态则空转）。 */
+var lastDone = null;
+function refreshDoneI18n() {
+  if (!lastDone || finishingRun) return;
+  var banner = document.querySelector('#dynamicArea .degrade-banner');
+  if (banner && lastDone.degraded) {
+    banner.outerHTML = degradeBannerHTML(lastDone.degradedReason, lastDone.degradedDetail);
+  }
+  var wrap = $('#resultsWrap');
+  if (wrap) {
+    wrap.innerHTML = resultsHTML(Array.isArray(lastDone.results) ? lastDone.results : [], lastDone.degraded === true);
+    animateBars();
+    bindAreaActions();
+  }
+}
 
 /* ===== 状态 ===== */
 var runToken = 0;
@@ -359,10 +594,10 @@ function fmtTime(ms) {
   var d = new Date(ms);
   var now = new Date();
   var hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
-  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) return '今天 ' + hm;
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) return tr('time.today') + hm;
   var yest = new Date(now);
   yest.setDate(yest.getDate() - 1);
-  if (d.getFullYear() === yest.getFullYear() && d.getMonth() === yest.getMonth() && d.getDate() === yest.getDate()) return '昨天 ' + hm;
+  if (d.getFullYear() === yest.getFullYear() && d.getMonth() === yest.getMonth() && d.getDate() === yest.getDate()) return tr('time.yesterday') + hm;
   var md = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + hm;
   if (d.getFullYear() === now.getFullYear()) return md;
   return d.getFullYear() + '-' + md;
@@ -387,13 +622,13 @@ async function api(method, path, body) {
     });
   } catch (e) {
     /* 仅超时中止转可读文案；非中止网络异常保持原样传播（既有容错口径不变） */
-    if (ctl.signal.aborted) throw new Error('请求超时（30 秒无响应），请稍后重试');
+    if (ctl.signal.aborted) throw new Error(tr('err.timeout'));
     throw e;
   } finally {
     clearTimeout(timer);
   }
   if (res.status === 401) {
-    var err = new Error('未登录或会话已过期：请先打开 DSH 主界面登录后再使用本页');
+    var err = new Error(tr('err.auth'));
     err.authRequired = true;
     throw err;
   }
@@ -460,11 +695,11 @@ function renderAiPanel() {
   return '<div class="ai-panel" id="aiPanel">'
     + '<div class="ai-panel-head">'
     + '<span class="ai-ic">' + ICONS.sparkle + '</span>'
-    + '<span class="ai-ttl">AI 语义分析</span>'
-    + '<span class="status-pill run" id="aiStatus"><span class="dot"></span><span id="aiStatusText">准备中 · 0.0s</span></span>'
+    + '<span class="ai-ttl">' + esc(tr('ai.title')) + '</span>'
+    + '<span class="status-pill run" id="aiStatus"><span class="dot"></span><span id="aiStatusText">' + esc(tr('pill.preparing')) + ' · 0.0s</span></span>'
     + '<span class="spacer"></span>'
-    + '<button class="btn-ghost" id="detailToggle">详细信息 ' + ICONS.chevron + '</button>'
-    + '<button class="btn-ghost stop" id="stopBtn">' + ICONS.stop + ' 中断</button>'
+    + '<button class="btn-ghost" id="detailToggle">' + esc(tr('detail.toggle')) + ' ' + ICONS.chevron + '</button>'
+    + '<button class="btn-ghost stop" id="stopBtn">' + ICONS.stop + ' ' + esc(tr('action.stop')) + '</button>'
     + '</div>'
     + '<div class="progress-track"><div class="progress-bar" id="aiProgress"></div></div>'
     + '<div class="ai-steps" id="aiSteps"></div>'
@@ -497,11 +732,11 @@ function renderProgress(progress, finished, failed) {
     var isLast = i === progress.length - 1;
     var inFlight = !finished && !failed && isLast;
     var failing = failed && isLast;
-    var title = esc(STEP_TITLES[p.step] || p.step);
+    var title = esc(tr('step.' + p.step) || p.step);
     var cls = failing ? 'fail' : (inFlight ? 'run' : 'ok');
     var icon = failing ? ICONS.x : (inFlight ? ICONS.spinner : ICONS.check);
     if (p.step === 'analyzing' && inFlight) {
-      title = '调用 AI 语义分析<span class="streaming-dots"><i></i><i></i><i></i></span>';
+      title = esc(tr('step.analyzing.run')) + STREAM_DOTS;
     }
     var detail = p.detail ? esc(p.detail) : '';
     var row = steps.children[i];
@@ -552,56 +787,56 @@ function resultCard(r, i) {
   var confCls = degraded ? 'conf mech' : 'conf';
   var confVal = degraded ? (Math.round(r.confidence * 10) / 10).toFixed(1) : pct + '%';
   var reason = degraded
-    ? '<span class="rc-reason">' + ICONS.search(1) + '<span>机械匹配 · ' + esc(r.reason) + '</span></span>'
+    ? '<span class="rc-reason">' + ICONS.search(1) + '<span>' + esc(tr('card.mechPrefix')) + esc(r.reason) + '</span></span>'
     : '<span class="rc-reason">' + ICONS.sparkle + '<span>' + esc(r.reason) + '</span></span>';
-  var ws = r.workspacePath || '(未归组)';
+  var ws = r.workspacePath || tr('card.ungrouped');
   /* 命中关键词 chips 行（对齐定稿原型）：机械命中词非空才渲染（旧载荷无此
      字段时省略整行，向后兼容）。 */
   var kws = Array.isArray(r.matchedKeywords) ? r.matchedKeywords.filter(function (k) { return typeof k === 'string' && k.length > 0; }) : [];
   var kwRow = kws.length > 0
-    ? '<div class="rc-kw"><span class="kw-label">命中</span><span class="match-kw">'
+    ? '<div class="rc-kw"><span class="kw-label">' + esc(tr('card.kw')) + '</span><span class="match-kw">'
       + kws.map(function (k) { return '<span>' + esc(k) + '</span>'; }).join('') + '</span></div>'
     : '';
   return '<div class="result-card" data-session="' + esc(r.sessionId) + '" style="animation-delay:' + (i * 60) + 'ms">'
-    + '<div class="rc-top"><span class="rc-title">' + esc(r.title || '(无标题会话)') + '</span>'
+    + '<div class="rc-top"><span class="rc-title">' + esc(r.title || tr('card.noTitle')) + '</span>'
     + '<span class="' + confCls + '"><span class="c-track"><span class="c-fill" data-pct="' + pct + '"></span></span><span class="c-val">' + confVal + '</span></span></div>'
     + '<div class="rc-meta"><span class="ws-chip">' + ICONS.archive + esc(ws) + '</span>'
     + '<span class="dot-sep"></span><span>' + ICONS.clock + '</span><span>' + fmtTime(r.activityTime) + '</span>'
-    + '<span class="dot-sep"></span><span>' + (degraded ? '机械匹配排序' : 'AI 相关性排序') + '</span></div>'
+    + '<span class="dot-sep"></span><span>' + (degraded ? esc(tr('card.sortMech')) : esc(tr('card.sortAi'))) + '</span></div>'
     + reason + kwRow + '</div>';
 }
 
 function resultsHTML(results, degraded) {
-  var head = '<div class="results-head"><span class="r-ttl">搜索结果</span><span class="r-cnt">' + results.length + ' 个会话</span>'
-    + '<span class="sort-by">' + (degraded ? ICONS.search(1) + '按机械匹配排序' : ICONS.sparkle + '按 AI 相关性排序') + '</span></div>';
+  var head = '<div class="results-head"><span class="r-ttl">' + esc(tr('results.title')) + '</span><span class="r-cnt">' + results.length + esc(tr('results.countSuffix')) + '</span>'
+    + '<span class="sort-by">' + (degraded ? ICONS.search(1) + esc(tr('results.sortMech')) : ICONS.sparkle + esc(tr('results.sortAi'))) + '</span></div>';
   if (results.length === 0) {
-    return head + '<div class="rc-empty">未找到匹配的会话</div>';
+    return head + '<div class="rc-empty">' + esc(tr('results.empty')) + '</div>';
   }
   return head + results.map(resultCard).join('');
 }
 
 function degradeBannerHTML(reason, degradedDetail) {
-  var text = DEGRADED_TEXT[reason] || 'LLM 分析不可用，已按机械匹配排序';
+  var text = tr('degraded.' + reason) || tr('degraded.fallback');
   /* 动态原因行（host 降级点拼装的 provider·model·根因 一句话）优先；静态
      DEGRADED_DETAIL 指引（凭证缺失配置路径）保留在其后。 */
   var cause = (typeof degradedDetail === 'string' && degradedDetail.length > 0) ? esc(degradedDetail) : '';
-  var detail = DEGRADED_DETAIL[reason] || '';
+  var detail = tr('detail.' + reason) || '';
   var actions = '';
   if (reason === 'credential-missing') {
     /* 本页（独立页/iframe 宿主）无 uiWorkspace 设置导航缝：按知识页「不可用
        时降级为提示文案」口径，按钮退化为回主界面指引（措辞与 shared/
        protocol.ts credentialHint 一致），完整路径见 db-d 提示文案。 */
     actions = '<div class="db-actions">'
-      + '<button class="btn-amber" id="goConfigBtn">' + ICONS.rightUp + ' 返回主界面，前往「设置 → 模型」</button>'
+      + '<button class="btn-amber" id="goConfigBtn">' + ICONS.rightUp + ' ' + esc(tr('action.goConfig')) + '</button>'
       // [fenix-ignore:a62977cabf80] 文案为 spec 钉死口径：session-advanced-search.md 规定 credential-missing 横幅必含「仅重试 AI 分析」（同 query 重新 POST），protocol.ts UI_TEXT.actionRetryAiOnly 同源且注释明示行为=重新 POST；协议仅 POST/GET/DELETE /jobs 端点、无分析段重放端点，文案与行为均按 spec 实现（两分支同 handler），改文案即偏离 spec。
-      + '<button class="btn-amber" id="retryAiBtn">' + ICONS.refresh + ' 仅重试 AI 分析</button>'
+      + '<button class="btn-amber" id="retryAiBtn">' + ICONS.refresh + ' ' + esc(tr('action.retryAiOnly')) + '</button>'
       + '</div>';
   } else {
-    actions = '<div class="db-actions"><button class="btn-amber" id="retryAiBtn">' + ICONS.refresh + ' 重试 AI 分析</button></div>';
+    actions = '<div class="db-actions"><button class="btn-amber" id="retryAiBtn">' + ICONS.refresh + ' ' + esc(tr('action.retryAi')) + '</button></div>';
   }
   return '<div class="degrade-banner">' + ICONS.warn
     + '<div class="db-body"><div class="db-t">' + esc(text) + '</div>'
-    + (cause ? '<div class="db-d">原因：' + cause + '</div>' : '')
+    + (cause ? '<div class="db-d">' + esc(tr('banner.cause')) + cause + '</div>' : '')
     + (detail ? '<div class="db-d">' + esc(detail) + '</div>' : '')
     + actions + '</div></div>';
 }
@@ -662,6 +897,7 @@ async function runSearch(query) {
   lastLogKey = '';
   lastStatusJson = '';
   finishingRun = false;
+  lastDone = null;
   $('#initialState').style.display = 'none';
   $('#runBtn').disabled = true;
   var area = $('#dynamicArea');
@@ -697,7 +933,7 @@ async function runSearch(query) {
        TypeError 漏进 finishFail，用户看到的不是可读原因；不满足最小形状时
        按既有失败路径报可读文案。 */
     if (!isPlainObject(created) || typeof created.jobId !== 'string' || created.jobId.length === 0) {
-      throw new Error('任务创建响应异常，请稍后重试');
+      throw new Error(tr('err.createShape'));
     }
     if (token !== runToken) {
       /* 过期响应（快速连续提交/提交后即中断）：本 run 已被取代，取代方登记
@@ -711,7 +947,7 @@ async function runSearch(query) {
     elapsedTimer = setInterval(function () {
       if (token !== runToken) { return; }
       var el = $('#aiStatusText');
-      if (el) el.textContent = '分析中 · ' + ((performance.now() - t0) / 1000).toFixed(1) + 's';
+      if (el) el.textContent = tr('pill.analyzing') + ' · ' + ((performance.now() - t0) / 1000).toFixed(1) + 's';
     }, 100);
 
     /* SSE 优先（用户反馈：轮询刷新令过程记录闪烁）——任务变更即推帧，有新
@@ -768,7 +1004,7 @@ function handleStatus(status, token) {
     if (!beginFinish()) return;
     stopStatusStream();
     stopTimers();
-    finishFail(new Error(status.message || '搜索失败'));
+    finishFail(new Error(status.message || tr('err.searchFailed')));
   } else if (phase === 'cancelled') {
     if (!beginFinish()) return;
     stopStatusStream();
@@ -832,7 +1068,7 @@ function startStatusStream(id, token) {
       if (watchdogBadCount <= 2) return;
       if (!beginFinish()) return;
       stopTimers();
-      finishFail(new Error('任务状态载荷形状非法'));
+      finishFail(new Error(tr('err.badPayload')));
       return;
     }
     watchdogBadCount = 0;
@@ -876,7 +1112,7 @@ async function startPolling(id, token) {
       /* 载荷形状守卫（protocol.ts parseJobStatus 同源移植）：非法载荷走既有
          轮询容错路径收尾，不进渲染。 */
       status = parseJobStatus(await api('GET', API + '/' + encodeURIComponent(id)));
-      if (!status) throw new Error('任务状态载荷形状非法');
+      if (!status) throw new Error(tr('err.badPayload'));
       pollFailCount = 0;
     } catch (err) {
       if (token !== runToken) return;
@@ -910,10 +1146,11 @@ async function startPolling(id, token) {
 function finishDone(status, token) {
   if (token !== runToken) return;
   var degraded = status.degraded === true;
+  lastDone = status;
   var pill = $('#aiStatus');
   if (pill) pill.className = 'status-pill ' + (degraded ? 'fail' : 'done');
   var pillText = $('#aiStatusText');
-  if (pillText) pillText.textContent = degraded ? '机械搜索 · 已完成' : 'AI 分析完成 · ' + ((performance.now() - t0) / 1000).toFixed(1) + 's';
+  if (pillText) pillText.textContent = degraded ? tr('pill.doneMech') : tr('pill.doneAi') + ' · ' + ((performance.now() - t0) / 1000).toFixed(1) + 's';
   renderProgress(Array.isArray(status.progress) ? status.progress : [], true, false);
   var stop = $('#stopBtn');
   if (stop) stop.style.display = 'none';
@@ -933,14 +1170,14 @@ function finishFail(err) {
   var pill = $('#aiStatus');
   if (pill) pill.className = 'status-pill fail';
   var pillText = $('#aiStatusText');
-  if (pillText) pillText.textContent = err && err.authRequired ? '未登录' : '失败';
+  if (pillText) pillText.textContent = err && err.authRequired ? tr('pill.auth') : tr('pill.fail');
   markAllStepsFailed(false);
   var stop = $('#stopBtn');
   if (stop) stop.style.display = 'none';
   var area = $('#dynamicArea');
-  var msg = err && err.message ? err.message : '搜索失败';
-  var html = '<div class="msg-banner">' + esc('搜索失败') + '：' + esc(msg);
-  if (err && err.authRequired) html += ' <button class="btn-amber" id="goLoginBtn" style="margin-left:8px">' + ICONS.rightUp + ' 打开 DSH 登录</button>';
+  var msg = err && err.message ? err.message : tr('err.searchFailed');
+  var html = '<div class="msg-banner">' + esc(tr('fail.bannerPrefix')) + esc(msg);
+  if (err && err.authRequired) html += ' <button class="btn-amber" id="goLoginBtn" style="margin-left:8px">' + ICONS.rightUp + ' ' + esc(tr('action.goLogin')) + '</button>';
   html += '</div>';
   area.insertAdjacentHTML('beforeend', html);
   var go = $('#goLoginBtn');
@@ -952,7 +1189,7 @@ function finishCancelled() {
   var pill = $('#aiStatus');
   if (pill) pill.className = 'status-pill fail';
   var pillText = $('#aiStatusText');
-  if (pillText) pillText.textContent = '已中断';
+  if (pillText) pillText.textContent = tr('pill.cancelled');
   markAllStepsFailed(true);
   var stop = $('#stopBtn');
   if (stop) stop.style.display = 'none';
@@ -960,17 +1197,19 @@ function finishCancelled() {
 }
 
 /* 失败/中断收尾：把在途步骤（最后一格 run）置为 fail。终态语义分文案：
-   error 终态写「AI 分析失败」、cancelled 终态写「AI 分析已中断」，与顶部
-   pill 的失败/已中断口径一致（cancelled 由调用方传入）。 */
+   error 终态写 tr('mark.aiFailed')、cancelled 终态写 tr('mark.aiCancelled')，
+   与顶部 pill 的失败/已中断口径一致（cancelled 由调用方传入）。在途判定改
+   以 streaming-dots 标记识别（原 zh 前缀 indexOf 判定对 en 档失明）：运行中
+   的「调用 AI 语义分析」行是唯一带 streaming-dots 的步骤行（en/zh 同形）。 */
 function markAllStepsFailed(cancelled) {
-  var runText = cancelled ? 'AI 分析已中断' : 'AI 分析失败';
+  var runText = cancelled ? tr('mark.aiCancelled') : tr('mark.aiFailed');
   var runSteps = document.querySelectorAll('#aiSteps .step.run');
   for (var i = 0; i < runSteps.length; i++) {
     runSteps[i].className = 'step fail';
     var ic = runSteps[i].querySelector('.st-ic');
     if (ic) ic.innerHTML = ICONS.x;
     var l1 = runSteps[i].querySelector('.st-l1');
-    if (l1 && l1.textContent.indexOf('调用 AI') === 0) l1.textContent = runText;
+    if (l1 && l1.innerHTML.indexOf('streaming-dots') !== -1) l1.textContent = runText;
   }
 }
 

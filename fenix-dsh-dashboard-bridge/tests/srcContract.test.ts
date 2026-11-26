@@ -106,8 +106,20 @@ function stubSlotsCtx() {
   const registrations: Registration[] = []
   const removed: string[] = []
   const injectCalls: string[] = []
+  const runtimeInjectDeps: string[][] = []
   const live = new Map<string, Registration>()
   const ctx = {
+    /** cordis 运行时 inject 桩（apply 经此装配 theme/locale follow，真实现 =
+     * ctx.plugin({ inject, apply })，cordis lib/index.js:1672）：同步触发回调，
+     * 子 ctx = 桩自身（theme/on 由 appliedWithTheme 经 Object.assign 后注入，
+     * 回调闭包持同一对象引用，取到的即带服务的最终形态）。 */
+    inject(deps: string[], callback: (c: unknown) => unknown) {
+      runtimeInjectDeps.push(deps)
+      const disposer = callback(ctx)
+      return {
+        dispose: typeof disposer === 'function' ? (disposer as () => void) : () => {},
+      }
+    },
     slots: {
       inject(slot: string, factory: () => unknown) {
         injectCalls.push(slot)
@@ -140,7 +152,7 @@ function stubSlotsCtx() {
       },
     },
   }
-  return { ctx, registrations, removed, injectCalls, live }
+  return { ctx, registrations, removed, injectCalls, runtimeInjectDeps, live }
 }
 
 function fakeTimer(): SyncTimer {
@@ -1060,9 +1072,13 @@ describe('宿主主题跟随（add-bridge-theme-channel）', () => {
   it('三挂载点接线源码钉：固定条目/项目面板/右缘页签全量注入快照档 + 装配点先于注册', () => {
     const clientSrc = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
     // 装配点在 apply 内、先于固定条目注入与项目同步（grep 对账：三处调用点
-    // 全部注入，design Risks「三挂载点漏改」条款）。
-    expect(clientSrc).toContain('const stopThemeFollow = installThemeFollow(ctx)')
-    expect(clientSrc).toContain('const stopLocaleFollow = installLocaleFollow(ctx)')
+    // 全部注入，design Risks「三挂载点漏改」条款）。2026-11-26 起 theme/locale
+    // follow 经运行时 inject 子上下文装配（服务闸：属性访问只对声明过该服务
+    // 的 fiber 放行，静态声明受 fence 约束不得入——见 apply 服务闸注释）。
+    expect(clientSrc).toContain(".inject(['theme'], (themeCtx) => {")
+    expect(clientSrc).toContain(".inject(['locale'], (localeCtx) => {")
+    expect(clientSrc).toContain('const stop = installThemeFollow(themeCtx as unknown as ThemeFollowContext)')
+    expect(clientSrc).toContain('const stop = installLocaleFollow(localeCtx as unknown as LocaleFollowContext)')
     expect(clientSrc).toContain(
       'src: buildPanelSrc(prefix, entry.route, currentThemeScheme(), currentLocaleScheme()),',
     )
@@ -1073,5 +1089,17 @@ describe('宿主主题跟随（add-bridge-theme-channel）', () => {
     expect(rightTabSrc).toContain(
       'buildPanelSrc(prefix, routeForSidebarParams(params), currentThemeScheme(), currentLocaleScheme()),',
     )
+  })
+
+  it('运行时 inject 装配行为钉：apply 经 ctx.inject 声明 [theme] [locale]，子 ctx 服务可达（服务闸实证形态）', async () => {
+    const stub = await appliedWithTheme('dark', { fetchProjects: noopFetch })
+    expect(stub.runtimeInjectDeps).toContainEqual(['theme'])
+    expect(stub.runtimeInjectDeps).toContainEqual(['locale'])
+    // 子 ctx（桩自身）携带 theme 服务：installThemeFollow 已取到初始档并落缓存
+    const overview = mainEntries(stub).find((entry) => entry.options.key === 'fenix-overview')
+    expect(iframeOf(overview?.component).props?.src).toBe(
+      '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard&theme=dark#/overview',
+    )
+    stub.stop()
   })
 })
