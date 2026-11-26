@@ -735,7 +735,7 @@
 
 ### 可改进
 - **API 停滞集中大上下文 run，停滞事件缺请求体积字段**
-  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：否
+  - 自进化：问题成立 / 建议合理 / ✓ 值得立项 · 处理：待处理 · 删除：是
   - 影响：复发敞口：大上下文 run 每个评审日稳定烧 270-420 秒停滞（已连续三日全中），若上游延迟按请求体积放大，随 run 上下文继续增长损耗同步放大；而停滞事件的 input_tokens/cache_read 字段恒为 0，停滞与请求体积的相关形态只能靠 run 级间接指标拼凑，定位不到轮，根因无法取证裁决。
   - 证据：run 级对照（fenixd.log run_metrics 三日逐行回源）：code-review 车道平均每轮输入 token（per_turn）3224-4282、停滞率 27-33%（code-review-1794935099 3/11 轮、code-review-1795021271 4/13 轮）；self-review 车道 per_turn 1781、停滞率 9%（review-2026-11-18 3/33 轮，该项按设计不进摘要第 6 节——源码 self_review.py 注释「自省 run 不审视自身」）；code-fix 车道 per_turn 581-764、停滞率 0-1%（code-fix-1795021821 0/65、code-fix-1794935669 1/71）。停滞事件字段：2026-11-18T17:07:02Z api_round_stall 事件 input_tokens=0、cache_read_input_tokens=0。
   - 调查评估：问题源是 agent_runner 的停滞观测面（框架层，非某 SPEC）。已核实：上述数字全部回源 run_metrics 逐行，「停滞轮不计 token」口径（11-16 条目）与本窗事件字段为零一致。归因边界：证据只覆盖「停滞率与 run 上下文体积单调正相关」的形态层，根因多假说并存——上游 prefill 计算随体积放大／服务端负载排队／网络链路，本窗内无 429、无 provider switched（grep 核实），不能裁决；按证据边界规则不预设单因，不建议根因方向修复。与存量关系：evo-add-lane-stall-daily-budget-accounting 已补车道×日合计与 30 分钟阈值（本窗生效）、evo-api-stall-signal-grading 已做停滞分级，两者均不落「单轮停滞×请求体积」明细；11-17 既有条目（失败 attempt 观测失明）讲 attempt 级记账，本条是 stall 轮级体积字段，互补不重复；spec/changes 活跃区 8 个目录均为已完结 spec，无相关立项。结论：观测面最后一个盲点是停滞轮的请求体积，补上即可让既有阈值机制之外多一张裁决根因的底牌，够格小改立项。
