@@ -1,0 +1,60 @@
+name: plugin-doc-sync
+
+# install-dsh-plugins.md 自动维护：
+# - push main 且插件清单（*/package.json）或生成器变更 → 重生成标记块，有 diff 自动提交；
+# - PR 触发 guard：文档与插件目录漂移（新插件漏改文档）则 fail，实现者在同 PR 内
+#   跑 `python3 scripts/gen_plugin_docs.py` 重生成后提交即可修复；
+# - 每周 cron + 手动 dispatch 兜底。
+# 同步提交只改 docs/install-dsh-plugins.md，不在 push 触发 paths 内，不会自触发循环。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "*/package.json"
+      - "scripts/gen_plugin_docs.py"
+  pull_request:
+    paths:
+      - "*/package.json"
+      - "scripts/gen_plugin_docs.py"
+      - "docs/install-dsh-plugins.md"
+  schedule:
+    - cron: "17 3 * * 1" # 每周一 UTC 03:17（北京 11:17）兜底
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Regenerate auto-plugin-list blocks
+        run: python3 scripts/gen_plugin_docs.py
+      - name: Commit & push if changed
+        run: |
+          if git diff --quiet docs/install-dsh-plugins.md; then
+            echo "doc already in sync"
+          else
+            git config user.name "fenix-bot"
+            git config user.email "fenix-bot@users.noreply.github.com"
+            git add docs/install-dsh-plugins.md
+            git commit -m "[fenix] docs: plugin manifest sync @ ${GITHUB_SHA::7}"
+            git push
+          fi
+
+  guard:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check doc in sync with plugin dirs
+        run: python3 scripts/gen_plugin_docs.py --check
