@@ -127,7 +127,9 @@ node -e "for (const p of require('fs').readdirSync('.').filter(d=>!d.startsWith(
 属预期，见 §9「版本门跳过」。plugin-manager 里版本门跳过的判定特征：该项
 **`enabled=false` 且 `fiberPhase=null`**（loader enabled:false），比翻找 stderr 直观——
 数到的 active 数比插件总数少一个（session-grouper 版本门跳过）即正常：v0.1.2 制品
-10 个插件为 9/10，v0.1.3 起 12 个插件为 11/12。）
+10 个插件为 9/10，v0.1.3 起 12 个插件为 11/12。
+勘误 C1 注记：判别命令按 `if(j.dsh)` 只打印 **11 行**（fenix-skill-provider 无 `dsh`
+字段，按 plain 口径处理，构建/注册循环仍覆盖它）——11 行属预期，勿当丢件排查。）
 
 > `pnpm add link:` / plugin-manager 安装时的警告
 > `linked in dependency will not resolve the peer dependencies … use file:` 为**预期噪音**：
@@ -147,6 +149,10 @@ done
 ```
 <!-- fenix:auto-plugin-list:register END -->
 
+> ⚠ **逐个串行注册，勿并发**（实测勘误 C5）：`plugin add` 对 profile `package.json`
+> 是「读-加-写回」，并行跑多个 add 会互相覆盖丢条目（丢 dependencies 或 bundles 行）——
+> 上面的 for 循环天然串行，保持原样执行；agent 批量自动化时也禁止 `&` / `Start-Job` 并发。
+>
 > Windows 下 link 路径写绝对盘符形态：`dsh plugin --profile <P> add "link:C:\repo\dsh-plugins\cc-import"`。
 > ⚠ 必须用 `link:` 软链形态——`file:` 拷贝装会使副本失去 `node_modules`、peer 断链（真机踩过）。
 >
