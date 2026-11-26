@@ -1,0 +1,72 @@
+# fenix-release-sync — fenixd 发版触发的插件发布检查。
+#
+# 机制：fenixd 仓 release.yml 发布完成后 POST repository_dispatch(fenix-released)
+# 到本仓 → 本 workflow 判定 main 相对最新 tag 是否有未发版的插件内容变更
+# （scripts/should_release.sh，docs/scripts/CI 类变更不算）：
+#   有 → patch+1 打新 tag，构建发布复用 release.yml 单一链路，并守望其结果；
+#   没有 → 不变（不发版、不打 tag）。
+# workflow_dispatch 供手动兜底（fenixd 未发版但插件有变更需补发时）。
+name: fenix-release-sync
+
+on:
+  repository_dispatch:
+    types: [fenix-released]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: fenix-release-sync
+  cancel-in-progress: false
+
+jobs:
+  check-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 需要 tag 与历史区间比对（should_release.sh 判定口径）
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 判定是否有未发版的插件变更
+        id: check
+        run: |
+          bash scripts/should_release.sh | tee check.log
+          {
+            echo "should_release=$(grep -oP '^should_release=\K.*' check.log | tail -1)"
+            echo "next_tag=$(grep -oP '^next_tag=\K.*' check.log | tail -1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 打新 tag 触发 release.yml（构建发布单一链路）
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          git config user.name "fenix-bot"
+          git config user.email "fenix-bot@users.noreply.github.com"
+          git tag "${{ steps.check.outputs.next_tag }}"
+          git push origin "${{ steps.check.outputs.next_tag }}"
+
+      # 守望 release 流水线（headBranch=tag 名），失败则本 job 一起失败，
+      # 让 fenixd 发版方在 sync 结果里直接看到插件发布没成。
+      - name: 守望 release 流水线
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.check.outputs.next_tag }}
+        run: |
+          for i in $(seq 1 12); do
+            run_id=$(gh run list --workflow=release --limit 20 --json databaseId,headBranch \
+              -q "[.[] | select(.headBranch==\"$TAG\")][0].databaseId" || true)
+            [ -n "$run_id" ] && break
+            sleep 5
+          done
+          if [ -z "${run_id:-}" ]; then
+            echo "::warning::未找到 $TAG 的 release run（可能尚未触发）"
+            exit 1
+          fi
+          gh run watch "$run_id" --exit-status
+
+      - name: 结论（无变更，不发布）
+        if: steps.check.outputs.should_release != 'true'
+        run: echo "插件无未发版变更，保持 $(git describe --tags --abbrev=0) 不变"
