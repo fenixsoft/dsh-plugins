@@ -61,6 +61,12 @@
  *    宿主崩溃路径：组件异常由 SlotErrorBoundary/abdicate 兜底，事件监听在
  *    dispose 移除。开关关闭时控制器与 document 捕获监听保持挂载（插槽注册
  *    常驻），事件处理器入口读开关状态直接放行（不接管、不 preventDefault）。
+ *    锚定契约（dsh 0.2.2-rc.1 安装包实证的官方 DOM 形态）：按键目标须命中官方
+ *    结构属性 [data-composer-input] 且编辑器相位 data-phase='plain'（官方 agent
+ *    运行期等相位非 plain 时本来就不接管）。官方升级改名/移除 data-phase 后
+ *    ↑/↓ 导航会静默失效，处理器对「命中 input 锚但相位属性缺失/非 plain」做
+ *    warn-once 留痕（keydown 高频，限流一次防热刷）供现场排障，漂移后按此处
+ *    登记修缝。
  *
  * 4. 设置分区开关（0.3.0；0.4.0 起登记私有嵌入槽声明）。
  *    经官方 keyed 插槽 settings.section / settings.section.icon 注册「Fenix 插件」
@@ -726,7 +732,9 @@
 						className: 'fdxchat-copy' + (copied ? ' is-copied' : ''),
 						onClick: onClick,
 					},
-					copied ? '已复制' : '复制',
+					/* 文案与 MarkdownText 代码块工具栏同源（labels.code.*，经 uiText 取词），
+					 * en 档下与工具栏一致切换，不双源漂移 */
+					copied ? uiText('labels.code.copied') : uiText('labels.code.copy'),
 				)
 			}
 
@@ -1034,6 +1042,8 @@
 			/* document 捕获阶段 keydown：先于 Lexical 命令处理。
 			 * history-nav 关闭 → 处理器入口直接放行（不接管、不 preventDefault），
 			 * 控制器与监听保持挂载（design D3，关闭态开销为一次布尔读） */
+			/* 相位锚失配告警限流（warn-once，防 keydown 热刷刷日志，同 storageWarned 口径） */
+			var phaseWarned = false
 			function onHistoryKeydown(e) {
 				var nav = null
 				try {
@@ -1043,7 +1053,18 @@
 					var target = e.target
 					if (!(target instanceof Element)) return
 					var editorEl = target.closest('[data-composer-input]')
-					if (!editorEl || editorEl.dataset.phase !== 'plain') return
+					if (!editorEl) return
+					/* 相位门：data-phase='plain' 为 dsh 0.2.2-rc.1 安装包实证的官方 DOM 契约
+					 * （出处与修缝指引登记在文件头功能 3 注释）。属性缺失/非 plain → 不接管；
+					 * 失配形态 warn-once 留痕供现场排障（否则导航永久静默失效无从下手），
+					 * 与 searchButton/sidebar-tabs 的锚失配告警同纪律 */
+					if (editorEl.dataset.phase !== 'plain') {
+						if (!phaseWarned) {
+							phaseWarned = true
+							console.warn('[fenix-dsh-chat-polish] history-nav 相位锚失配：[data-composer-input] 命中但 data-phase 缺失/非 "plain"，↑/↓ 历史导航不接管；官方升级后请按文件头功能 3 注释登记的契约修缝')
+						}
+						return
+					}
 					var owner = historyState.owner
 					if (!owner) return
 					if (!ownedEditor(editorEl, owner)) return /* 事件目标不是 owner 的编辑器：放行 */
