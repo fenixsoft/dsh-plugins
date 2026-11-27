@@ -93,7 +93,7 @@
 				/* Workspaces 区容器：sidebar.workspaces 槽位挂载壳 */
 				workspaces: '[class*="regionArea"]',
 				/* 底部区（footerActions + Account/⋯ More 菜单）：仅作钉底软锚点，
-				 * 不入 firstMissingAnchor 硬校验——footArea 缺席只降级钉底，不放弃整个插件 */
+				 * 不入 ensure 内联锚点硬校验——footArea 缺席只降级钉底，不放弃整个插件 */
 				foot: '[class*="footArea"]',
 			}
 
@@ -214,17 +214,6 @@
 							if (nav) nav.style.removeProperty('display')
 							if (ws) ws.style.removeProperty('display')
 						}
-					}
-
-					function firstMissingAnchor() {
-						var col = document.querySelector(SEL.col)
-						if (!col) return 'sidebarCol(' + SEL.col + ')'
-						if (!col.querySelector(SEL.nav)) return 'panelList(' + SEL.nav + ')'
-						if (!col.querySelector(SEL.workspaces)) return 'regionArea(' + SEL.workspaces + ')'
-						var nav = col.querySelector(SEL.nav)
-						var ws = col.querySelector(SEL.workspaces)
-						if (!nav.parentElement || !nav.parentElement.contains(ws)) return 'sidebarRoot(nav.parentElement)'
-						return null
 					}
 
 					/* 失配告警（限流按失配锚点名：同锚只 warn 一次，命中恢复即复位；

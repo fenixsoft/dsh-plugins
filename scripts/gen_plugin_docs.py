@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -47,8 +48,6 @@ def discover_plugins(repo: Path) -> list[dict]:
         if not pj.is_file():
             continue
         try:
-            import json
-
             j = json.loads(pj.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue

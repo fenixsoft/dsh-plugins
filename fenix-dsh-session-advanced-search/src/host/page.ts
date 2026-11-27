@@ -556,10 +556,20 @@ window.addEventListener('message', function (ev) {
   }
 });
 
-/* 语言切换时已完成态结果面重渲染（finishDone 缓存载荷；未见完成态则空转）。 */
+/* 语言切换时已完成态结果面重渲染（finishDone 缓存载荷；未见完成态则空转）。
+   finishKind 区分「收尾进行中」与「已落终态」：beginFinish 置 finishingRun 起、
+   终态分支写入 finishKind 前为收尾在途（其间迟到帧由 handleStatus 顶部闸门
+   拦截），refresh 空转；已落 'done' 终态后语言切档即时重写降级横幅、结果卡与
+   完成态 pill（fail/cancelled 横幅按既有取舍留待下一轮 runSearch 自愈）。 */
 var lastDone = null;
+var finishKind = null;
+var doneElapsed = '';
 function refreshDoneI18n() {
-  if (!lastDone || finishingRun) return;
+  if (!lastDone || finishKind !== 'done') return;
+  var pill = $('#aiStatus');
+  if (pill) pill.className = 'status-pill ' + (lastDone.degraded === true ? 'fail' : 'done');
+  var pillText = $('#aiStatusText');
+  if (pillText) pillText.textContent = lastDone.degraded === true ? tr('pill.doneMech') : tr('pill.doneAi') + ' · ' + doneElapsed + 's';
   var banner = document.querySelector('#dynamicArea .degrade-banner');
   if (banner && lastDone.degraded) {
     banner.outerHTML = degradeBannerHTML(lastDone.degradedReason, lastDone.degradedDetail);
@@ -909,6 +919,7 @@ async function runSearch(query) {
   lastLogKey = '';
   lastStatusJson = '';
   finishingRun = false;
+  finishKind = null;
   lastDone = null;
   $('#initialState').style.display = 'none';
   $('#runBtn').disabled = true;
@@ -1159,10 +1170,12 @@ function finishDone(status, token) {
   if (token !== runToken) return;
   var degraded = status.degraded === true;
   lastDone = status;
+  finishKind = 'done';
+  doneElapsed = ((performance.now() - t0) / 1000).toFixed(1);
   var pill = $('#aiStatus');
   if (pill) pill.className = 'status-pill ' + (degraded ? 'fail' : 'done');
   var pillText = $('#aiStatusText');
-  if (pillText) pillText.textContent = degraded ? tr('pill.doneMech') : tr('pill.doneAi') + ' · ' + ((performance.now() - t0) / 1000).toFixed(1) + 's';
+  if (pillText) pillText.textContent = degraded ? tr('pill.doneMech') : tr('pill.doneAi') + ' · ' + doneElapsed + 's';
   renderProgress(Array.isArray(status.progress) ? status.progress : [], true, false);
   var stop = $('#stopBtn');
   if (stop) stop.style.display = 'none';
@@ -1179,6 +1192,7 @@ function finishDone(status, token) {
 }
 
 function finishFail(err) {
+  finishKind = 'fail';
   var pill = $('#aiStatus');
   if (pill) pill.className = 'status-pill fail';
   var pillText = $('#aiStatusText');
@@ -1198,6 +1212,7 @@ function finishFail(err) {
 }
 
 function finishCancelled() {
+  finishKind = 'cancelled';
   var pill = $('#aiStatus');
   if (pill) pill.className = 'status-pill fail';
   var pillText = $('#aiStatusText');

@@ -1409,6 +1409,7 @@
 			var sectionAuthPaneStyle = { marginTop: '12px' }
 
 			/* 自绘 toggle 降级替身（宿主 Switch 漂移缺失时）：role/aria-checked 同构，
+			 * tabIndex+Enter/Space 键盘可达（对齐官方 Switch 键盘语义），
 			 * 视觉对齐官方分区（胶囊轨道 + 圆点，主题变量着色） */
 			var FallbackSwitch = function FallbackSwitch(props) {
 				var checked = props.checked === true
@@ -1416,6 +1417,12 @@
 					role: 'switch',
 					'aria-checked': checked ? 'true' : 'false',
 					title: props.title,
+					tabIndex: 0,
+					onKeyDown: function (event) {
+						if (event.key !== 'Enter' && event.key !== ' ') return
+						event.preventDefault()
+						if (typeof props.onChange === 'function') props.onChange(!checked)
+					},
 					onClick: function () { if (typeof props.onChange === 'function') props.onChange(!checked) },
 					style: {
 						display: 'inline-flex',

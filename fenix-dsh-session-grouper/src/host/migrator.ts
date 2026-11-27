@@ -310,8 +310,10 @@ export class Migrator {
           // 清单在 staging 侧封存（相对路径键与晋升后一致），易失败的收集/落盘
           // （磁盘满/EACCES）全部发生在晋升前，失败即整目录清退，不产生残缺晋升；
           // 晋升只剩两次 rename 且清单先行——中途被杀残留的是「有清单无目录」
-          // （下轮 discardBackup 可全量清退），而非「有目录无清单」的不可信滞留，
-          // 使「正式备份目录存在则清单必在」的不变式在同步失败路径上成立。
+          // （下轮 discardBackup 可全量清退；晋升前被杀留下的「有目录无清单」
+          // staging 残目录不在正式备份路径上、不破不变式，亦由 discardBackup
+          // 一并清扫），使「正式备份目录存在则清单必在」的不变式在同步失败
+          // 路径上成立。
           writeFileSync(backupManifestPath(backupStaging), JSON.stringify(collectManifest(backupStaging)), 'utf8')
           renameSync(backupManifestPath(backupStaging), backupManifestPath(backupDir))
           renameSync(backupStaging, backupDir)
@@ -457,8 +459,8 @@ export class Migrator {
       renameSync(srcSessionDir, srcTrashDir)
       movedToTrash = true
     } catch {
-      // 源目录已缺席或不可挪动（无可保留的增量）：按直接删除兜底（force 对缺席
-      // 目录是 no-op）。
+      // 源目录已缺席或不可挪动：按直接删除兜底（force 对缺席目录是 no-op），
+      // 删除前仍须经窗口增量判定（见下方兜底分支）。
     }
     if (movedToTrash) {
       // 判定/清退失败一律保守保留残目录（与 retainOrDisposeOriginalTrash 同口径）。
@@ -476,16 +478,23 @@ export class Migrator {
       // 写权限）再删顶层（需父目录写权限），可能呈现「子项已删、顶层删除抛
       // EPERM」的部分删除形态：异常若沿 migrate 内层 catch 触发全量回滚，已删
       // 子项中恰有释放写锁窗口内追加的增量时会无声丢失，且无 trash 残迹可人工
-      // 找回。故兜底删除自身吞错降级：rmSync 成功或源目录确认缺席维持现行为；
-      // 抛错且源目录仍在则 warn 保留部分删除残目录现场（目标位产物已完整，不
-      // 再触发回滚），继续 attach 主链路（旧 log 已删则无 duplicate 风险，仍在
-      // 则按告警提示由人工处置 duplicate）。
+      // 找回。但「常」非「必」：父目录可写性在 rename 与 rmSync 之间变化、或
+      // 其他非常规 rename 失败形态下，rmSync 仍可能整目录成功并无声销毁释放
+      // 写锁窗口内追加的增量。故兜底删除前先以 hasWritesAfter 补窗口增量判定
+      // （与 movedToTrash 分支同口径）：命中即保守保留现场待人工核对；rmSync
+      // 成功或源目录确认缺席维持现行为；判定/删除抛错且源目录仍在则 warn 保留
+      // 残目录现场（目标位产物已完整，不再触发回滚），继续 attach 主链路（旧
+      // log 已删则无 duplicate 风险，仍在则按告警提示由人工处置 duplicate）。
       try {
-        rmSync(srcSessionDir, { recursive: true, force: true })
+        if (hasWritesAfter(srcSessionDir, releaseAtMs)) {
+          this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 旧目录存在迁移后追加的写入，残目录保留于 ${srcSessionDir}，请人工核对后清理`)
+        } else {
+          rmSync(srcSessionDir, { recursive: true, force: true })
+        }
       } catch (error) {
         if (existsSync(srcSessionDir)) {
           const duplicateRisk = existsSync(srcLog) ? '旧 log 仍在，与目标位存在 duplicate 风险' : '旧 log 已删，无 duplicate 风险'
-          this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 旧目录兜底删除失败（部分删除残迹保留于 ${srcSessionDir} 待人工核对，目标位产物已完整故不回滚；${duplicateRisk}）：${errorMessage(error)}`)
+          this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 旧目录兜底删除/窗口判定失败（残迹保留于 ${srcSessionDir} 待人工核对，目标位产物已完整故不回滚；${duplicateRisk}）：${errorMessage(error)}`)
         }
       }
     }
@@ -571,6 +580,9 @@ export class Migrator {
    * 此时 rmSync 会静默销毁人工尚未核查的现场，违背「现场保留待人工核查」的
    * 承诺——跳过清退并返回 false，由调用方拒绝本轮，把处置权留给人工。
    * 返回 false = 现场保留、调用方须拒绝本轮；true = 已清退（或本无备份）。
+   * 同时清扫两阶段晋升中途被杀残留的 `${backupDir}.staging-*` 残目录
+   * （discardStagingResidue）：否则「下轮 discardBackup 可全量清退」的承诺
+   * 不会发生，含完整会话副本的残目录会在 backupsDir 下永久累积。
    */
   private discardBackup(sessionId: SessionId): boolean {
     const backupDir = backupDirFor(this.dshHome, sessionId)
@@ -580,7 +592,32 @@ export class Migrator {
     }
     rmSync(backupDir, { recursive: true, force: true })
     rmSync(backupManifestPath(backupDir), { force: true })
+    this.discardStagingResidue(sessionId, backupDir)
     return true
+  }
+
+  /**
+   * 清扫两阶段晋升中途被杀残留的 staging 备份残目录（`${backupDir}.staging-*`）：
+   * 晋升前被杀留下「有目录无清单」、清单已晋升而目录 rename 未竟留下「有清单
+   * 无目录」，前者此前从不被任何清退路径触碰。staging 路径不可能成为台账在册
+   * 备份（台账 backupDir 只指向正式备份路径），且备份晋升发生在任何数据改动
+   * 之前、原目录仍然完整，残目录绝非唯一副本，可安全清扫；清扫失败保守保留并
+   * 告警留痕待人工处置，不阻断本轮。
+   */
+  private discardStagingResidue(sessionId: SessionId, backupDir: string): void {
+    const backupsParent = dirname(backupDir)
+    try {
+      if (!existsSync(backupsParent)) return
+      for (const entry of readdirSync(backupsParent, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue
+        if (!entry.name.startsWith(`${basename(backupDir)}.staging-`)) continue
+        const residue = join(backupsParent, entry.name)
+        rmSync(residue, { recursive: true, force: true })
+        this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 已清退既往晋升残留的 staging 备份残目录 ${residue}`)
+      }
+    } catch (error) {
+      this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} staging 备份残目录清扫失败（保守保留待人工处置）：${errorMessage(error)}`)
+    }
   }
 
   /** 台账中是否存在指向该备份路径的成功迁移行（migrated/pending-attach 且 backupDir 一致）。 */
