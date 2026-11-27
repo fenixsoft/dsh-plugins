@@ -1084,3 +1084,7 @@
   - 证据：2026-11-27 00:00 体检报告（留痕 commit 53e70c1）：待人工 5 项，其中 4 条锚点悬空被报路径盘上全部实存（逐一 ls 核实；新增第 4 项系 chat-polish-feature-toggles.md:52 行内简写引用 tests/v0.2.2-baseline.css 被当根相对路径解析）；check_anchor_references 判定行 knowledge.py:612 仍为 is_file() 判据（读源码核实）；另新增能力页 marker 缺失 1 项（dsh-plugin-rollout.md，性质未核）。
   - 调查评估：问题源：知识体检车道锚点检查（add-knowledge-anchor-lint-and-prune 归档 SPEC 落地的病灶⑥检查）。既有 11-24 可改进条已登记根因（is_file() 校验目录级引用必判悬空）与三项建议，本条为（恶化）重述：误报面零修复 3 天且 3→4 项，待人工 4→5 项。增量核实：原第 4 项（stray-wip-disposal.md 179 行超 150 硬顶）已随页面重构自解（现 51 行，wc 核实）——证明待人工项可以被消费，缺的正是误报面判据修正与消费路径接线。结论：一行判据小改 + 消费路径接线，维持既有建议不另立项。
   - 建议：沿既有条目执行：check_anchor_references 对目录级引用加 is_dir() 放行、行内简写 token 不当路径解析；待人工档接消费路径（登记跟踪项或并入每日自省输入）；dsh-plugin-rollout.md 的 marker 缺失项人工补齐。
+
+## 2026-11-28
+### 知识真相源
+- audit 待人工发现：spec/knowledge/domains/chat-surface/chat-polish-feature-toggles.md：锚点悬空: tests/v0.2.2-baseline.css
