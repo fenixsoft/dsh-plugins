@@ -53,10 +53,10 @@
 	function installGuard() {
 	/* 防重入（多锚点/重复装载时只装第一份） */
 	if (window.__fenixRpcGuardInstalled) return
-	window.__fenixRpcGuardInstalled = true
 
 	var originalFetch = window.fetch && window.fetch.bind(window)
-	if (typeof originalFetch !== 'function') return /* 极旧环境，放弃不碍事 */
+	if (typeof originalFetch !== 'function') return /* 极旧环境，放弃不碍事（不置防重入标志，环境就绪/插件重载后可再装） */
+	window.__fenixRpcGuardInstalled = true
 
 	/* 响应头超时（毫秒）。每次调用即时读取 localStorage：测试与排障可在不改
 	 * 代码的情况下调整（如设 3000 快速验证），非法值回落默认。 */
@@ -126,7 +126,14 @@
 	 * 一律按不接管处理（原样透传），保证任何形态的调用都不被护栏改变语义。 */
 	function describeCall(input, init) {
 		try {
-			var rawUrl = typeof input === 'string' ? input : input && input.url
+			/* fetch 除 string/Request 外也接受 URL 实例：URL 没有 .url 属性，
+			 * 不读 .href 的话 rawUrl 取到 undefined 会被按「解析失败」静默
+			 * 透传，该形态的同源 /api POST 即绕过护栏（无超时/重试保护）。
+			 * typeof 守卫防极旧环境下 instanceof 对未声明标识符抛 ReferenceError。 */
+			var rawUrl
+			if (typeof input === 'string') rawUrl = input
+			else if (typeof URL === 'function' && input instanceof URL) rawUrl = input.href
+			else rawUrl = input && input.url
 			if (typeof rawUrl !== 'string' || rawUrl.length === 0) return null
 			var parsed = new URL(rawUrl, window.location.href)
 			if (parsed.origin !== window.location.origin) return null
