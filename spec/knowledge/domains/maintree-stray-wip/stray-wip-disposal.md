@@ -32,7 +32,10 @@ Admin 盘点信号 `maintree_stray_wip_stale`（主树 tracked 散件 WIP 无主
 ### 度数台账（同文件集口径，各特征集处置度数起点）
 
 - dashboard-bridge/brand-fenix 特征集：第 34 度（2026-11-24，run admin-dsh-plugins-1795499155）；第 4 度起零触碰口径维持中，见规则 4/6。
-- fenix-dsh-chat-polish 特征集（README.zh.md/client.js/tests/client.test.mjs/tests/v0.2.2-baseline.css）：第 1 度（2026-11-24，run admin-dsh-plugins-1795512362）——0.3.x 迭代快照（设置分区更名「Fenix 插件设置」+ data-composer-input 宽度锚定修复 + settings-embed 嵌入设置页）测试自洽 33/33 后收编提交 923e430；无同特征 untracked 兄弟（rpc-guard 零引用，独立特征集归 untracked 族）。主树直改开发会话形态（写完离场），再现新 WIP 按同文件集口径计第 2 度并挂本页跟踪项。
+- **fenix-dsh-chat-polish 特征集（README.zh.md/client.js/package.json/tests/client.test.mjs/tests/v0.2.2-baseline.css）——复发型跟踪项（规则 4 两件套）**：第 2 度（2026-11-27，run admin-dsh-plugins-1795744945）——0.4.0 版本轮（client.js 扩展 127 行 + 测试扩至 37 例）自洽 37/37 后收编提交 52670ee（与 auth/settings-dock/bridge-locale-theme 同批次）；第 1 度见 2026-11-24 条（923e430，33/33）。主树直改开发会话形态（写完离场）已两度实证，属确定性复发特征：**后续复查时机 = maintree_stray_wip_stale 再现本文件集时按同文件集口径计第 3 度，处置维持「验证自洽+收编提交+本页回写计度」；第 4 度起按规则 4 转零触碰 + escalate 转人工（为该会话建立 worktree 车道），不再自动收编**。package.json 版本 bump 行为该特征集常规成员（随收编，非新特征集）。
+- fenix-dsh-auth 特征集（README.zh.md/client.js/package.json）：第 1 度（2026-11-27，run admin-dsh-plugins-1795744945）——0.2.0 版本轮（client.js 重构精简 93 行）自洽 19/19（tests/host.test.mjs）后收编提交 52670ee；再现新 WIP 计第 2 度并挂本页跟踪项。
+- fenix-dsh-settings-dock 特征集（README.zh.md/client.js/package.json）：第 1 度（2026-11-27，run admin-dsh-plugins-1795744945）——0.3.0 版本轮（client.js 精简）node --check 自洽（无测试体系）后收编提交 52670ee；再现新 WIP 计第 2 度并挂本页跟踪项。
+- fenix-dsh-dashboard-bridge/locale-theme 特征集（src/client/localeFollow.ts + themeFollow.ts + 对应 tests/*.test.ts）：第 1 度（2026-11-27，run admin-dsh-plugins-1795744945）——「初值即广播」冷启动竞态修补自洽（tsc 0 错 + vitest 228/228 全量）后收编提交 52670ee；独立于 brand-fenix 监听对象（rightTab/wsTooltip/locate/projectSync + panels.tsx），再现新 WIP 计第 2 度并挂本页跟踪项。
 
 ## 关键行为
 
@@ -49,3 +52,4 @@ Admin 盘点信号 `maintree_stray_wip_stale`（主树 tracked 散件 WIP 无主
 - 2026-11-14 → 2026-11-24 admin 盘点处置轮第 4–34 度回写（run `admin-dsh-plugins-1794625487` → `1795499155`，共 31 轮）— 复查时机条款落地：第 4 度起零触碰 + escalate 转人工，逐度维持；逐度告警指纹/文件清单/处置明细存 admin_alerts 历史与本页 git 历史。
 - 2026-11-24 add-bridge-theme-channel（spec/changes/add-bridge-theme-channel/）— mergeback_wip_overlap 碰撞解阻塞收编终局：panels.tsx 冻结 WIP 验证自洽（tsc 0 错、vitest 182/182）+ merge-tree 预演干净后提交 0f995cb，该改动集 saga 终结；沉淀处置规则 5 与规则 6 挂起口径。
 - 2026-11-24 admin 处置轮（run admin-dsh-plugins-1795512362）— fenix-dsh-chat-polish 特征集第 1 度收编：0.3.x 迭代快照测试自洽 33/33 后提交 923e430，铁律 10 首次处置「提交+建议」口径实证；新增度数台账节承载各特征集本页度数。
+- 2026-11-27 admin 处置轮（run admin-dsh-plugins-1795744945）— 四特征集同批次收编提交 52670ee（auth 第 1 度 / settings-dock 第 1 度 / bridge-locale-theme 第 1 度 / chat-polish 第 2 度）：单指纹 58e3dc3b1a466c7b 告警覆盖多特征集时按本页同文件集口径分别计度，chat-polish 第 2 度触发规则 4 两件套挂跟踪项（台账内含第 3/4 度升级路径）。
