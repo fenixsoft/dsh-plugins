@@ -83,7 +83,13 @@
 			var FETCH_TIMEOUT_MS = 10000
 
 			/** 带超时的 fetch：AbortController + setTimeout，超时 abort（调用方
-			 * catch 收到 AbortError，按「请求超时」提示并复位 busy/loading）。 */
+			 * catch 收到 AbortError，按「请求超时」提示并复位 busy/loading）。
+			 * 计时器覆盖到 body 读取完成：fetch 在响应头到达即 settle，若此刻
+			 * 就清 timer，response.json() 读 body 悬挂（半开代理、网关截断）
+			 * 便无兜底，loading/busy 永不复位——故返回轻量响应壳（调用点仅
+			 * 消费 ok/status/json），json() 读取收口或 fetch 失败才清 timer；
+			 * 不读 body 的路径由 timer 到期 abort 自然收尾（对已 settle 的
+			 * 请求是 no-op，无副作用）。 */
 			function fetchWithTimeout(url, options, timeoutMs) {
 				var controller = new AbortController()
 				var timer = setTimeout(function () {
@@ -91,8 +97,19 @@
 				}, timeoutMs === undefined ? FETCH_TIMEOUT_MS : timeoutMs)
 				var init = options ? Object.assign({}, options) : {}
 				init.signal = controller.signal
-				return fetch(url, init).finally(function () {
+				return fetch(url, init).then(function (response) {
+					return {
+						ok: response.ok,
+						status: response.status,
+						json: function () {
+							return response.json().finally(function () {
+								clearTimeout(timer)
+							})
+						},
+					}
+				}, function (err) {
 					clearTimeout(timer)
+					throw err
 				})
 			}
 
@@ -369,7 +386,10 @@
 								var rawError = data && data.error
 								var text = typeof rawError === 'string' && Object.hasOwn(texts, rawError) ? texts[rawError] : t('auth.err.validation') + String(rawError) + t('auth.common.parenClose')
 								setMessage({ kind: 'error', text: text })
-							}).catch(function () {
+							}).catch(function (err) {
+								/* body 阶段超时 abort 原样上抛 → 外层 catch 走
+								 * saveTimeout 文案（与 fetchCredentials 同口径）。 */
+								if (isAbortError(err)) throw err
 								if (unmountedRef.current) return
 								setMessage({ kind: 'error', text: t('auth.err.validationHttp') })
 							})
