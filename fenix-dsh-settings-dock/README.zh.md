@@ -5,11 +5,14 @@
 （用户定调 2026-11-07），退出 = Esc / 侧栏导航 / 设置触发按钮。各设置页
 （模型/内置插件/Agent 预设等）内容自适应停靠宽度。窄屏（<768px）维持官方弹窗形态。
 
-**独立页铺满（0.2.0，rc.5 回归修复）**：rc.5 起「插件」「自动化任务」从设置弹窗
-分区改为独立页（官方 `PluginManagerPage` / `TaskManagerPage`），列宽锁 960px
-居中、宽屏两侧大片留白——历史「填满」随入口搬家失效。本插件同缝注入结构放开：
-插件页按 `_pageBody` / `_pageBar` > `_pageHead` 片段、自动化页按 `_pageContent`
-片段（四个类片段全 client-ui 族 CSS modules 唯一，升级失配自动失效回官方 960 列）。
+**独立页铺满（0.2.0 附带，0.3.0 起迁出）**：rc.5 起「插件」「自动化任务」从设置
+弹窗分区改为独立页（官方 `PluginManagerPage` / `TaskManagerPage`），列宽锁 960px
+居中、宽屏两侧大片留白——历史「填满」随入口搬家失效。0.2.0 曾在本插件样式表
+内同缝注入结构放开（插件页按 `_pageBody` / `_pageBar` > `_pageHead` 片段、自动化
+页按 `_pageContent` 片段）。**0.3.0 起这四条规则迁入 fenix-dsh-chat-polish 的
+「独立页铺满内容区域」开关（`page-fill`，默认开启，带 `@media (min-width:768px)`
+守卫）**——独立页行为自此与设置面板停靠解耦，可分别开关；本插件回归设置面板
+停靠单一职责。
 
 ## 插件形态
 
@@ -77,7 +80,7 @@ systemctl restart dsh-web
 | dsh 版本 | 兼容性 | 说明 |
 | --- | --- | --- |
 | 0.2.0-rc.2 | ✅ 唯一钉版 | 开发与验收基线（`[data-shortcut-modal="settings"]`、`[data-side="sidebar"]`、`[data-rightbar-col]`、`--dsh-frame-chrome-top`、body 直挂 portal、useModalLayer 行为） |
-| 0.2.2-rc.5 | ✅ 验收通过 | 「插件」「自动化任务」独立页化后补 `_pageBody`/`_pageBar`/`_pageHead`/`_pageContent` 片段放开（0.2.0 新增）；设置停靠部分按 rc.5 真机复核无回归 |
+| 0.2.2-rc.5 | ✅ 验收通过 | 「插件」「自动化任务」独立页铺满规则（0.2.0 新增，**0.3.0 起迁出至 fenix-dsh-chat-polish `page-fill` 开关**）；设置停靠部分按 rc.5 真机复核无回归 |
 | 其它/升级 | ⚠️ 自动降级 + 须同步重测 | 结构漂移时样式失配自动回官方弹窗；恢复停靠需按新构建产物复核测量锚 |
 
 ## 真机验收清单（2026-11-07 全量通过；2026-11-25 rc.5 复核 + 新增 11/12）
@@ -93,6 +96,8 @@ systemctl restart dsh-web
 9. 模型/内置插件/Agent 预设页 → 内容自适应铺满停靠宽度（右缘仅剩 24px 内边距）；
 10. 设置内切换 section 导航正常；console 零报错。
 11. 「插件」页（Installed/Plugin Market/Discover/More）→ 头部行与内容列铺满
-    侧栏右侧内容区（1920 宽下无 960 居中留白；自身 clamp 内边距保留）；
+    侧栏右侧内容区（1920 宽下无 960 居中留白；自身 clamp 内边距保留）
+    **——0.3.0 起需 fenix-dsh-chat-polish 0.4.0+ 在装且 `page-fill` 开关开启
+    （默认开），dock 自身不再附带该行为**；
 12. 「自动化任务」页 → 列表列铺满内容区（同上口径）；窄视口（1280）下两页与
     设置停靠均无回归。

@@ -8,7 +8,7 @@ dsh web 账号密码登录插件（零构建 JS，dsh 0.2.2-rc.1 实测）。
 - **双通道登录**：
   - token 通道完整保留——有效 `/?token=` 的原生 303（铸会话 cookie）由插件捕获后原样回放，不复制签名逻辑；
   - 密码通道——`POST /auth/login` 校验通过后 303 到同源 `/?token=<launchToken>`（`authenticatedUrl` 生成），由 dsh 原生 `authorizeIndex` 铸 cookie 后 303 回干净 URL，地址栏不残留 token。
-- **设置分区**：客户端半在官方设置弹窗注册「登录」分区（`settings.section`，官方排序尾），可配置用户名/密码（含确认密码）、保存、移除账号密码（回退 token-only）。
+- **设置分区（0.2.0 起并入 fenix-dsh-chat-polish）**：客户端半不再注册官方「登录」分区（`settings.section` 退役，DSH 设置导航不再出现独立登录条目）——改为把同一设置组件注册进私有嵌入槽 `fenix.auth.embed`（由 fenix-dsh-chat-polish 的「Fenix 插件」分区注册项以官方 children 表声明），在官方设置弹窗「Fenix 插件」分区的「Deepseek Harness 快捷登录」卡片内渲染；可配置用户名/密码（含确认密码）、保存、移除账号密码（回退 token-only）。chat-polish 缺席/卸载时该组件不渲染，其余能力不受影响。
 - **凭据存储**：经 dsh credentials 服务记录 `fenix-dsh-auth/login`（`kind: "grant"`），payload 仅含 scrypt（新写入 N=131072, r=8, p=1, keylen=64，取 OWASP 交互式登录现行建议档位）派生哈希 + 16 字节随机盐 + 参数，不落明文；校验按记录内落盘参数执行，旧记录（N=16384）继续可验。
 - **安全**：登录与凭据写端点校验 Origin/Host 同源（端口按协议默认值归一化，Origin 缺失按同源放行）；凭据接口要求已认证 owner Peer；登录失败限流 5 次/60 秒（按来源地址，进程内内存，锁 60 秒，成功清零）；登录页转义一切反射值，错误码白名单，页面不含 token/凭据。
 - **降级**：apply 阶段探测上游契约（`connection.authorizeIndex/authenticatedUrl/admit`、`webServer.register/readResource`、`credentials.modifyRecord`），任一缺失或类型不符时 warn 一次、不注册任何路由，保持 dsh 原生 token-only 行为；运行期异常捕获降级，不产生未处理异常。
@@ -26,7 +26,7 @@ dsh web 账号密码登录插件（零构建 JS，dsh 0.2.2-rc.1 实测）。
 1. `/root/.dsh/profiles/web/package.json` 增加 `"fenix-dsh-auth": "link:/root/dsh-plugins/fenix-dsh-auth"`，`node_modules` 建同名符号链接；
 2. `cordis.patch.yml` 的 insert 块增加 `- id: fenix-dsh-auth` / `name: fenix-dsh-auth` 两行；
 3. `systemctl restart dsh-web`，从 `/var/log/dsh-web.log` 尾部取新 token URL；
-4. 浏览器 token 登录 → 设置「登录」分区配置账号密码 → 清 cookie 后 `/` 出现登录页，账号密码可登录。
+4. 浏览器 token 登录 → 设置「Fenix 插件」分区「快捷登录」卡片配置账号密码 → 清 cookie 后 `/` 出现登录页，账号密码可登录。
 
 ## 不受信任地址的行为
 
@@ -48,5 +48,5 @@ dsh 原生 `authorizeIndex` 按 cookie 鉴权（不看信任列表），而 `adm
 
 ## 回滚
 
-- 运行时回退 token-only：已登录态 `DELETE /auth/credentials`（或设置分区「移除账号密码」）。
+- 运行时回退 token-only：已登录态 `DELETE /auth/credentials`（或设置弹窗「Fenix 插件」分区「快捷登录」卡片「移除账号密码」）。
 - 彻底卸载：删除 profile `cordis.patch.yml` 的 insert 两行与 `package.json` 依赖（及 node_modules 链接）→ `systemctl restart dsh-web`。

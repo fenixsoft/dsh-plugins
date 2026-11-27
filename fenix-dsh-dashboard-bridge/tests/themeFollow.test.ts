@@ -116,7 +116,7 @@ describe('面板窗口注册表（挂载注销对称 + 广播闸）', () => {
 })
 
 describe('installThemeFollow（快照缓存 + 订阅 + 降级）', () => {
-  it('快照装入即缓存；事件先刷新缓存再广播；晚挂载面板注入最新档；disposer 退订+清缓存', () => {
+  it('快照装入即缓存；初值即广播（冷启动竞态修补）；事件先刷新缓存再广播；晚挂载面板注入最新档；disposer 退订+清缓存', () => {
     const win = fakeWindow()
     registerPanelWindow(win)
     const listeners: Array<(snapshot: unknown) => void> = []
@@ -130,11 +130,16 @@ describe('installThemeFollow（快照缓存 + 订阅 + 降级）', () => {
       },
     })
     expect(currentThemeScheme()).toBe('light') // 装入时快照即缓存（首帧即对）
+    // 初值即广播：竞态窗口内注册的面板（src 无 &theme= 段）装机即收到宿主档，
+    // 不再等首次 theme/change（用户实证：宿主档与面板自身缺省档背离时面板
+    // 永远停在缺省档）。
+    expect(win.postMessage).toHaveBeenCalledTimes(1)
+    expect(win.postMessage).toHaveBeenCalledWith({ kind: FENIX_THEME_KIND, theme: 'light' }, expect.any(String))
 
     listeners[0]?.(snapshotOf('dark')) // 宿主切换 theme/change
     expect(currentThemeScheme()).toBe('dark') // 先刷新缓存
-    expect(win.postMessage).toHaveBeenCalledTimes(1)
-    expect(win.postMessage).toHaveBeenCalledWith(
+    expect(win.postMessage).toHaveBeenCalledTimes(2)
+    expect(win.postMessage).toHaveBeenLastCalledWith(
       { kind: FENIX_THEME_KIND, theme: 'dark' },
       expect.any(String), // 再广播（origin 形状已在他例钉值）
     )
@@ -147,8 +152,17 @@ describe('installThemeFollow（快照缓存 + 订阅 + 降级）', () => {
     stop()
     expect(currentThemeScheme()).toBeUndefined() // 缓存清零
     expect(listeners).toHaveLength(0) // 宿主事件总线已退订
-    expect(win.postMessage).toHaveBeenCalledTimes(1) // 退订后零新增广播
+    expect(win.postMessage).toHaveBeenCalledTimes(2) // 退订后零新增广播
     unregisterPanelWindow(win)
+  })
+
+  it('初值广播的注册表空集零发送：装入成功但无在册面板时无 postMessage、无报错', () => {
+    const stop = installThemeFollow({
+      theme: { getTheme: () => snapshotOf('dark') },
+      on: () => () => {},
+    })
+    expect(currentThemeScheme()).toBe('dark') // 接档成功（无面板可广播，纯缓存）
+    stop()
   })
 
   it('D4 降级：ctx.theme 缺席 / getTheme 不可调 / 抛错 / 订阅不可用 → 缓存 undefined 零注入、无报错', () => {
@@ -193,6 +207,7 @@ describe('installThemeFollow（快照缓存 + 订阅 + 降级）', () => {
       },
     })
     expect(currentThemeScheme()).toBe('light')
+    win.postMessage.mockClear() // 装入初值广播已在他例钉值；本例只验白名单外事件零广播
     listeners[0]?.(snapshotOf('sepia')) // 白名单外：不发不刷
     expect(currentThemeScheme()).toBe('light') // 已挂载面板主题保持不变
     expect(win.postMessage).not.toHaveBeenCalled()

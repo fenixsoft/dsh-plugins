@@ -3,6 +3,8 @@
  * 行为不变、发送态恒匹配。2026-11-25 滚动条箭头改为仅会话滚动容器持有
  * （上下各一枚），并加 margin-right:-24px 把会话滚动条钉到页面最右缘
  * （抵消官方 root 右 padding 24px + scrollBody margin-right 2px 的 26px 让位）。
+ * 0.4.0 起 page-fill 块（独立页铺满，自 fenix-dsh-settings-dock 迁入）在册：
+ * 尾部 @media 包裹的 4 条 _page 规则为 0.4.0 形态（0.2.2/0.3.0 无此块）。
  * 测试：node --test fenix-dsh-chat-polish/tests/ */
 body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_scroll"]{padding-left:14px;padding-right:24px}
 body:not(:has([class$="_embeddedBody"])) [data-conversation-scroll] [class$="_column"]{max-width:none;--dsh-chat-content-width:calc(100cqw - 48px)}
@@ -49,3 +51,9 @@ html body[data-ds-dark-theme] [data-conversation-scroll]::-webkit-scrollbar-butt
 .fdxchat-copy{align-self:flex-end;padding:2px 10px;border:none;border-radius:100px;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;cursor:pointer;visibility:hidden}
 .fdxchat-userRow:hover .fdxchat-copy,.fdxchat-copy:focus-visible,.fdxchat-copy.is-copied{visibility:visible}
 .fdxchat-copy:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
+@media (min-width: 768px) {
+html body section[class*="_page"]:has(> [class*="_pageBody"]) > * { max-width: none; }
+html body section[class*="_page"] [class*="_pageBody"] > * { max-width: none; }
+html body section[class*="_page"] [class*="_pageBar"] > [class*="_pageHead"] { max-width: none; }
+html body section[class*="_page"] [class*="_pageContent"] { max-width: none; }
+}

@@ -62,15 +62,22 @@
  *    dispose 移除。开关关闭时控制器与 document 捕获监听保持挂载（插槽注册
  *    常驻），事件处理器入口读开关状态直接放行（不接管、不 preventDefault）。
  *
- * 4. 设置分区开关（0.3.0）。
+ * 4. 设置分区开关（0.3.0；0.4.0 起登记私有嵌入槽声明）。
  *    经官方 keyed 插槽 settings.section / settings.section.icon 注册「Fenix 插件」
- *    分区（先例 fenix-dsh-auth「登录」分区的同构写法：order 经 ctx.slots.entries
- *    尾随探测、失败回退 FALLBACK_MAX_ORDER、逐槽 try/catch 失配仅 console.warn
- *    菜单缺席）。分区面板按 DSH 语境分组渲染：组「Deepseek Harness UI调整」=
+ *    分区（先例同构写法：order 经 ctx.slots.entries 尾随探测、失败回退
+ *    FALLBACK_MAX_ORDER、逐槽 try/catch 失配仅 console.warn 菜单缺席）。注册项
+ *    携 children 表声明私有嵌入槽 fenix.auth.embed（官方机制：声明随注册条目
+ *    存续，条目卸载时 store releaseChildren 连带注销槽内注册项）——
+ *    fenix-dsh-auth 0.2.0 起不再自注册 settings.section（独立「登录」分区退役，
+ *    并入本面板），改注入该槽。
+ *    分区面板按 DSH 语境分组渲染：组「Deepseek Harness UI调整」=
  *    本插件各功能行（功能名 + 一句话说明 + 开关控件，控件复用基线包 primitives
- *    Switch）；组「Deepseek Harness 快捷登录」= 探测到 fenix-dsh-auth 的分区注册
- *    时，经 ui-slots entries 记录的 component 字段把其分区组件嵌入本面板渲染
- *    （close 透传官方关闭回调；auth 未安装或槽契约漂移时该组整体不出现）。
+ *    Switch）；组「Deepseek Harness 快捷登录」= 探测到 fenix-dsh-auth 在
+ *    fenix.auth.embed 槽的注册时（旧版 auth 的 settings.section 注册保留为
+ *    升级窗口期兼容扫描），经 ui-slots entries 记录的 component 字段把其分区
+ *    组件嵌入本面板渲染（close 透传官方关闭回调；auth 未安装或槽契约漂移时
+ *    该组整体不出现）。auth 注册晚于本分区首轮渲染时经槽订阅补一次重渲
+ *    （官方 SettingsRoot 同款 getVersion/subscribe 口径）。
  *    点击开关写模块级开关 store 即时生效。
  *    开关状态持久化于 localStorage 键 fenix-chat-polish.toggles（JSON
  *    {功能ID: bool}，只记录关闭项，缺省即开启）；读取容错（损坏/未知键忽略按
@@ -94,6 +101,15 @@
  *    （特异性逐条压过 dock），逐属性还原官方 .VOzbGW_{overlay,mask,panel,_close}
  *    声明值，兑现「关闭 = 回退官方弹出模态」；dock 未装机时反制值 = 官方值，
  *    注入无副作用。
+ *
+ * 6. 独立页铺满内容区域（0.4.0，开关 page-fill，默认开启）。
+ *    官方 rc.5 独立插件管理页（PluginManagerPage）与独立自动化任务页
+ *    （TaskManagerPage）列宽为 960px 居中上限（.page > * / .pageBar > .pageHead /
+ *    .pageBody > * 与 .pageContent 四条），宽屏右侧大片空白。兄弟插件
+ *    fenix-dsh-settings-dock 此前在其 DOCK_CSS 内无条件携带这四条铺满规则，
+ *    0.4.0 起迁移入本插件成为独立开关：开启 = 页面铺满内容区域（dock 只保留
+ *    设置面板停靠几何）；关闭 = 回退官方 960px 居中形态。@media(min-width:768px)
+ *    守卫与 dock 原样一致（窄屏官方本就单列铺满）。
  */
 (function () {
 	'use strict'
@@ -247,6 +263,26 @@
 					"html body[data-ds-dark-theme] [data-conversation-scroll]::-webkit-scrollbar-button:vertical:decrement{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 5 4 0 8 5Z' fill='%23a8a8a8'/%3E%3C/svg%3E\")}",
 					"html body[data-ds-dark-theme] [data-conversation-scroll]::-webkit-scrollbar-button:vertical:increment{background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0 4 5 8 0Z' fill='%23a8a8a8'/%3E%3C/svg%3E\")}",
 				].join('\n'),
+				/* 独立页铺满内容区域（0.4.0 自 fenix-dsh-settings-dock DOCK_CSS 原文
+				 * 逐字迁入、成为独立开关，头注功能 6；rc.5 回归修复 2026-11-25）：
+				 * 官方 PluginManagerPage 列宽三条上限 .page > * / .pageBar > .pageHead /
+				 * .pageBody > * 均 960px 居中（page 容器 align-items:center）。_pageBody
+				 * 片段全 client-ui 族唯一 → :has 直子限定只命中插件页根；pageBar 直子
+				 * pageHead 同锚（:has 外置免重复长链）。特异性 html body +
+				 * 三重类锚必胜官方单类/双类选择器。行内控件自身窄 max-width
+				 * （开关/胶囊等）不在直子链上，不受影响。独立自动化任务页
+				 * （TaskManagerPage）列宽 .pageContent{max-width:960px;margin:0 auto}，
+				 * _pageContent 片段全族唯一（schedule 包）；放开后列宽 = 滚动视口
+				 * 全宽，自身 clamp(24px,4vw,48px) 内边距保留（与插件页 inset 同语言，
+				 * 贴边不顶格）。@media 守卫对齐 dock 原文：窄屏官方本就单列铺满 */
+				'page-fill': [
+					'@media (min-width: 768px) {',
+					'html body section[class*="_page"]:has(> [class*="_pageBody"]) > * { max-width: none; }',
+					'html body section[class*="_page"] [class*="_pageBody"] > * { max-width: none; }',
+					'html body section[class*="_page"] [class*="_pageBar"] > [class*="_pageHead"] { max-width: none; }',
+					'html body section[class*="_page"] [class*="_pageContent"] { max-width: none; }',
+					'}',
+				].join('\n'),
 			}
 
 			/* 用户消息气泡视觉单源表（0.3.0）：className 与内联 style 同值同源——
@@ -300,13 +336,13 @@
 			/* ── 开关 store（模块级单例，design D1）────────────────────────── */
 
 			var STORAGE_KEY = 'fenix-chat-polish.toggles'
-			var FEATURE_IDS = ['whitespace', 'scrollbar', 'composer-width', 'markdown', 'hero-row', 'history-nav', 'settings-embed']
+			var FEATURE_IDS = ['whitespace', 'scrollbar', 'composer-width', 'markdown', 'hero-row', 'history-nav', 'settings-embed', 'page-fill']
 			/* 0.3.x 起从面板移除独立开关的已下线功能 id：CSS 功能与 store 机制保留、
 			 * 默认仍开启，但面板已无开关可把历史 override 改回——残留 override 视同
 			 * 未知键忽略按开启处理（readOverrides 内提示一次） */
 			var RETIRED_FEATURE_IDS = ['scrollbar', 'hero-row']
 			/* 有 CSS 分块的功能 id（cssText 拼接顺序） */
-			var CSS_BLOCK_IDS = ['whitespace', 'composer-width', 'hero-row', 'scrollbar', 'markdown']
+			var CSS_BLOCK_IDS = ['whitespace', 'composer-width', 'hero-row', 'scrollbar', 'markdown', 'page-fill']
 
 			/* settings-embed 关闭态反制样式（feature 5 倒挂 CSS，无独立 CSS 块 id）：
 			 * 兄弟插件 fenix-dsh-settings-dock 的样式表无条件把设置面板停靠铺满内容区
@@ -473,7 +509,7 @@
 				'section.intro': ['各打磨功能可独立开关；默认全部开启（与安装即用形态一致），关闭某项即时回退官方原生形态。开关仅对当前浏览器生效。', 'Each polish feature can be toggled independently; all are on by default (identical to the installed form). Turning one off instantly falls back to the official native form. Toggles only affect this browser.'],
 				'section.group.ui': ['Deepseek Harness UI调整', 'Deepseek Harness UI Tweaks'],
 				'section.group.auth': ['Deepseek Harness 快捷登录', 'Deepseek Harness Quick Login'],
-				'features.whitespace.label': ['对话列留白 24px', 'Conversation column 24px gutter'],
+				'features.whitespace.label': ['会话铺满内容区域', 'Conversation fills the content area'],
 				'features.whitespace.desc': ['消息列与输入卡两侧留白固定 24px，解除官方 920px 居中上限，隐藏列宽拖拽把手', 'Fix a 24px gutter on both sides of the message column and composer, lift the official 920px centered cap, and hide the column-width drag handle'],
 				'features.composer-width.label': ['输入框 80% 宽度居中', 'Composer centered at 80% width'],
 				'features.composer-width.desc': ['输入卡、提示条与队列坞按 80% 宽度居中，与消息列同轴', 'Composer, hints bar and queue dock are centered at 80% width, aligned with the message column'],
@@ -483,6 +519,8 @@
 				'features.history-nav.desc': ['输入框首行按 ↑ 召回上一条已发送消息，↓ 切回，Esc 恢复草稿', 'Press ↑ on the composer first line to recall the last sent message, ↓ to return, Esc to restore the draft'],
 				'features.settings-embed.label': ['嵌入设置页面', 'Embedded settings page'],
 				'features.settings-embed.desc': ['设置页嵌入内容区以页面形式展示，关闭后回退官方弹出模态对话框', 'Show the settings page embedded in the content area; off falls back to the official modal dialog'],
+				'features.page-fill.label': ['独立页铺满内容区域', 'Standalone pages fill the content area'],
+				'features.page-fill.desc': ['DSH 原功能独立页面（插件管理、自动化任务等）填充满内容区域，解除官方 960px 居中上限；此前随设置面板停靠附带生效，现为独立开关', 'DSH standalone pages (plugin manager, scheduled tasks, etc.) fill the whole content area, lifting the official 960px centered cap; previously bundled with the settings dock, now a standalone toggle'],
 				'labels.untitledFile': ['未命名文件', 'Untitled file'],
 				'labels.code.copy': ['复制', 'Copy'],
 				'labels.code.copied': ['已复制', 'Copied'],
@@ -1272,6 +1310,7 @@
 			 * 开关；二者历史 override 经 readOverrides 忽略按开启处理（无恢复死角） */
 			var FEATURES = [
 				{ id: 'whitespace', labelKey: 'features.whitespace.label', descKey: 'features.whitespace.desc' },
+				{ id: 'page-fill', labelKey: 'features.page-fill.label', descKey: 'features.page-fill.desc' },
 				{ id: 'composer-width', labelKey: 'features.composer-width.label', descKey: 'features.composer-width.desc' },
 				{ id: 'markdown', labelKey: 'features.markdown.label', descKey: 'features.markdown.desc' },
 				{ id: 'history-nav', labelKey: 'features.history-nav.label', descKey: 'features.history-nav.desc' },
@@ -1393,24 +1432,62 @@
 			 * feature/-switch/-group 属性供真机验证定位 */
 			var sectionSlotsRef = null
 
-			/* 探测 fenix-dsh-auth 的 settings.section 注册。entries 返回原始注册记录数组
-			 * （含被遮蔽项；auth 单条注册不受影响），命中 options.id==='fenix-auth' 且
-			 * component 为函数才认定可用；槽 API 漂移 → null 分组缺席，不抛渲染错 */
+			/* 探测 fenix-dsh-auth 的登录分区注册（0.4.0 起主探私有嵌入槽
+			 * fenix.auth.embed——本分区注册项 children 表声明、auth 注入其中，
+			 * 头注功能 4；auth ≤0.1.x 旧版自注册官方 settings.section，保留该槽
+			 * 的兼容扫描作升级窗口期 fallback：新旧 auth 单独或并存装载均命中，
+			 * 且探测序私槽在前，新旧并存时以新版为准）。entries 返回原始注册
+			 * 记录数组（含被遮蔽项；auth 单条注册不受影响），命中
+			 * options.id==='fenix-auth' 且 component 为函数才认定可用；槽 API
+			 * 漂移 → null 分组缺席，不抛渲染错 */
+			var AUTH_SLOT_NAMES = ['fenix.auth.embed', 'settings.section']
 			var resolveAuthSectionEntry = function resolveAuthSectionEntry() {
 				var slots = sectionSlotsRef
 				if (!slots || typeof slots.entries !== 'function') return null
-				try {
-					var entries = slots.entries('settings.section')
-					for (var i = 0; i < entries.length; i += 1) {
-						var entry = entries[i]
-						if (entry && entry.options && entry.options.id === 'fenix-auth' && typeof entry.component === 'function') return entry
-					}
-				} catch (err) { /* 槽契约漂移：仅分组缺席 */ }
+				for (var s = 0; s < AUTH_SLOT_NAMES.length; s += 1) {
+					try {
+						var entries = slots.entries(AUTH_SLOT_NAMES[s])
+						for (var i = 0; i < entries.length; i += 1) {
+							var entry = entries[i]
+							if (entry && entry.options && entry.options.id === 'fenix-auth' && typeof entry.component === 'function') return entry
+						}
+					} catch (err) { /* 槽契约漂移：仅分组缺席 */ }
+				}
 				return null
+			}
+
+			/* auth 注册晚到重渲（官方 SettingsRoot 同款口径：entries 直读 + 槽事件
+			 * 订阅）：本分区组件渲染期直读 entries 探测 auth 卡片，但两插件加载
+			 * 顺序无关——auth 注入晚于本分区首轮渲染时不订阅则卡片迟到缺席直至
+			 * 下次重渲；订阅两个槽名的变更事件驱动 setState 补一次重探。useEffect
+			 * 卸载自动退订；槽 API 漂移/订阅缺席（loadClient mocks 等）静默跳过，
+			 * 首渲染仍直读 entries。 */
+			var useAuthSlotVersion = function useAuthSlotVersion() {
+				var state = react.useState(0)
+				var setVersion = state[1]
+				react.useEffect(function () {
+					var slots = sectionSlotsRef
+					if (!slots || typeof slots.subscribe !== 'function') return undefined
+					var unsubs = []
+					var bump = function () { setVersion(function (v) { return v + 1 }) }
+					for (var i = 0; i < AUTH_SLOT_NAMES.length; i += 1) {
+						try {
+							var off = slots.subscribe(AUTH_SLOT_NAMES[i], bump)
+							if (typeof off === 'function') unsubs.push(off)
+						} catch (err) { /* 槽名不可订阅：跳过 */ }
+					}
+					return function () {
+						for (var j = 0; j < unsubs.length; j += 1) {
+							try { unsubs[j]() } catch (err) { /* 退订失败不阻断卸载 */ }
+						}
+					}
+				}, [])
+				return state[0]
 			}
 
 			var PolishSection = function PolishSection(props) {
 				var toggles = useToggles()
+				useAuthSlotVersion()
 				var rows = FEATURES.map(function (feature, index) {
 					var on = toggles[feature.id] !== false
 					return react.createElement(
@@ -1589,6 +1666,16 @@
 								order: maxOrder + 1,
 								label: function () {
 									return uiText('section.label')
+								},
+								/* 私有嵌入子槽声明（官方 children 机制，头注功能 4）：声明随
+								 * 本分区条目存续，条目卸载时 store releaseChildren 连带注销
+								 * 槽内注册项——fenix-dsh-auth 0.2.0 起 inject 该槽挂登录分区
+								 * 组件（独立「登录」分区退役）。slot store 对未声明槽名的
+								 * register 恒 throw（slot "X" is not declared），故必须由本
+								 * 条目声明、auth 只注册。kind/scope 对齐官方
+								 * settings.section 声明形态（list/root）。 */
+								children: {
+									'fenix.auth.embed': { kind: 'list', scope: 'root' },
 								},
 							}, PolishSection)
 						})

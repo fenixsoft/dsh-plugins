@@ -1,6 +1,6 @@
 {
   "name": "fenix-dsh-auth",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "dsh web 账号密码登录：接管首页 / 路由，未认证时呈现登录页（替代原生 401 文本），密码校验通过经原生 token 铸会话；token 通道保留；设置弹窗「登录」分区配置/移除凭据（scrypt 存储、同源校验、失败限流）；上游契约失配 warn 降级回 token-only",
   "license": "MIT",
   "type": "module",

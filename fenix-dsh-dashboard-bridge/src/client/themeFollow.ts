@@ -213,6 +213,13 @@ export function installThemeFollow(ctx: ThemeFollowContext): () => void {
       }
       cachedScheme = initial
       subscribe(theme, on)
+      // 初值即广播（冷启动竞态修补）：三挂载点在主插件 apply 同步注册面板，
+      // 早于本跟随接入（theme/locale 服务 late provide，1s 轮询才拿到初值）——
+      // 竞态窗口内注册的面板 src 无 &theme= 段，且此后宿主不再切主题就永远
+      // 没有 theme/change 事件，面板停在自身缺省档（用户实证：宿主 dark 而
+      // 面板 light）。接入成功把初值直接推给已注册面板（set 为空时零发送，
+      // 无害）；此后实时变化仍由 theme/change 监听广播。
+      broadcastTheme(initial)
       return true
     } catch {
       return false // ctx.theme 属性访问抛错（cordis proxy）→ 继续等

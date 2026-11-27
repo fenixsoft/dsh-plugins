@@ -150,6 +150,24 @@ describe('installLocaleFollow（缓存 / 事件 / 降级）', () => {
     expect(currentLocaleScheme()).toBeUndefined() // 缓存清零
   })
 
+  it('初值即广播（冷启动竞态修补）：先注册面板后装入 → 装入即收到宿主档 postMessage，无需等首次 locale/change', () => {
+    const win = fakeWindow()
+    registerPanelWindow(win)
+    try {
+      const ctx = ctxOf('en')
+      const stop = installLocaleFollow(ctx)
+      expect(currentLocaleScheme()).toBe('en-US')
+      expect(win.postMessage).toHaveBeenCalledTimes(1)
+      expect(win.postMessage).toHaveBeenCalledWith({ kind: FENIX_LOCALE_KIND, locale: 'en-US' }, expect.any(String))
+      ctx.listeners[0]!(snapshotOf('zh')) // 实时变化仍由监听广播（第二次）
+      expect(win.postMessage).toHaveBeenCalledTimes(2)
+      expect(win.postMessage).toHaveBeenLastCalledWith({ kind: FENIX_LOCALE_KIND, locale: 'zh-CN' }, expect.any(String))
+      stop()
+    } finally {
+      unregisterPanelWindow(win)
+    }
+  })
+
   it('buildPanelSrc 第四参：白名单档拼 &locale= 段（theme 段之后、hash 之前）；缺席/白名单外零变化', () => {
     expect(buildPanelSrc('/fenix-dashboard/', '#/projects', 'dark', 'en-US')).toBe(
       '/fenix-dashboard/?embed=1&apiBase=/fenix-dashboard&theme=dark&locale=en-US#/projects',

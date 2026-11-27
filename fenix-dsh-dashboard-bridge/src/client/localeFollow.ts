@@ -142,6 +142,12 @@ export function installLocaleFollow(ctx: LocaleFollowContext): () => void {
       cachedLocale = initial
       setPluginLocale(initial) // 插件自绘控件文案（tooltip/菜单）跟随宿主档
       subscribe(localeService, on)
+      // 初值即广播（冷启动竞态修补，themeFollow 同步同款）：挂载点同步注册
+      // 面板早于本跟随接入（locale 服务 late provide），竞态窗口内注册的面板
+      // src 无 &locale= 段；宿主此后不再切语言就永远没有 locale/change 事件，
+      // 面板停在自身缺省档（用户实证：宿主切语言后面板语言不跟随）。接入成功
+      // 把初值推给已注册面板（set 为空零发送，无害）；实时变化仍由监听广播。
+      broadcastLocale(initial)
       return true
     } catch {
       return false // ctx.locale 属性访问抛错（cordis proxy）→ 继续等

@@ -24,13 +24,13 @@
  *     不做任何改动，停靠态设置关闭指令照常工作；代价是设置打开期间侧栏内
  *     输入框键盘输入会被官方 isBehindModal 判定让位（小众边缘，README 登记）。
  *
- * 独立页铺满（rc.5 回归修复，2026-11-25）：rc.5 起「插件」「自动化任务」
- * 从设置弹窗分区改为独立页（PluginManagerPage / TaskManagerPage，section 壳
- * 类 <hash>_page），官方列宽锁 960px 居中——历史「填满」随入口搬家失效
- * （settings-dock 的 _section 放开不再覆盖到它们）。同缝补两条结构放开：
- * 插件页按 _pageBody/_pageBar/_pageHead 片段、自动化页按 _pageContent 片段
- * （四片段全 client-ui 族 CSS modules 唯一，grep 核实；_pageHead 含
- * _pageHeading 前缀碰撞由 _pageBar 父锚排除——schedule 无 _pageBar）。
+ * 独立页铺满（历史归属，本插件 0.3.0 起迁出）：rc.5 起「插件」「自动化任务」从设置
+ * 弹窗分区改为独立页（PluginManagerPage / TaskManagerPage，section 壳类
+ * <hash>_page），官方列宽锁 960px 居中。本插件曾在 DOCK_CSS 内无条件携带四条
+ * 铺满规则（_pageBody/_pageBar/_pageHead 与 _pageContent 片段放开）；0.3.0 起
+ * 该组规则迁入 fenix-dsh-chat-polish 0.4.0 成为「独立页铺满内容区域」独立开关
+ * （头注功能 6），本插件回归「只停靠设置面板」单一职责——开关关闭时独立页
+ * 回退官方 960px 居中形态，不再有本插件侧的残留。
  *
  * 钩子（0.2.0-rc.2 构建产物，升级失配自动回官方布局）：
  *   - 面板稳定属性 [data-shortcut-modal="settings"]（官方非哈希调试锚点）；
@@ -82,22 +82,9 @@
 				 * _section* 变体），按类片段放开；行内控件自身的窄 max-width
 				 * （标签/控件宽度语义）不动 */
 				'html body [data-shortcut-modal="settings"] [class*="_section"] { max-width: none; }',
-				/* 独立插件页铺满（rc.5 回归修复，2026-11-25）：官方 PluginManagerPage
-				 * 列宽三条上限 .page > * / .pageBar > .pageHead / .pageBody > *
-				 * 均 960px 居中（page 容器 align-items:center）。_pageBody 片段全
-				 * client-ui 族唯一 → :has 直子限定只命中插件页根；pageBar 直子
-				 * pageHead 同锚（:has 外置免重复长链）。特异性 html body +
-				 * 三重类锚必胜官方单类/双类选择器。行内控件自身窄 max-width
-				 * （开关/胶囊等）不在直子链上，不受影响。 */
-				'html body section[class*="_page"]:has(> [class*="_pageBody"]) > * { max-width: none; }',
-				'html body section[class*="_page"] [class*="_pageBody"] > * { max-width: none; }',
-				'html body section[class*="_page"] [class*="_pageBar"] > [class*="_pageHead"] { max-width: none; }',
-				/* 独立自动化任务页铺满（rc.5 同款回归）：TaskManagerPage 列宽
-				 * .pageContent { max-width:960px; margin:0 auto }。_pageContent
-				 * 片段全族唯一（schedule 包）；放开后列宽 = 滚动视口全宽，自身
-				 * clamp(24px,4vw,48px) 内边距保留（与插件页 inset 同语言，贴边
-				 * 不顶格）。 */
-				'html body section[class*="_page"] [class*="_pageContent"] { max-width: none; }',
+				/* 独立插件页/自动化任务页的四条铺满规则已于 0.4.0 迁入
+				 * fenix-dsh-chat-polish 的 page-fill 开关块（头注「独立页铺满」节），
+				 * 本表不再携带——dock 回归设置面板停靠单一职责。 */
 				'}',
 			].join('\n')
 

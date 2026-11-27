@@ -10,9 +10,12 @@
  *  - 分块正确性：whitespace/scrollbar/composer-width/hero-row/markdown 各块
  *    规则归属（关闭任一块后其特征规则从注入串消失、其余块保留）；
  *  - history-nav 无 CSS：关闭不影响注入串；
- *  - 设置分区：label「Fenix 插件」、分组渲染（dsh-ui 组恒渲染；dsh-auth 组仅在
- *    fenix-dsh-auth 的分区注册存在时出现并嵌入其组件）、5 个功能行（scrollbar/
- *    hero-row 两行已移除、settings-embed 新增）、开关点击写 store 即时生效；
+ *  - 设置分区：label「Fenix 插件」、注册项携 children 表声明私有嵌入槽
+ *    fenix.auth.embed（fenix-dsh-auth 0.2.0 起注入该槽）、分组渲染（dsh-ui 组
+ *    恒渲染；dsh-auth 组仅在 fenix-dsh-auth 的注册存在时出现并嵌入其组件——
+ *    私槽与旧版 settings.section 注册两路探测）、6 个功能行（scrollbar/
+ *    hero-row 两行已移除、settings-embed 0.3.0 新增、page-fill 0.4.0 新增）、
+ *    开关点击写 store 即时生效；
  *  - 嵌入设置页面（settings-embed）：面板挂载经 MO 同步内联几何、开关关闭/
  *    面板卸载/锚点缺席还原官方模态、dispose 断开观察器；关闭态注入 EMBED_OFF
  *    反制样式表（抵消 fenix-dsh-settings-dock 的无条件停靠，恢复官方模态）。
@@ -148,6 +151,12 @@ function loadClient({ storage, initialEntries, documentOverrides } = {}) {
 				register(spec, component) { registered.push({ spec, component }); return spec },
 				entries(name) { return (initialEntries && initialEntries[name]) || [] },
 			},
+			/* 运行时 inject 子上下文桩（locale 服务闸，edaccd8 起）：apply 内
+			 * ctx.inject(['locale'], fn) 直调空子上下文——ctx.locale 访问得
+			 * undefined，installLocaleFollow 走「服务未就绪继续等」路径，1s
+			 * 轮询计时器 unref 不持有事件循环、dispose 收口；缺此桩会让
+			 * stage('locale follow') 落 console.warn，污染零告警断言 */
+			inject(deps, fn) { if (typeof fn === 'function') fn({}) },
 		}
 		const fakeRequire = function (name) {
 			if (name === 'react') return react
@@ -208,6 +217,7 @@ const FEATURE_MARKERS = {
 	'composer-width': '{width:80%;max-width:none}',
 	'hero-row': '[class$="_heroWorkspaceRow"]{margin-left:calc(24px + (100% - 48px)*0.1)',
 	markdown: '.fdxchat-bubble{max-width:100%;background:var(--dsw-specific-bubble)',
+	'page-fill': 'section[class*="_page"]',
 }
 
 /* 已下线面板开关的功能（CSS 块保留、默认恒开；readOverrides 对其持久化 off
@@ -489,9 +499,17 @@ test('settings.section and settings.section.icon are registered with trailing or
 	})
 	const section2 = env2.registered.find((r) => r.spec && r.spec.name === 'settings.section')
 	assert.equal(section2.spec.order, 16, 'fallback order when probe yields nothing usable')
+	/* 0.4.0 注册项携 children 表声明私有嵌入槽 fenix.auth.embed：
+	 * fenix-dsh-auth 0.2.0 起注入该槽挂登录分区组件（独立「登录」分区退役）；
+	 * slot store 对未声明槽名的 register 恒 throw，声明必须随本条目走 */
+	assert.deepEqual(
+		section.spec.children,
+		{ 'fenix.auth.embed': { kind: 'list', scope: 'root' } },
+		'section registration declares the private fenix.auth.embed child slot',
+	)
 })
 
-test('polish section renders 5 feature rows with switches, all on by default', () => {
+test('polish section renders 6 feature rows with switches, all on by default', () => {
 	const env = loadClient()
 	const section = env.registered.find((r) => r.spec && r.spec.name === 'settings.section')
 	const Section = section.component
@@ -504,10 +522,10 @@ test('polish section renders 5 feature rows with switches, all on by default', (
 	})
 	assert.deepEqual(
 		[...rows].sort(),
-		['composer-width', 'history-nav', 'markdown', 'settings-embed', 'whitespace'].sort(),
-		'exactly 5 feature rows: scrollbar/hero-row removed, settings-embed added',
+		['composer-width', 'history-nav', 'markdown', 'page-fill', 'settings-embed', 'whitespace'].sort(),
+		'exactly 6 feature rows: scrollbar/hero-row removed, settings-embed 0.3.0, page-fill 0.4.0',
 	)
-	assert.equal(switches.length, 5, 'one switch control per row')
+	assert.equal(switches.length, 6, 'one switch control per row')
 	for (const sw of switches) {
 		assert.equal(sw.props.checked, true, `switch for ${sw.props.label} defaults to on`)
 		assert.equal(typeof sw.props.onChange, 'function')
@@ -568,7 +586,7 @@ test('polish section groups: dsh-ui always; dsh-auth only with fenix-auth instal
 	const uiCardRows = groupEls['dsh-ui'].children.flat(Infinity).filter(
 		(el) => el && el.props && el.props['data-fdx-polish-feature'],
 	)
-	assert.equal(uiCardRows.length, 5, 'all 5 feature rows live inside the dsh-ui card')
+	assert.equal(uiCardRows.length, 6, 'all 6 feature rows live inside the dsh-ui card')
 	assert.ok(
 		String(uiCardRows[0].props.style.borderBottom).includes('solid'),
 		'first row keeps its separator inside the card',
@@ -611,6 +629,62 @@ test('polish section groups: dsh-ui always; dsh-auth only with fenix-auth instal
 	assert.deepEqual(bareGroups, ['dsh-ui'], 'auth group absent without the auth plugin')
 })
 
+test('auth group resolves via the private fenix.auth.embed slot (0.4.0 path)', () => {
+	/* 0.4.0 主路径：auth 注入私有嵌入槽 fenix.auth.embed（本分区注册项 children
+	 * 声明），不再自注册 settings.section——探测必须命中私槽注册项 */
+	const closeFn = function close() {}
+	const FakeAuthSection = function FakeAuthSection() {
+		return { type: 'div', props: { 'data-fake-auth': '' } }
+	}
+	const env = loadClient({
+		initialEntries: {
+			'fenix.auth.embed': [{ options: { id: 'fenix-auth' }, component: FakeAuthSection }],
+		},
+	})
+	const section = env.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	const tree = section.component({ close: closeFn })
+	const groups = []
+	let authEl = null
+	walk(tree, (el) => {
+		if (el.props && el.props['data-fdx-polish-group']) groups.push(el.props['data-fdx-polish-group'])
+		if (el.type === FakeAuthSection) authEl = el
+	})
+	assert.deepEqual([...groups].sort(), ['dsh-auth', 'dsh-ui'], 'auth group renders from the private embed slot')
+	assert.ok(authEl, 'auth component embedded via the private slot entry')
+	assert.equal(authEl.props.close, closeFn, 'close callback forwarded on the private-slot path')
+
+	/* 升级窗口期：新旧 auth 并存（私槽 + 旧版 settings.section 注册都在）时只
+	 * 渲染一张 auth 卡（探测序私槽在前，不重复嵌入） */
+	const LegacyAuthSection = function LegacyAuthSection() {
+		return { type: 'div', props: { 'data-fake-auth-legacy': '' } }
+	}
+	const envBoth = loadClient({
+		initialEntries: {
+			'fenix.auth.embed': [{ options: { id: 'fenix-auth' }, component: FakeAuthSection }],
+			'settings.section': [{ options: { id: 'fenix-auth', order: 99 }, component: LegacyAuthSection }],
+		},
+	})
+	const sectionBoth = envBoth.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	const treeBoth = sectionBoth.component({ close: closeFn })
+	const authEls = []
+	let legacyEl = null
+	let authGroups = 0
+	walk(treeBoth, (el) => {
+		if (el.props && el.props['data-fdx-polish-group'] === 'dsh-auth') authGroups += 1
+		if (el.type === FakeAuthSection) authEls.push(el)
+		if (el.type === LegacyAuthSection) legacyEl = el
+	})
+	assert.equal(authGroups, 1, 'exactly one auth card even when both slot paths have entries')
+	assert.equal(authEls.length, 1, 'the private-slot (new) entry wins the probe order')
+	assert.equal(legacyEl, null, 'legacy settings.section entry not embedded alongside')
+
+	/* 私槽探测 + 槽订阅缺席（loadClient mock 无 subscribe）：组件照常渲染不抛
+	 * （useAuthSlotVersion 的 typeof 守卫路径） */
+	const bare = loadClient()
+	const bareSection = bare.registered.find((r) => r.spec && r.spec.name === 'settings.section')
+	assert.doesNotThrow(() => bareSection.component(), 'section renders without slot subscribe API')
+})
+
 test('clicking a switch writes the store and the next render reflects the new state', () => {
 	const env = loadClient()
 	const section = env.registered.find((r) => r.spec && r.spec.name === 'settings.section')
@@ -634,7 +708,7 @@ test('clicking a switch writes the store and the next render reflects the new st
 	walk(secondTree, (el) => {
 		if (el.type && el.type.name === 'Switch' && el.props.label !== '用户消息 Markdown 渲染') others.push(el.props.checked)
 	})
-	assert.deepEqual(others, [true, true, true, true], 'other 4 switches stay on')
+	assert.deepEqual(others, [true, true, true, true, true], 'other 5 switches stay on')
 	/* 持久化只记录关闭项 */
 	assert.deepEqual(JSON.parse(env.store.dump()[STORAGE_KEY]), { markdown: false })
 	/* 再开回：键清除（全开后 removeItem 由 store 内部处理） */
@@ -689,7 +763,7 @@ test('fallback switch is used when host Switch export drifts away', () => {
 	walk(tree, (el) => {
 		if (el.type && el.type.name === 'FallbackSwitch') toggles.push(el)
 	})
-	assert.equal(toggles.length, 5, 'fallback switch renders for all 5 rows when host Switch is gone')
+	assert.equal(toggles.length, 6, 'fallback switch renders for all 6 rows when host Switch is gone')
 	assert.equal(toggles[0].props.checked, true, 'fallback switch reflects default-on state')
 })
 

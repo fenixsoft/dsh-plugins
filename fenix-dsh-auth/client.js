@@ -2,20 +2,26 @@
  * fenix-dsh-auth — Client 半（零构建，形态对齐 fenix-dsh-brand-fenix /
  * fenix-dsh-chat-polish）。
  *
- * 在官方设置弹窗（ui-settings-general 的 settings.section 槽，dsh 0.2.2-rc.1
- * 契约）注册「登录」分区：用户名/密码/确认密码输入、「保存」与「移除账号
+ * 提供登录设置分区组件：用户名/密码/确认密码输入、「保存」与「移除账号
  * 密码」操作、当前配置状态行。凭据读写走宿主半端点
  * `GET/POST/DELETE /auth/credentials`（JSON），未认证 401 / 校验失败 400 /
  * 跨源 403 均有对应提示。
  *
- * 槽契约（发行包核实）：
- *   - settings.section：list 槽；注册项 `{id, order, label, locale}`，组件
- *     收 renderSlot 传入的 `{close}` 与运行时 props；nav 行按 order 升序。
- *     order 动态探测官方注册尾（account=-10 / general=0 / models=10 /
- *     plugins=15）取 max+1，枚举不可用时回退 15（官方已知尾值）→ 16。
- *   - settings.section.icon：list + inline 槽；组件收 `{size, active}`；
- *     未注册时官方 fallback navIcon 未知 id 无专属图标，故注册同款官方
- *     账户图标（primitives IconUserOutlineMedium，account 分区在用）。
+ * 槽契约（0.2.0 起改私有嵌入槽，独立「登录」分区退役）：
+ *   - 不再注册官方 settings.section / settings.section.icon —— DSH 设置
+ *     导航不再出现独立登录分区（2026-11-26 用户指示：登录设置已合并进
+ *     fenix-dsh-chat-polish 的「Fenix 插件」分区「快捷登录」卡片）。
+ *   - 改注册私有子槽 `fenix.auth.embed`：该槽名由 fenix-dsh-chat-polish
+ *     的 settings.section 注册项以 children 表声明（官方机制：声明随宿主
+ *     分区条目存续；slot store 对未声明槽名的 register 恒 throw，故必须
+ *     由宿主声明、本插件只注册）。本插件 `ctx.slots.inject('fenix.auth.embed',
+ *     …)` 等声明就绪后注册 AuthSection（两插件加载顺序无关）；宿主分区
+ *     条目卸载时 store releaseChildren 连带注销本注册项，无孤儿残留。
+ *   - chat-polish 侧按 entries('fenix.auth.embed') 命中 id 'fenix-auth'
+ *     嵌入组件（升级窗口期旧版 auth ≤0.1.x 仍自注册官方 settings.section，
+ *     chat-polish 0.4.0 起对该槽保留兼容扫描，新旧并存时以私槽注册项为准）。
+ *     私槽未声明（chat-polish 缺席/卸载）= AuthSection 不渲染，插件保持
+ *     激活无副作用。
  *
  * 视觉约束（design D5）：复用 @deepseek-ai/dsh-client-ui-primitives 基元
  * （Button）与宿主主题变量（--dsw-alias-label-* / --dsw-alias-border-l2 /
@@ -26,7 +32,7 @@
  * 降级：宿主半契约失配时 /auth/credentials 不可达，分区操作得到网络错误
  * 提示，不影响官方设置弹窗其余分区。
  *
- * i18n（宿主语言跟随轮）：全部分区 UI 文案（分区 label / 输入标签 / 状态行
+ * i18n（宿主语言跟随轮）：全部分区 UI 文案（输入标签 / 状态行
  * / 错误与成功消息）走本文件内嵌小词典（bridge pluginLocale 小词典模式移植
  * ，键值双列，zh 列=历史硬编码串逐字），宿主档经 installLocaleFollow 读
  * `ctx.locale` 快照 + locale/change 事件跟随（bridge 轮询口径：late provide
@@ -43,15 +49,10 @@
 			var react = require('react')
 			var primitives = require('@deepseek-ai/dsh-client-ui-primitives')
 			var Button = primitives.Button
-			var AccountIcon = primitives.IconUserOutlineMedium
 			var createElement = react.createElement
 			var useEffect = react.useEffect
 			var useState = react.useState
 			var useRef = react.useRef
-
-			/* 官方注册尾兜底值（0.2.2-rc.1 实测：plugins=15；动态探测失败时本
-			 * 分区落在 official 尾部 +1，不与官方分区争序）。 */
-			var FALLBACK_MAX_ORDER = 15
 
 			/* 主题变量快捷引用（缺省值兜底浅色形态，暗色由宿主变量接管） */
 			var COLOR_LABEL = 'var(--dsw-alias-label-primary, #1a1a1a)'
@@ -125,8 +126,7 @@
 
 			/** 文案键值对（zh 为历史硬编码串逐字，en 对应译）。 */
 			var AUTH_DICT = {
-				/* 分区与控件 */
-				'auth.section.label': ['登录', 'Sign in'],
+				/* 控件 */
 				'auth.label.username': ['用户名', 'Username'],
 				'auth.label.password': ['密码（至少 8 个字符）', 'Password (at least 8 characters)'],
 				'auth.label.confirm': ['确认密码', 'Confirm password'],
@@ -256,7 +256,8 @@
 				})
 			}
 
-			/** 「登录」分区组件（settings.section 槽）。 */
+			/** 登录设置分区组件（私有嵌入槽 fenix.auth.embed；chat-polish 嵌入
+			 * 时透传官方 close 回调，组件收 props 但不消费）。 */
 			function AuthSection() {
 				var state = useState('loading') /* loading | ready */
 				var loading = state[0]
@@ -454,19 +455,14 @@
 				)
 			}
 
-			/** 分区图标（settings.section.icon 槽，收 {size, active}）。 */
-			function AuthIcon(props) {
-				return createElement(AccountIcon, { size: (props && props.size) || 16 })
-			}
-
 			return {
 				/* 浏览器侧 cordis 同样要求服务依赖声明（brand-fenix 先例）：
 				 * 未声明 inject 时 ctx.slots 属性访问 throw，模块 boot 即 failed。 */
 				inject: ['slots'],
 				apply(ctx) {
 					/* 宿主语言跟随装配（i18n 宿主跟随轮）：接入点 MUST 先于槽位
-					 * 注册——settings.section 的 label thunk 为渲染期实时求值，晚
-					 * 装入会让首轮分区标签取到未初始化缓存（bridge apply 同款纪律）。
+					 * 注册——嵌入组件内所有文案在渲染期实时求值，晚装入会让首轮
+					 * 渲染取到未初始化缓存（bridge apply 同款纪律）。
 					 * 内部自带降级与轮询，返回收口函数在 dispose 统一调用。 */
 					/* 服务闸（2026-11-26 真机实证）：ctx.locale 只对「inject 声明过
 					 * locale 的 fiber」放行（未声明属性访问恒抛 cannot get property
@@ -482,51 +478,32 @@
 						stopLocaleFollow = installLocaleFollow(localeCtx)
 						return stopLocaleFollow
 					})
-					/* 注册回调由宿主框架在渲染时声明（brand-fenix 先例：模块装载器
-					 * 保证插件晚于 inject 宿主到达），此刻官方分区已注册，可探测
-					 * 排序尾；枚举失败回退 FALLBACK_MAX_ORDER。逐槽 try/catch 降级，
-					 * 单槽失配不影响另一槽与官方分区。 */
+					/* 注册私有嵌入槽 fenix.auth.embed（声明方 = fenix-dsh-chat-polish
+					 * 的 settings.section 注册项 children 表，头注「槽契约」节）：
+					 * inject 等声明就绪后触发（两插件加载顺序无关），工厂返回
+					 * register 注销 disposer 由宿主框架在插件卸载时收集执行；宿主
+					 * 分区条目卸载时 store releaseChildren 连带注销本注册项（无
+					 * 孤儿）。注册项仅带 id（私槽不投影导航，无 order/label 语义；
+					 * chat-polish 探测锚仍是 options.id==='fenix-auth'）。逐槽
+					 * try/catch 降级：私槽注册失配仅登录卡片缺席（console.warn），
+					 * 不影响宿主分区本体。 */
 					var failures = []
 					var stage = function (name, err) {
 						console.warn('[fenix-dsh-auth] slot injection "' + name + '" rejected: ' + (err && err.stack ? err.stack : String(err)))
 						failures.push(name)
 					}
 					try {
-						ctx.slots.inject('settings.section', function () {
-							var maxOrder = FALLBACK_MAX_ORDER
-							try {
-								var entries = ctx.slots.entries('settings.section')
-								for (var i = 0; i < entries.length; i += 1) {
-									var order = entries[i] && entries[i].options && entries[i].options.order
-									if (typeof order === 'number' && order > maxOrder) maxOrder = order
-								}
-							} catch {}
+						ctx.slots.inject('fenix.auth.embed', function () {
 							return ctx.slots.register({
-								name: 'settings.section',
+								name: 'fenix.auth.embed',
 								id: 'fenix-auth',
-								order: maxOrder + 1,
-								/* label thunk（宿主 syncPanels 渲染期求值，i18n 宿主跟随轮
-								 * 词典化：求值期经 t() 取当前档，zh 列=原「登录」逐字）。 */
-								label: function () {
-									return t('auth.section.label')
-								},
 							}, AuthSection)
 						})
 					} catch (err) {
-						stage('settings.section', err)
-					}
-					try {
-						ctx.slots.inject('settings.section.icon', function () {
-							return ctx.slots.register({
-								name: 'settings.section.icon',
-								id: 'fenix-auth',
-							}, AuthIcon)
-						})
-					} catch (err) {
-						stage('settings.section.icon', err)
+						stage('fenix.auth.embed', err)
 					}
 					return function dispose() {
-						/* [fenix-ignore:44ca15f49734] 槽位回收已由宿主框架接管：两个 inject 工厂均返回 ctx.slots.register 的注销 disposer（dsh-runtime.d.ts 契约「工厂返回值由框架在插件卸载时收集执行」，chat-polish 同款形态、bridge apply 注释同口径），dispose 无需再逐槽保存 disposer。 */
+						/* [fenix-ignore:44ca15f49734] 槽位回收已由宿主框架接管：inject 工厂返回 ctx.slots.register 的注销 disposer（dsh-runtime.d.ts 契约「工厂返回值由框架在插件卸载时收集执行」，chat-polish 同款形态、bridge apply 注释同口径），dispose 无需再保存 disposer；声明方卸载路径的连带注销由 store releaseChildren 负责。 */
 						localeFollowDisposed = true
 						stopLocaleFollow()
 						return failures.length === 0
