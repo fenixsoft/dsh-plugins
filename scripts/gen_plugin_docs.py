@@ -81,7 +81,12 @@ def wrap_names(names: list[str], *, prefix: str, indent: str, limit: int,
 
 
 def wrap_prose(names: list[str], *, indent: str, limit: int, tail: str) -> str:
-    """把名称序列折成 `name、name、…` 的中文顿号 prose 形态；折行处行尾保留顿号。"""
+    """把名称序列折成 `name、name、…` 的中文顿号 prose 形态；折行处行尾保留顿号。
+
+    空列表返回「（无）」占位，避免 bundle/plain 某分组清零时 catalog 块生成崩溃。
+    """
+    if not names:
+        return "（无）"
     lines: list[str] = []
     cur = names[0]
     for w in names[1:]:
@@ -187,7 +192,7 @@ def main() -> int:
     args = ap.parse_args()
     plugins = discover_plugins(REPO)
     if not plugins:
-        print("ERROR: no plugin dirs discovered (package.json with `dsh` field)",
+        print("ERROR: no plugin dirs discovered (package.json with `name` field)",
               file=sys.stderr)
         return 2
     return process(Path(args.doc), plugins, check=args.check)

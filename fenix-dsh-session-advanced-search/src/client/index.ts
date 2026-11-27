@@ -196,9 +196,16 @@ export function apply(ctx: Context, options?: ClientPluginOptions): () => void {
   const syncIframePrefs = (): void => {
     const frameWindow = iframe?.contentWindow
     if (frameWindow === undefined || frameWindow === null) return
+    // targetOrigin 对齐 bridge themeFollow.broadcastOrigin 口径：宿主页面自身
+    // origin（node/桩环境取不到降级 '*'），iframe 异常导航到外部 origin 时偏好不再送达。
+    const origin = (globalThis as { window?: { location?: { origin?: unknown } } }).window?.location
+      ?.origin
+    const targetOrigin = typeof origin === 'string' && origin.length > 0 ? origin : '*'
     try {
-      if (currentTheme !== undefined) frameWindow.postMessage({ kind: 'fenix-theme', theme: currentTheme }, '*')
-      if (currentLocale !== undefined) frameWindow.postMessage({ kind: 'fenix-locale', locale: currentLocale }, '*')
+      if (currentTheme !== undefined)
+        frameWindow.postMessage({ kind: 'fenix-theme', theme: currentTheme }, targetOrigin)
+      if (currentLocale !== undefined)
+        frameWindow.postMessage({ kind: 'fenix-locale', locale: currentLocale }, targetOrigin)
     } catch {
       // contentWindow 未就绪（about:blank 初始态等）：首载 src 段已带偏好。
     }

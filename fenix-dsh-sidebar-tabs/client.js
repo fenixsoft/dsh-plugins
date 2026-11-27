@@ -530,10 +530,20 @@
 					/* 语言跟随装配走运行时 inject（服务闸见 installLocaleFollow 注释）；
 					 * 回调返回的停止函数按 cordis 对象插件 apply 约定作 disposer，
 					 * 随本插件 fiber 卸载级联清理（dispose 内 localeStopped/定时器/
-					 * 退订三重兜底不变）。 */
-					ctx.inject(['locale'], function (localeCtx) {
-						return installLocaleFollow(localeCtx)
-					})
+					 * 退订三重兜底不变）。宿主 inject 缝缺失/调用抛错只降级语言
+					 * 跟随（tab 文案回落 zh），不牵连上方 tab 注入主链路（失配零
+					 * 异常契约收口；口径对齐 session-advanced-search hostFollow）。 */
+					try {
+						if (ctx !== null && ctx !== undefined && typeof ctx.inject === 'function') {
+							ctx.inject(['locale'], function (localeCtx) {
+								return installLocaleFollow(localeCtx)
+							})
+						}
+					} catch (e) {
+						console.warn(
+							'fenix-dsh-sidebar-tabs: 语言跟随 inject 装配失败（' + (e && e.message ? e.message : e) + '），放弃跟随宿主语言，tab 文案降级 zh',
+						)
+					}
 
 					return function dispose() {
 						disposed = true

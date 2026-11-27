@@ -717,12 +717,12 @@ function stepHTML(icon, l1, l2, cls, at) {
 }
 
 /* 按 host 推进点顺序渲染 progress[]：**增量协调**——已有行原位更新（类名/
-   图标/标题/detail），仅新增行追加 DOM，绝不整体重建（整体 innerHTML 重建
-   会重启 spinner CSS 动画 = 用户反馈的过程记录闪烁）。host 对 progress[]
-   有界保留最近 50 条（protocol.ts PROGRESS_MAX_STEPS）：淘汰启动后数组
-   整体滑动，本函数全字段比较后写的原位同步使行内容随滑移整体刷新，行为
-   仍为「显示最近 50 条」；日志收集的对账（handleStatus）按条目内容键而非
-   数组下标，滑移不冻结。 */
+   图标/标题/detail/时间），仅新增行追加 DOM，绝不整体重建（整体 innerHTML
+   重建会重启 spinner CSS 动画 = 用户反馈的过程记录闪烁）。host 对
+   progress[] 有界保留最近 50 条（protocol.ts PROGRESS_MAX_STEPS）：淘汰
+   启动后数组整体滑动，本函数全字段（类名/图标/标题/detail/时间）比较后写
+   的原位同步使行内容随滑移整体刷新，行为仍为「显示最近 50 条」；日志收集
+   的对账（handleStatus）按条目内容键而非数组下标，滑移不冻结。 */
 function renderProgress(progress, finished, failed) {
   var steps = $('#aiSteps');
   if (!steps) return;
@@ -759,6 +759,18 @@ function renderProgress(progress, finished, failed) {
       /* 数组下标复用的行可能换成了无 detail 的条目：必须移除旧详情节点，
          否则滑动窗口滑移后会残留上一条目的详情（张冠李戴）。 */
       l2.remove();
+    }
+    /* 时间戳同步（与 stepHTML 同构：at 为真值才渲染）：滑移后行复用为
+       新条目，不同步则全部行时间停格在首次创建时的条目时刻。置于 l2
+       处理之后以保持 st-body 内 l1→l2→time 的 DOM 顺序。 */
+    var time = p.at ? fmtTime(p.at) : '';
+    var tEl = row.querySelector('.st-time');
+    if (time) {
+      if (tEl) { if (tEl.textContent !== time) tEl.textContent = time; }
+      else row.querySelector('.st-body').insertAdjacentHTML('beforeend', '<span class="st-time">' + time + '</span>');
+    } else if (tEl) {
+      /* 同上：条目无时间戳（at=0）时移除旧节点，避免滑移后残留上一条目时刻。 */
+      tEl.remove();
     }
   }
   var pct = finished ? 100 : Math.min(12 + progress.length * 22, 90);

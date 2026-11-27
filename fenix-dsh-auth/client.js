@@ -350,7 +350,11 @@
 						} else if (response.status === 401) {
 							setMessage({ kind: 'error', text: t('auth.err.loginRequired') })
 						} else if (response.status === 400) {
-							response.json().then(function (data) {
+							/* return 把 json 链纳入外层 promise 链：细分文案落定后才走到
+							 * 链尾 finally 复位 busy（悬空时按钮先恢复可点、提示后到，
+							 * 窗口内重复点击会二次 POST 并竞写消息；解析失败仍由下方
+							 * .catch 收口成 validationHttp 文案，再走 finally）。 */
+							return response.json().then(function (data) {
 								if (unmountedRef.current) return
 								var texts = {
 									'invalid-username': t('auth.err.invalidUsername'),
@@ -473,11 +477,27 @@
 					 * 原轮询路径保留作无害兜底。 */
 					var localeFollowDisposed = false
 					var stopLocaleFollow = function () {}
-					ctx.inject(['locale'], function (localeCtx) {
-						if (localeFollowDisposed) return
-						stopLocaleFollow = installLocaleFollow(localeCtx)
-						return stopLocaleFollow
-					})
+					/* 运行时 inject 缝探测+包裹（对齐 session-advanced-search
+					 * hostFollow 口径）：宿主形态漂移（ctx 无 inject 缝/缝抛错）时
+					 * 仅语言跟随放弃（缓存恒 undefined，t() 走 zh 档 =
+					 * installLocaleFollow 既有降级终局），不阻断下方槽位注册装配。 */
+					var injectRuntime = null
+					try {
+						if (typeof ctx.inject === 'function') injectRuntime = ctx.inject.bind(ctx)
+					} catch (err) {
+						/* ctx.inject 属性访问抛错（cordis proxy 形态漂移）→ 视同缝缺席 */
+					}
+					if (injectRuntime !== null) {
+						try {
+							injectRuntime(['locale'], function (localeCtx) {
+								if (localeFollowDisposed) return
+								stopLocaleFollow = installLocaleFollow(localeCtx)
+								return stopLocaleFollow
+							})
+						} catch (err) {
+							/* inject 缝抛错（宿主形态漂移）：语言跟随放弃，零报错（宁缺毋错） */
+						}
+					}
 					/* 注册私有嵌入槽 fenix.auth.embed（声明方 = fenix-dsh-chat-polish
 					 * 的 settings.section 注册项 children 表，头注「槽契约」节）：
 					 * inject 等声明就绪后触发（两插件加载顺序无关），工厂返回

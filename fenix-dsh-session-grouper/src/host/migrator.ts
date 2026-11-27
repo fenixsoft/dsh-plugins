@@ -472,7 +472,22 @@ export class Migrator {
         this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 旧目录残迹无法判定/清退，保留于 ${srcTrashDir} 待人工核对：${errorMessage(error)}`)
       }
     } else {
-      rmSync(srcSessionDir, { recursive: true, force: true })
+      // rename 失败常源于父目录不可写，而 rmSync 递归是先删子项（只需目录自身
+      // 写权限）再删顶层（需父目录写权限），可能呈现「子项已删、顶层删除抛
+      // EPERM」的部分删除形态：异常若沿 migrate 内层 catch 触发全量回滚，已删
+      // 子项中恰有释放写锁窗口内追加的增量时会无声丢失，且无 trash 残迹可人工
+      // 找回。故兜底删除自身吞错降级：rmSync 成功或源目录确认缺席维持现行为；
+      // 抛错且源目录仍在则 warn 保留部分删除残目录现场（目标位产物已完整，不
+      // 再触发回滚），继续 attach 主链路（旧 log 已删则无 duplicate 风险，仍在
+      // 则按告警提示由人工处置 duplicate）。
+      try {
+        rmSync(srcSessionDir, { recursive: true, force: true })
+      } catch (error) {
+        if (existsSync(srcSessionDir)) {
+          const duplicateRisk = existsSync(srcLog) ? '旧 log 仍在，与目标位存在 duplicate 风险' : '旧 log 已删，无 duplicate 风险'
+          this.log.warn(`fenix-dsh-session-grouper: 会话 ${sessionId} 旧目录兜底删除失败（部分删除残迹保留于 ${srcSessionDir} 待人工核对，目标位产物已完整故不回滚；${duplicateRisk}）：${errorMessage(error)}`)
+        }
+      }
     }
     // 旧 project 目录清空则一并移除（避免 mangled 目录残留噪音）。
     const srcProjectDir = dirname(srcSessionDir)

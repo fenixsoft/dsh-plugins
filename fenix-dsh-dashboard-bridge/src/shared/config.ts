@@ -38,14 +38,20 @@ export interface ResolvedBridgeConfig {
 
 /**
  * 归一 URL 路径前缀到尾斜杠形态：`fenix-dashboard` / `/fenix-dashboard` /
- * `/fenix-dashboard/` → `/fenix-dashboard/`。空串抛错；缺前导/尾斜杠自动
- * 补全、不抛错（loader 配置错误应在装载期显式失败，而非静默挂错路径）。
+ * `/fenix-dashboard/`（含多重尾斜杠 `/fenix-dashboard//`）→ `/fenix-dashboard/`。
+ * 空串抛错；缺前导斜杠自动补全、多余尾斜杠折叠为单个（与 normalizeUpstream
+ * 口径一致），不抛错（loader 配置错误应在装载期显式失败，而非静默挂错路径）。
  */
 export function normalizePrefix(input: string): string {
   const trimmed = input.trim()
   if (trimmed.length === 0) throw new Error('fenix-dsh-dashboard-bridge: prefix 不能为空')
   const withLeading = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
-  return withLeading.endsWith('/') ? withLeading : `${withLeading}/`
+  // 先折叠全部尾斜杠再补单个：畸形 `/fenix-dashboard//` 归一后 routePath/apiBase
+  // （下游 slice 去尾斜杠）仍无尾斜杠。仅斜杠输入（`///`）折叠为空后补单个
+  // 尾斜杠得 `/`——prefix 契约钉死尾斜杠形态，下游 routePath 顺势为空串，
+  // 仍满足「无尾斜杠」注册契约。
+  const withoutTrailing = withLeading.replace(/\/+$/, '')
+  return `${withoutTrailing}/`
 }
 
 /** 归一上游地址：校验为 http(s) URL 并去除尾斜杠。 */
