@@ -41,11 +41,20 @@ jobs:
 
       - name: 打新 tag 触发 release.yml（构建发布单一链路）
         if: steps.check.outputs.should_release == 'true'
+        env:
+          SYNC_RELEASE_PAT: ${{ secrets.SYNC_RELEASE_PAT }}
         run: |
           git config user.name "fenix-bot"
           git config user.email "fenix-bot@users.noreply.github.com"
           git tag "${{ steps.check.outputs.next_tag }}"
-          git push origin "${{ steps.check.outputs.next_tag }}"
+          if [ -n "$SYNC_RELEASE_PAT" ]; then
+            # GITHUB_TOKEN 的推送不产生 push 事件（GitHub 防递归规则），
+            # release.yml（on: push tags）不会被拉起——必须用 PAT 推送。
+            git push "https://x-access-token:${SYNC_RELEASE_PAT}@github.com/fenixsoft/dsh-plugins.git" "${{ steps.check.outputs.next_tag }}"
+          else
+            echo "::warning::未配置 SYNC_RELEASE_PAT（需对本仓有 contents:write 的 PAT）。GITHUB_TOKEN 推的 tag 不会触发 release.yml，本次发布将无法启动。"
+            git push origin "${{ steps.check.outputs.next_tag }}"
+          fi
 
       # 守望 release 流水线（headBranch=tag 名），失败则本 job 一起失败，
       # 让 fenixd 发版方在 sync 结果里直接看到插件发布没成。
@@ -62,7 +71,7 @@ jobs:
             sleep 5
           done
           if [ -z "${run_id:-}" ]; then
-            echo "::warning::未找到 $TAG 的 release run（可能尚未触发）"
+            echo "::warning::未找到 $TAG 的 release run。常见原因：tag 由 GITHUB_TOKEN 推送（不产生 push 事件）——检查 SYNC_RELEASE_PAT 是否已配置。"
             exit 1
           fi
           gh run watch "$run_id" --exit-status
