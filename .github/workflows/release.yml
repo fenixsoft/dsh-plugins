@@ -9,6 +9,10 @@ on:
   push:
     tags:
       - "v*"
+  # workflow_dispatch 例外通道：fenix-release-sync 用 GITHUB_TOKEN 打 tag
+  # 不产生 push 事件（GitHub 防递归），但 workflow_dispatch 事件不受此限制，
+  # 可显式拉起本流水线（--ref <tag>，GITHUB_REF_NAME 即 tag 名作版本号）。
+  workflow_dispatch:
 
 permissions:
   contents: write

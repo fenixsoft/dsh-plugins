@@ -3,7 +3,9 @@
 # 机制：fenixd 仓 release.yml 发布完成后 POST repository_dispatch(fenix-released)
 # 到本仓 → 本 workflow 判定 main 相对最新 tag 是否有未发版的插件内容变更
 # （scripts/should_release.sh，docs/scripts/CI 类变更不算）：
-#   有 → patch+1 打新 tag，构建发布复用 release.yml 单一链路，并守望其结果；
+#   有 → patch+1 打新 tag，再显式 workflow_dispatch 拉起 release.yml（--ref tag）
+#   （GITHUB_TOKEN 推 tag 不产生 push 事件；workflow_dispatch 是官方例外通道，
+#    无需 PAT secret），并守望其结果；
 #   没有 → 不变（不发版、不打 tag）。
 # workflow_dispatch 供手动兜底（fenixd 未发版但插件有变更需补发时）。
 name: fenix-release-sync
@@ -15,7 +17,7 @@ on:
 
 permissions:
   contents: write
-  actions: read
+  actions: write
 
 concurrency:
   group: fenix-release-sync
@@ -39,22 +41,22 @@ jobs:
             echo "next_tag=$(grep -oP '^next_tag=\K.*' check.log | tail -1)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: 打新 tag 触发 release.yml（构建发布单一链路）
+      - name: 打新 tag（GITHUB_TOKEN 推送不产生 push 事件，无妨）
         if: steps.check.outputs.should_release == 'true'
-        env:
-          SYNC_RELEASE_PAT: ${{ secrets.SYNC_RELEASE_PAT }}
         run: |
           git config user.name "fenix-bot"
           git config user.email "fenix-bot@users.noreply.github.com"
           git tag "${{ steps.check.outputs.next_tag }}"
-          if [ -n "$SYNC_RELEASE_PAT" ]; then
-            # GITHUB_TOKEN 的推送不产生 push 事件（GitHub 防递归规则），
-            # release.yml（on: push tags）不会被拉起——必须用 PAT 推送。
-            git push "https://x-access-token:${SYNC_RELEASE_PAT}@github.com/fenixsoft/dsh-plugins.git" "${{ steps.check.outputs.next_tag }}"
-          else
-            echo "::warning::未配置 SYNC_RELEASE_PAT（需对本仓有 contents:write 的 PAT）。GITHUB_TOKEN 推的 tag 不会触发 release.yml，本次发布将无法启动。"
-            git push origin "${{ steps.check.outputs.next_tag }}"
-          fi
+          git push origin "${{ steps.check.outputs.next_tag }}"
+
+      # 显式 dispatch release.yml（--ref tag）。workflow_dispatch 事件是
+      # GITHUB_TOKEN 防递归规则的官方例外，无需任何 PAT secret。
+      - name: dispatch release.yml（workflow_dispatch 例外通道）
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.check.outputs.next_tag }}
+        run: gh workflow run release.yml --ref "$TAG"
 
       # 守望 release 流水线（headBranch=tag 名），失败则本 job 一起失败，
       # 让 fenixd 发版方在 sync 结果里直接看到插件发布没成。
@@ -71,7 +73,7 @@ jobs:
             sleep 5
           done
           if [ -z "${run_id:-}" ]; then
-            echo "::warning::未找到 $TAG 的 release run。常见原因：tag 由 GITHUB_TOKEN 推送（不产生 push 事件）——检查 SYNC_RELEASE_PAT 是否已配置。"
+            echo "::warning::未找到 $TAG 的 release run——dispatch 步骤可能失败或 release.yml 触发器被改。"
             exit 1
           fi
           gh run watch "$run_id" --exit-status
